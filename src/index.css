@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #faf8f5;
+  --color-paper-2: #f2efe9;
+  --color-paper-3: #e8e4db;
+  --color-ink: #2a2825;
+  --color-ink-2: #6b6660;
+  --color-ink-3: #a09a93;
+  --color-line: #ddd9d0;
+  --color-stamp: #b5451b;
+  
+  --font-serif: "Noto Serif TC", serif;
+  --font-sans: "Noto Sans TC", sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-paper-2 text-ink font-sans font-light;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 border border-ink bg-transparent px-4.5 py-2 text-xs font-normal tracking-wider transition-colors duration-150 rounded-sm cursor-pointer whitespace-nowrap;
+  }
+  .btn:hover {
+    @apply bg-ink text-paper;
+  }
+  .btn-primary {
+    @apply bg-ink text-paper border-ink;
+  }
+  .btn-primary:hover {
+    @apply bg-stone-700 border-stone-700;
+  }
+  .btn-sm {
+    @apply px-3 py-1.25 text-[11px];
+  }
+  .btn-ghost {
+    @apply border-line text-ink-2;
+  }
+  .btn-ghost:hover {
+    @apply border-ink text-ink bg-transparent;
+  }
+  .btn-danger {
+    @apply border-red-700 text-red-700;
+  }
+  .btn-danger:hover {
+    @apply bg-red-700 text-white;
+  }
+
+  .field-label {
+    @apply block text-[11px] tracking-[2px] uppercase text-ink-3 mb-1.5;
+  }
+
+  .panel {
+    @apply bg-paper border border-line rounded-sm shadow-sm;
+  }
+
+  .section-label {
+    @apply text-[10px] tracking-[3px] uppercase text-ink-3;
+  }
+
+  .stamp {
+    @apply inline-block border-2 border-stamp text-stamp text-[10px] tracking-[3px] uppercase px-2 py-0.75 -rotate-2 font-serif;
+  }
+}
+
+input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  @apply w-full bg-paper border-b border-line text-ink font-sans font-light py-2 outline-none transition-colors duration-150 rounded-none appearance-none;
+}
+input:focus, select:focus, textarea:focus {
+  @apply border-b-ink;
+}
+
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a09a93'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 24px;
+}
+
