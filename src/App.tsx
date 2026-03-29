@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -396,7 +396,7 @@ export default function App() {
   const balances = useMemo(() => currentGroup ? utils.calcBalances(currentGroup) : {}, [currentGroup]);
   const settlements = useMemo(() => utils.calcSettlements(balances), [balances]);
 
-  const groupedExpenses = useMemo(() => {
+  const groupedExpenses = useMemo<Record<string, Expense[]>>(() => {
     if (!currentGroup) return {};
     const sorted = [...currentGroup.expenses].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     const groups: Record<string, Expense[]> = {};
@@ -520,9 +520,9 @@ export default function App() {
                         <div key={date}>
                           <div className="flex justify-between items-center py-2.5 border-b border-line mt-1.5 uppercase text-[11px] tracking-[2px] text-ink-3">
                             <span>{date === '未設定日期' ? date : utils.fmtDate(date)}</span>
-                            <span className="text-ink-3">NT$ {utils.fmt(items.reduce((s, e) => s + e.amount, 0))}</span>
+                            <span className="text-ink-3">NT$ {utils.fmt((items as Expense[]).reduce((s, e) => s + e.amount, 0))}</span>
                           </div>
-                          {items.map(e => (
+                          {(items as Expense[]).map(e => (
                             <div
                               key={e.id}
                               onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
