@@ -117,6 +117,86 @@ export default function App() {
     setSettingsGroupName(data.name);
     setCurrentPage('group');
     setActiveTab('expenses');
+
+    // 每次打開群組時，自動從雲端同步最新近況
+    syncGroupData(code);
+  };
+
+  // 背景從 Google Sheet 拉取該群組所有資料的函數
+  const syncGroupData = async (code: string) => {
+    setSyncState('syncing');
+    try {
+      const rows = await fetchSheetData();
+      const groupRows = rows.filter(r => String(r.GroupCode) === String(code));
+      if (groupRows.length === 0) {
+        setSyncState('');
+        return; // 雲端無資料
+      }
+
+      let name = "雲端同步群組";
+      let creator = "";
+      let members = new Set<string>();
+      let expenses: Expense[] = [];
+      let transfers: Transfer[] = [];
+
+      groupRows.forEach((r, i) => {
+        if (r.Type === '建立群組' && r.Item) {
+          name = String(r.Item);
+          if (r.Payer) creator = String(r.Payer);
+        }
+        if (r.Payer && r.Type === '加入群組') members.add(String(r.Payer));
+        if (r.Payer && r.Type !== '建立群組') members.add(String(r.Payer));
+        if (r.Participants) {
+           String(r.Participants).split(',').forEach((p: string) => {
+             if(p.trim()) members.add(p.trim());
+           });
+        }
+
+        if (r.Type === '新增費用' || r.Type === '編輯費用') {
+          const parts = r.Participants ? String(r.Participants).split(',').filter(Boolean) : [];
+          expenses.push({
+            id: 'ce_' + i,
+            desc: String(r.Item),
+            amount: Number(r.Amount) || 0,
+            payer: String(r.Payer),
+            participants: parts,
+            splitMode: 'equal',
+            shares: [],
+            date: String(r.Date),
+            createdAt: Date.now()
+          });
+        }
+        if (r.Type === '轉帳') {
+          transfers.push({
+            id: 'ct_' + i,
+            from: String(r.Payer),
+            to: String(r.Participants),
+            amount: Number(r.Amount) || 0,
+            note: String(r.Item),
+            date: String(r.Date),
+            createdAt: Date.now()
+          });
+        }
+      });
+
+      // 確保群主 (creator) 在 members 陣列的第一位
+      let memberArray = Array.from(members);
+      if (creator && memberArray.includes(creator)) {
+         memberArray = [creator, ...memberArray.filter(m => m !== creator)];
+      }
+
+      const updatedGroup = {
+        name, code, members: memberArray, expenses, transfers, createdAt: Date.now()
+      };
+      
+      setCurrentGroup(updatedGroup);
+      storage.saveGroup(code, updatedGroup);
+      setSyncState('synced');
+      setTimeout(() => setSyncState(''), 2000);
+    } catch (e) {
+      console.error(e);
+      setSyncState('');
+    }
   };
 
   const goHome = () => {
@@ -182,13 +262,18 @@ export default function App() {
         }
 
         let name = "雲端同步群組";
+        let creator = "";
         let members = new Set<string>();
         let expenses: Expense[] = [];
         let transfers: Transfer[] = [];
 
         groupRows.forEach((r, i) => {
-          if (r.Type === '建立群組' && r.Item) name = String(r.Item);
-          if (r.Payer) members.add(String(r.Payer));
+          if (r.Type === '建立群組' && r.Item) {
+             name = String(r.Item);
+             if (r.Payer) creator = String(r.Payer);
+          }
+          if (r.Payer && r.Type === '加入群組') members.add(String(r.Payer));
+          if (r.Payer && r.Type !== '建立群組') members.add(String(r.Payer));
           if (r.Participants) {
              String(r.Participants).split(',').forEach((p: string) => {
                if(p.trim()) members.add(p.trim());
@@ -223,8 +308,15 @@ export default function App() {
         });
 
         members.add(joinMyName);
+        
+        // 確保群主在第一位
+        let memberArray = Array.from(members);
+        if (creator && memberArray.includes(creator)) {
+           memberArray = [creator, ...memberArray.filter(m => m !== creator)];
+        }
+
         data = {
-          name, code: joinCode, members: Array.from(members), expenses, transfers, createdAt: Date.now()
+          name, code: joinCode, members: memberArray, expenses, transfers, createdAt: Date.now()
         };
         
         // 將加入動作推送到雲端記錄
@@ -406,6 +498,18 @@ export default function App() {
   const removeMember = (name: string) => {
     if (!currentGroup) return;
     if (name === myName) { showToast('無法移除自己'); return; }
+    
+    // 檢查是否為群主（群主永遠是 members 的第 0 個索引）
+    const creator = currentGroup.members[0];
+    if (myName !== creator) { 
+       showToast('⚠️ 權限不足：只有群主可以刪除成員'); 
+       return; 
+    }
+    if (name === creator) { 
+       showToast('不能刪除群主'); 
+       return; 
+    }
+
     const inUse = [...currentGroup.expenses, ...currentGroup.transfers]
       .some(e => e.payer === name || (e as any).participants?.includes(name) || (e as any).from === name || (e as any).to === name);
     if (inUse) { showToast('此成員有費用記錄，無法移除'); return; }
@@ -523,8 +627,17 @@ export default function App() {
                 <div className="text-[10px] tracking-[2px] text-ink-3">{currentGroup?.code}</div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : syncState === 'synced' ? 'bg-green-600' : 'bg-ink-3'}`}></span>
-                <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)}><MoreHorizontal size={18} /></button>
+                <button 
+                  className="icon-btn text-[11px] font-medium px-2 py-1 rounded border border-line flex items-center gap-1 transition-all hover:bg-paper-2" 
+                  onClick={() => syncGroupData(currentGroup?.code || '')}
+                  title="手動重新拉取 Google Sheet 資料"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : syncState === 'synced' ? 'bg-green-600' : 'bg-ink-3'}`}></span>
+                  {syncState === 'syncing' ? '同步中' : '更新'}
+                </button>
+                <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)}>
+                  <MoreHorizontal size={18} />
+                </button>
               </div>
             </nav>
 
