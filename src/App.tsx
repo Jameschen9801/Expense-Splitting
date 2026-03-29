@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
+import { appendRowToSheet } from './lib/googleSheet';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
@@ -141,6 +142,18 @@ export default function App() {
     const updated = [...myGroups, { code, name: newGroupName, myName: newGroupMyName }];
     storage.saveMyGroups(updated);
     setMyGroups(updated);
+
+    // 同步到 Google Sheet
+    appendRowToSheet({
+      Date: utils.todayStr(),
+      Type: '建立群組',
+      Item: newGroupName,
+      GroupCode: code,
+      Payer: newGroupMyName,
+      Amount: 0,
+      Participants: ''
+    });
+
     toggleModal('createGroup', false);
     setNewGroupName('');
     setNewGroupMyName('');
@@ -237,6 +250,18 @@ export default function App() {
     const updated = { ...currentGroup, expenses: updatedExpenses };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
+
+    // 同步到 Google Sheet
+    appendRowToSheet({
+      Date: date,
+      Type: isEditingExpense ? '編輯費用' : '新增費用',
+      Item: desc,
+      GroupCode: updated.code,
+      Payer: payer,
+      Amount: utils.round2(amt),
+      Participants: participants.join(',')
+    });
+
     toggleModal('addExpense', false);
     setIsEditingExpense(false);
     showToast(isEditingExpense ? '費用已更新' : '費用已新增');
@@ -257,6 +282,18 @@ export default function App() {
     const updated = { ...currentGroup, transfers: [...currentGroup.transfers, tf] };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
+
+    // 同步到 Google Sheet
+    appendRowToSheet({
+      Date: date,
+      Type: '轉帳',
+      Item: note || '轉帳還款',
+      GroupCode: updated.code,
+      Payer: from,
+      Amount: utils.round2(amt),
+      Participants: to
+    });
+
     toggleModal('addTransfer', false);
     showToast('轉帳已記錄');
   };
