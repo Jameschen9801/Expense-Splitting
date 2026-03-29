@@ -14,7 +14,8 @@ import {
   Check,
   ArrowRight,
   Trash2,
-  Info
+  Info,
+  ShoppingBag
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
@@ -406,7 +407,7 @@ export default function App() {
       groups[key].push(e);
     });
     return groups;
-  }, [currentGroup]);
+  }, [currentGroup, myName]);
 
   return (
     <div className="min-h-screen flex flex-col font-sans">
@@ -522,22 +523,34 @@ export default function App() {
                             <span>{date === '未設定日期' ? date : utils.fmtDate(date)}</span>
                             <span className="text-ink-3">NT$ {utils.fmt((items as Expense[]).reduce((s, e) => s + e.amount, 0))}</span>
                           </div>
-                          {(items as Expense[]).map(e => (
-                            <div
-                              key={e.id}
-                              onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
-                              className="py-3 border-b border-line last:border-b-0 grid grid-cols-[1fr_auto] gap-3 items-start cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
-                            >
-                              <div>
-                                <div className="text-sm font-medium">{e.desc}</div>
-                                <div className="text-[11px] text-ink-3 tracking-tight">{e.payer} 付款 · {e.participants.join('、')} 分攤</div>
+                          {(items as Expense[]).map(e => {
+                            let myCost = 0;
+                            if (e.participants.includes(myName)) {
+                              if (e.splitMode === 'equal') {
+                                myCost = e.amount / e.participants.length;
+                              } else if (e.shares) {
+                                myCost = e.shares.find(s => s.name === myName)?.amount || 0;
+                              }
+                            }
+                            
+                            return (
+                              <div
+                                key={e.id}
+                                onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
+                                className="py-3 border-b border-line last:border-b-0 flex items-center justify-between gap-3 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[16px] tracking-wide font-medium text-ink truncate">{e.desc}</div>
+                                  <div className="text-[12px] text-ink-3 tracking-tight mt-0.5 truncate">{e.payer} 先付 NT${utils.fmt(e.amount)}</div>
+                                </div>
+                                {myCost > 0 && (
+                                  <div className="text-right shrink-0">
+                                    <div className="text-[20px] font-medium tracking-[0.5px] text-[#f87171]">NT${utils.fmt(myCost)}</div>
+                                  </div>
+                                )}
                               </div>
-                              <div className="text-right">
-                                <div className="text-[15px] font-medium tracking-tight">NT$ {utils.fmt(e.amount)}</div>
-                                <div className="text-[10px] tracking-wider text-ink-3">{utils.buildSplitDesc(e)}</div>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ))
                     )}
