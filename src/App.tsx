@@ -5,20 +5,20 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  ArrowLeft, 
-  Plus, 
-  MoreHorizontal, 
-  X, 
-  Copy, 
-  Check, 
+import {
+  ArrowLeft,
+  Plus,
+  MoreHorizontal,
+  X,
+  Copy,
+  Check,
   ArrowRight,
   Trash2,
   Info
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
-import { appendRowToSheet } from './lib/googleSheet';
+import { appendRowToSheet, fetchSheetData } from './lib/googleSheet';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
@@ -26,7 +26,7 @@ export default function App() {
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
   const [myName, setMyName] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'expenses' | 'transfers' | 'balance' | 'members'>('expenses');
-  
+
   // Modals state
   const [modals, setModals] = useState({
     createGroup: false,
@@ -46,7 +46,7 @@ export default function App() {
   const [newGroupMyName, setNewGroupMyName] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [joinMyName, setJoinMyName] = useState('');
-  
+
   const [expForm, setExpForm] = useState({
     desc: '',
     amount: '',
@@ -160,30 +160,109 @@ export default function App() {
     openGroup(code);
   };
 
-  const joinGroup = () => {
+  const joinGroup = async () => {
     if (!joinCode.trim() || !joinMyName.trim()) {
       showToast('請填寫邀請碼與你的名字');
       return;
     }
-    const data = storage.getGroup(joinCode);
+    
+    setSyncState('syncing');
+    let data = storage.getGroup(joinCode);
+    
     if (!data) {
-      showToast('找不到此邀請碼，請確認後再試');
-      return;
+      showToast('本地無資料，正從雲端資料庫同步中...');
+      try {
+        const rows = await fetchSheetData();
+        const groupRows = rows.filter(r => String(r.GroupCode) === String(joinCode));
+        
+        if (groupRows.length === 0) {
+          showToast('雲端也找不到此邀請碼！');
+          setSyncState('');
+          return;
+        }
+
+        let name = "雲端同步群組";
+        let members = new Set<string>();
+        let expenses: Expense[] = [];
+        let transfers: Transfer[] = [];
+
+        groupRows.forEach((r, i) => {
+          if (r.Type === '建立群組' && r.Item) name = String(r.Item);
+          if (r.Payer) members.add(String(r.Payer));
+          if (r.Participants) {
+             String(r.Participants).split(',').forEach((p: string) => {
+               if(p.trim()) members.add(p.trim());
+             });
+          }
+
+          if (r.Type === '新增費用' || r.Type === '編輯費用') {
+            const parts = r.Participants ? String(r.Participants).split(',').filter(Boolean) : [];
+            expenses.push({
+              id: 'ce_' + i,
+              desc: String(r.Item),
+              amount: Number(r.Amount) || 0,
+              payer: String(r.Payer),
+              participants: parts,
+              splitMode: 'equal',
+              shares: [],
+              date: String(r.Date),
+              createdAt: Date.now()
+            });
+          }
+          if (r.Type === '轉帳') {
+            transfers.push({
+              id: 'ct_' + i,
+              from: String(r.Payer),
+              to: String(r.Participants),
+              amount: Number(r.Amount) || 0,
+              note: String(r.Item),
+              date: String(r.Date),
+              createdAt: Date.now()
+            });
+          }
+        });
+
+        members.add(joinMyName);
+        data = {
+          name, code: joinCode, members: Array.from(members), expenses, transfers, createdAt: Date.now()
+        };
+        
+        // 將加入動作推送到雲端記錄
+        appendRowToSheet({
+          Date: utils.todayStr(),
+          Type: '加入群組',
+          Item: name,
+          GroupCode: joinCode,
+          Payer: joinMyName,
+          Amount: 0,
+          Participants: ''
+        });
+        
+        showToast('🎉 雲端群組同步成功！');
+      } catch (err) {
+        showToast('雲端同步失敗，請檢查網路。');
+        setSyncState('');
+        return;
+      }
     }
+
     if (!data.members.includes(joinMyName)) {
       data.members.push(joinMyName);
-      storage.saveGroup(joinCode, data);
     }
+    storage.saveGroup(joinCode, data);
+
     const updated = [...myGroups];
     if (!updated.find(g => g.code === joinCode)) {
       updated.push({ code: joinCode, name: data.name, myName: joinMyName });
       storage.saveMyGroups(updated);
       setMyGroups(updated);
     }
+    
     toggleModal('joinGroup', false);
     setJoinCode('');
     setJoinMyName('');
     openGroup(joinCode);
+    setSyncState('');
   };
 
   const openEditExpense = (e: Expense) => {
@@ -194,7 +273,7 @@ export default function App() {
         customShares[s.name] = s.amount.toString();
       });
     }
-    
+
     setExpForm({
       desc: e.desc,
       amount: e.amount.toString(),
@@ -204,7 +283,7 @@ export default function App() {
       splitMode: e.splitMode,
       customShares
     });
-    
+
     setModals(prev => ({ ...prev, expenseDetail: false, addExpense: true }));
   };
 
@@ -376,7 +455,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col font-sans">
       <AnimatePresence mode="wait">
         {currentPage === 'home' ? (
-          <motion.div 
+          <motion.div
             key="home"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -401,11 +480,11 @@ export default function App() {
                 <div className="flex flex-col gap-2">
                   {myGroups.length === 0 ? (
                     <div className="text-center py-10 text-ink-3 text-xs tracking-wider leading-relaxed">
-                      尚無群組<br/><span className="text-[10px]">建立或加入一個群組以開始</span>
+                      尚無群組<br /><span className="text-[10px]">建立或加入一個群組以開始</span>
                     </div>
                   ) : (
                     myGroups.map(g => (
-                      <button 
+                      <button
                         key={g.code}
                         onClick={() => openGroup(g.code)}
                         className="bg-paper border border-line p-4 text-left flex items-center justify-between transition-all hover:border-ink hover:shadow-sm rounded-sm"
@@ -430,7 +509,7 @@ export default function App() {
             </div>
           </motion.div>
         ) : (
-          <motion.div 
+          <motion.div
             key="group"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -451,7 +530,7 @@ export default function App() {
 
             <div className="flex border-b border-line bg-paper sticky top-13 z-40 px-5">
               {(['expenses', 'transfers', 'balance', 'members'] as const).map(tab => (
-                <button 
+                <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`flex-1 py-3 text-[11px] tracking-[2px] uppercase transition-all border-b-2 -mb-px ${activeTab === tab ? 'text-ink border-ink' : 'text-ink-3 border-transparent'}`}
@@ -479,8 +558,8 @@ export default function App() {
                             <span className="text-ink-3">NT$ {utils.fmt(items.reduce((s, e) => s + e.amount, 0))}</span>
                           </div>
                           {items.map(e => (
-                            <div 
-                              key={e.id} 
+                            <div
+                              key={e.id}
                               onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
                               className="py-3 border-b border-line last:border-b-0 grid grid-cols-[1fr_auto] gap-3 items-start cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
                             >
@@ -562,7 +641,7 @@ export default function App() {
                     <div className="px-4.5">
                       {settlements.length === 0 ? (
                         <div className="text-center py-10 text-ink-3 text-xs tracking-wider leading-loose">
-                          <span className="stamp">已結清</span><br/><br/>目前無需轉帳
+                          <span className="stamp">已結清</span><br /><br />目前無需轉帳
                         </div>
                       ) : (
                         settlements.map((s, idx) => (
@@ -573,7 +652,7 @@ export default function App() {
                               <span className="font-medium">{s.to}</span>
                               <span className="ml-auto font-medium">NT$ {utils.fmt(s.amount)}</span>
                             </div>
-                            <button 
+                            <button
                               className="btn btn-sm btn-ghost w-full text-[11px] tracking-wider"
                               onClick={() => {
                                 const tf: Transfer = {
@@ -611,7 +690,7 @@ export default function App() {
                       }}><Copy size={14} className="mr-1" /> 複製</button>
                     </div>
                     <div className="text-[11px] text-ink-3 mb-4 tracking-wider">將邀請碼分享給朋友，他們即可加入此群組</div>
-                    
+
                     <div className="flex flex-col">
                       {currentGroup?.members.map(m => (
                         <div key={m} className="flex items-center py-3 border-b border-line last:border-b-0 gap-3">
@@ -627,12 +706,12 @@ export default function App() {
                     <div className="mt-4">
                       <div className="field-label">新增成員姓名</div>
                       <div className="flex gap-2">
-                        <input 
-                          type="text" 
-                          id="newMemberInput" 
-                          placeholder="姓名" 
-                          className="flex-1" 
-                          maxLength={12} 
+                        <input
+                          type="text"
+                          id="newMemberInput"
+                          placeholder="姓名"
+                          className="flex-1"
+                          maxLength={12}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               addMember((e.target as HTMLInputElement).value);
@@ -695,21 +774,21 @@ export default function App() {
           <Modal title={isEditingExpense ? "編輯費用" : "新增費用"} onClose={() => toggleModal('addExpense', false)}>
             <div className="field">
               <label className="field-label">說明</label>
-              <input type="text" value={expForm.desc} onChange={e => setExpForm({...expForm, desc: e.target.value})} placeholder="例：晚餐" maxLength={30} />
+              <input type="text" value={expForm.desc} onChange={e => setExpForm({ ...expForm, desc: e.target.value })} placeholder="例：晚餐" maxLength={30} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="field">
                 <label className="field-label">金額 (NT$)</label>
-                <input type="number" value={expForm.amount} onChange={e => setExpForm({...expForm, amount: e.target.value})} placeholder="0.00" step="0.01" min="0" />
+                <input type="number" value={expForm.amount} onChange={e => setExpForm({ ...expForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
               </div>
               <div className="field">
                 <label className="field-label">日期</label>
-                <input type="date" value={expForm.date} onChange={e => setExpForm({...expForm, date: e.target.value})} />
+                <input type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
               </div>
             </div>
             <div className="field">
               <label className="field-label">付款人</label>
-              <select value={expForm.payer} onChange={e => setExpForm({...expForm, payer: e.target.value})}>
+              <select value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
                 {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
@@ -717,13 +796,13 @@ export default function App() {
               <label className="field-label">分攤對象</label>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {currentGroup?.members.map(m => (
-                  <button 
-                    key={m} 
+                  <button
+                    key={m}
                     onClick={() => {
-                      const updated = expForm.participants.includes(m) 
+                      const updated = expForm.participants.includes(m)
                         ? expForm.participants.filter(p => p !== m)
                         : [...expForm.participants, m];
-                      setExpForm({...expForm, participants: updated});
+                      setExpForm({ ...expForm, participants: updated });
                     }}
                     className={`px-3 py-1.25 border rounded-full text-xs transition-all ${expForm.participants.includes(m) ? 'border-ink bg-paper-2 text-ink' : 'border-line text-ink-3'}`}
                   >
@@ -736,9 +815,9 @@ export default function App() {
               <label className="field-label">分攤方式</label>
               <div className="flex border border-line rounded-sm overflow-hidden mb-3">
                 {(['equal', 'custom', 'percent'] as const).map(mode => (
-                  <button 
+                  <button
                     key={mode}
-                    onClick={() => setExpForm({...expForm, splitMode: mode})}
+                    onClick={() => setExpForm({ ...expForm, splitMode: mode })}
                     className={`flex-1 py-1.75 text-[11px] tracking-wider transition-all ${expForm.splitMode === mode ? 'bg-ink text-paper' : 'bg-transparent text-ink-3'}`}
                   >
                     {mode === 'equal' ? '平均分攤' : mode === 'custom' ? '自訂金額' : '自訂比例%'}
@@ -755,10 +834,10 @@ export default function App() {
                     <div key={p} className="flex items-center gap-2.5">
                       <div className="w-20 text-sm shrink-0">{p}</div>
                       <div className="flex-1">
-                        <input 
-                          type="number" 
-                          value={expForm.customShares[p] || ''} 
-                          onChange={e => setExpForm({...expForm, customShares: {...expForm.customShares, [p]: e.target.value}})}
+                        <input
+                          type="number"
+                          value={expForm.customShares[p] || ''}
+                          onChange={e => setExpForm({ ...expForm, customShares: { ...expForm.customShares, [p]: e.target.value } })}
                           placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
                           step="0.01"
                         />
@@ -781,28 +860,28 @@ export default function App() {
             <div className="grid grid-cols-2 gap-4">
               <div className="field">
                 <label className="field-label">付款人</label>
-                <select value={tfForm.from} onChange={e => setTfForm({...tfForm, from: e.target.value})}>
+                <select value={tfForm.from} onChange={e => setTfForm({ ...tfForm, from: e.target.value })}>
                   {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div className="field">
                 <label className="field-label">收款人</label>
-                <select value={tfForm.to} onChange={e => setTfForm({...tfForm, to: e.target.value})}>
+                <select value={tfForm.to} onChange={e => setTfForm({ ...tfForm, to: e.target.value })}>
                   {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
             </div>
             <div className="field">
               <label className="field-label">金額 (NT$)</label>
-              <input type="number" value={tfForm.amount} onChange={e => setTfForm({...tfForm, amount: e.target.value})} placeholder="0.00" step="0.01" min="0" />
+              <input type="number" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
             </div>
             <div className="field">
               <label className="field-label">日期</label>
-              <input type="date" value={tfForm.date} onChange={e => setTfForm({...tfForm, date: e.target.value})} />
+              <input type="date" value={tfForm.date} onChange={e => setTfForm({ ...tfForm, date: e.target.value })} />
             </div>
             <div className="field">
               <label className="field-label">備註（選填）</label>
-              <input type="text" value={tfForm.note} onChange={e => setTfForm({...tfForm, note: e.target.value})} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
+              <input type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addTransfer', false)}>取消</button>
@@ -889,14 +968,14 @@ export default function App() {
 
 function Modal({ title, children, onClose }: { title: string, children: React.ReactNode, onClose: () => void }) {
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-ink/40 z-[200] flex items-center justify-center p-5"
       onClick={onClose}
     >
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 12 }}
