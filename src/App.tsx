@@ -176,6 +176,14 @@ export default function App() {
             createdAt: Date.now()
           });
         }
+        if (r.Type === '刪除費用') {
+          const idx = expenses.findIndex(e => e.desc === String(r.Item) && e.amount === Number(r.Amount) && e.payer === String(r.Payer));
+          if (idx !== -1) expenses.splice(idx, 1);
+        }
+        if (r.Type === '刪除轉帳') {
+          const idx = transfers.findIndex(t => t.note === String(r.Item) && t.amount === Number(r.Amount) && t.from === String(r.Payer));
+          if (idx !== -1) transfers.splice(idx, 1);
+        }
       });
 
       // 確保群主 (creator) 在 members 陣列的第一位
@@ -303,6 +311,14 @@ export default function App() {
               date: String(r.Date),
               createdAt: Date.now()
             });
+          }
+          if (r.Type === '刪除費用') {
+            const idx = expenses.findIndex(e => e.desc === String(r.Item) && e.amount === Number(r.Amount) && e.payer === String(r.Payer));
+            if (idx !== -1) expenses.splice(idx, 1);
+          }
+          if (r.Type === '刪除轉帳') {
+            const idx = transfers.findIndex(t => t.note === String(r.Item) && t.amount === Number(r.Amount) && t.from === String(r.Payer));
+            if (idx !== -1) transfers.splice(idx, 1);
           }
         });
 
@@ -471,18 +487,46 @@ export default function App() {
 
   const removeExpense = (id: string) => {
     if (!currentGroup) return;
+    const target = currentGroup.expenses.find(e => e.id === id);
     const updated = { ...currentGroup, expenses: currentGroup.expenses.filter(e => e.id !== id) };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
+    
+    if (target) {
+      appendRowToSheet({
+        Date: utils.todayStr(),
+        Type: '刪除費用',
+        Item: target.desc,
+        GroupCode: updated.code,
+        Payer: target.payer,
+        Amount: target.amount,
+        Participants: target.participants.join(',')
+      });
+    }
+
     showToast('已刪除');
     toggleModal('expenseDetail', false);
   };
 
   const removeTransfer = (id: string) => {
     if (!currentGroup) return;
+    const target = currentGroup.transfers.find(t => t.id === id);
     const updated = { ...currentGroup, transfers: currentGroup.transfers.filter(t => t.id !== id) };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
+
+    if (target) {
+      appendRowToSheet({
+        Date: utils.todayStr(),
+        Type: '刪除轉帳',
+        Item: target.note || '刪除轉帳記錄',
+        GroupCode: updated.code,
+        Payer: target.from,
+        Amount: target.amount,
+        Participants: target.to
+      });
+    }
+
     showToast('已刪除');
   };
 
