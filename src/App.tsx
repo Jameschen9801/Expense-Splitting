@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
-import { appendRowToSheet, fetchSheetData } from './lib/googleSheet';
+import { subscribeToGroup, fetchGroupOnce, syncGroupToCloud } from './lib/firebase';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
@@ -72,6 +72,26 @@ export default function App() {
     setMyGroups(storage.getMyGroups());
   }, []);
 
+  // 當使用者停留在群組頁面時，自動開啟 Firebase 監聽雙向綁定
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    if (currentPage === 'group' && currentGroup?.code) {
+      setSyncState('syncing');
+      unsubscribe = subscribeToGroup(currentGroup.code, (cloudData) => {
+        if (cloudData) {
+          // 當雲端有任何風吹草動變更，立刻覆寫到畫面與本地！
+          setCurrentGroup(cloudData);
+          storage.saveGroup(currentGroup.code, cloudData);
+        }
+        setSyncState('synced'); // 綠燈
+        setTimeout(() => setSyncState(''), 2000); // 熄滅
+      });
+    }
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [currentPage, currentGroup?.code]);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2200);
@@ -117,94 +137,7 @@ export default function App() {
     setSettingsGroupName(data.name);
     setCurrentPage('group');
     setActiveTab('expenses');
-
-    // 每次打開群組時，自動從雲端同步最新近況
-    syncGroupData(code);
-  };
-
-  // 背景從 Google Sheet 拉取該群組所有資料的函數
-  const syncGroupData = async (code: string) => {
-    setSyncState('syncing');
-    try {
-      const rows = await fetchSheetData();
-      const groupRows = rows.filter(r => String(r.GroupCode) === String(code));
-      if (groupRows.length === 0) {
-        setSyncState('');
-        return; // 雲端無資料
-      }
-
-      let name = "雲端同步群組";
-      let creator = "";
-      let members = new Set<string>();
-      let expenses: Expense[] = [];
-      let transfers: Transfer[] = [];
-
-      groupRows.forEach((r, i) => {
-        if (r.Type === '建立群組' && r.Item) {
-          name = String(r.Item);
-          if (r.Payer) creator = String(r.Payer);
-        }
-        if (r.Payer) members.add(String(r.Payer));
-        if (r.Participants) {
-           String(r.Participants).split(',').forEach((p: string) => {
-             if(p.trim()) members.add(p.trim());
-           });
-        }
-
-        if (r.Type === '新增費用' || r.Type === '編輯費用') {
-          const parts = r.Participants ? String(r.Participants).split(',').filter(Boolean) : [];
-          expenses.push({
-            id: 'ce_' + i,
-            desc: String(r.Item),
-            amount: Number(r.Amount) || 0,
-            payer: String(r.Payer),
-            participants: parts,
-            splitMode: 'equal',
-            shares: [],
-            date: String(r.Date),
-            createdAt: Date.now()
-          });
-        }
-        if (r.Type === '轉帳') {
-          transfers.push({
-            id: 'ct_' + i,
-            from: String(r.Payer),
-            to: String(r.Participants),
-            amount: Number(r.Amount) || 0,
-            note: String(r.Item),
-            date: String(r.Date),
-            createdAt: Date.now()
-          });
-        }
-        if (r.Type === '刪除費用') {
-          const idx = expenses.findIndex(e => e.desc === String(r.Item) && e.amount === Number(r.Amount) && e.payer === String(r.Payer));
-          if (idx !== -1) expenses.splice(idx, 1);
-        }
-        if (r.Type === '刪除轉帳') {
-          const idx = transfers.findIndex(t => t.note === String(r.Item) && t.amount === Number(r.Amount) && t.from === String(r.Payer));
-          if (idx !== -1) transfers.splice(idx, 1);
-        }
-      });
-
-      // 確保群主 (creator) 在 members 陣列的第一位
-      if (creator) members.add(creator);
-      let memberArray = Array.from(members);
-      if (creator) {
-         memberArray = [creator, ...memberArray.filter(m => m !== creator)];
-      }
-
-      const updatedGroup = {
-        name, code, members: memberArray, expenses, transfers, createdAt: Date.now()
-      };
-      
-      setCurrentGroup(updatedGroup);
-      storage.saveGroup(code, updatedGroup);
-      setSyncState('synced');
-      setTimeout(() => setSyncState(''), 2000);
-    } catch (e) {
-      console.error(e);
-      setSyncState('');
-    }
+    // Firebase useEffect 會自動幫我們連線並更新
   };
 
   const goHome = () => {
@@ -227,20 +160,13 @@ export default function App() {
       createdAt: Date.now()
     };
     storage.saveGroup(code, data);
+    
+    // 初始化一份空的 Firebase 資料
+    syncGroupToCloud(code, data);
+
     const updated = [...myGroups, { code, name: newGroupName, myName: newGroupMyName }];
     storage.saveMyGroups(updated);
     setMyGroups(updated);
-
-    // 同步到 Google Sheet
-    appendRowToSheet({
-      Date: utils.todayStr(),
-      Type: '建立群組',
-      Item: newGroupName,
-      GroupCode: code,
-      Payer: newGroupMyName,
-      Amount: 0,
-      Participants: ''
-    });
 
     toggleModal('createGroup', false);
     setNewGroupName('');
@@ -258,94 +184,15 @@ export default function App() {
     let data = storage.getGroup(joinCode);
     
     if (!data) {
-      showToast('本地無資料，正從雲端資料庫同步中...');
+      showToast('本地無資料，正從 Firebase 同步中...');
       try {
-        const rows = await fetchSheetData();
-        const groupRows = rows.filter(r => String(r.GroupCode) === String(joinCode));
-        
-        if (groupRows.length === 0) {
-          showToast('雲端也找不到此邀請碼！');
+        const cloudData = await fetchGroupOnce(joinCode);
+        if (!cloudData) {
+          showToast('雲端找不到此邀請碼！');
           setSyncState('');
           return;
         }
-
-        let name = "雲端同步群組";
-        let creator = "";
-        let members = new Set<string>();
-        let expenses: Expense[] = [];
-        let transfers: Transfer[] = [];
-
-        groupRows.forEach((r, i) => {
-          if (r.Type === '建立群組' && r.Item) {
-             name = String(r.Item);
-             if (r.Payer) creator = String(r.Payer);
-          }
-          if (r.Payer) members.add(String(r.Payer));
-          if (r.Participants) {
-             String(r.Participants).split(',').forEach((p: string) => {
-               if(p.trim()) members.add(p.trim());
-             });
-          }
-
-          if (r.Type === '新增費用' || r.Type === '編輯費用') {
-            const parts = r.Participants ? String(r.Participants).split(',').filter(Boolean) : [];
-            expenses.push({
-              id: 'ce_' + i,
-              desc: String(r.Item),
-              amount: Number(r.Amount) || 0,
-              payer: String(r.Payer),
-              participants: parts,
-              splitMode: 'equal',
-              shares: [],
-              date: String(r.Date),
-              createdAt: Date.now()
-            });
-          }
-          if (r.Type === '轉帳') {
-            transfers.push({
-              id: 'ct_' + i,
-              from: String(r.Payer),
-              to: String(r.Participants),
-              amount: Number(r.Amount) || 0,
-              note: String(r.Item),
-              date: String(r.Date),
-              createdAt: Date.now()
-            });
-          }
-          if (r.Type === '刪除費用') {
-            const idx = expenses.findIndex(e => e.desc === String(r.Item) && e.amount === Number(r.Amount) && e.payer === String(r.Payer));
-            if (idx !== -1) expenses.splice(idx, 1);
-          }
-          if (r.Type === '刪除轉帳') {
-            const idx = transfers.findIndex(t => t.note === String(r.Item) && t.amount === Number(r.Amount) && t.from === String(r.Payer));
-            if (idx !== -1) transfers.splice(idx, 1);
-          }
-        });
-
-        members.add(joinMyName);
-        
-        // 確保群主在第一位
-        if (creator) members.add(creator);
-        let memberArray = Array.from(members);
-        if (creator) {
-           memberArray = [creator, ...memberArray.filter(m => m !== creator)];
-        }
-
-        data = {
-          name, code: joinCode, members: memberArray, expenses, transfers, createdAt: Date.now()
-        };
-        
-        // 將加入動作推送到雲端記錄
-        appendRowToSheet({
-          Date: utils.todayStr(),
-          Type: '加入群組',
-          Item: name,
-          GroupCode: joinCode,
-          Payer: joinMyName,
-          Amount: 0,
-          Participants: ''
-        });
-        
+        data = cloudData;
         showToast('🎉 雲端群組同步成功！');
       } catch (err) {
         showToast('雲端同步失敗，請檢查網路。');
@@ -358,6 +205,9 @@ export default function App() {
       data.members.push(joinMyName);
     }
     storage.saveGroup(joinCode, data);
+    
+    // 將自己加入並直接暴力覆寫回 Firebase 即可！
+    syncGroupToCloud(joinCode, data);
 
     const updated = [...myGroups];
     if (!updated.find(g => g.code === joinCode)) {
@@ -437,17 +287,7 @@ export default function App() {
     const updated = { ...currentGroup, expenses: updatedExpenses };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
-
-    // 同步到 Google Sheet
-    appendRowToSheet({
-      Date: date,
-      Type: isEditingExpense ? '編輯費用' : '新增費用',
-      Item: desc,
-      GroupCode: updated.code,
-      Payer: payer,
-      Amount: utils.round2(amt),
-      Participants: participants.join(',')
-    });
+    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
     toggleModal('addExpense', false);
     setIsEditingExpense(false);
@@ -469,17 +309,7 @@ export default function App() {
     const updated = { ...currentGroup, transfers: [...currentGroup.transfers, tf] };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
-
-    // 同步到 Google Sheet
-    appendRowToSheet({
-      Date: date,
-      Type: '轉帳',
-      Item: note || '轉帳還款',
-      GroupCode: updated.code,
-      Payer: from,
-      Amount: utils.round2(amt),
-      Participants: to
-    });
+    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
     toggleModal('addTransfer', false);
     showToast('轉帳已記錄');
@@ -491,18 +321,7 @@ export default function App() {
     const updated = { ...currentGroup, expenses: currentGroup.expenses.filter(e => e.id !== id) };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
-    
-    if (target) {
-      appendRowToSheet({
-        Date: utils.todayStr(),
-        Type: '刪除費用',
-        Item: target.desc,
-        GroupCode: updated.code,
-        Payer: target.payer,
-        Amount: target.amount,
-        Participants: target.participants.join(',')
-      });
-    }
+    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
     showToast('已刪除');
     toggleModal('expenseDetail', false);
@@ -514,18 +333,7 @@ export default function App() {
     const updated = { ...currentGroup, transfers: currentGroup.transfers.filter(t => t.id !== id) };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
-
-    if (target) {
-      appendRowToSheet({
-        Date: utils.todayStr(),
-        Type: '刪除轉帳',
-        Item: target.note || '刪除轉帳記錄',
-        GroupCode: updated.code,
-        Payer: target.from,
-        Amount: target.amount,
-        Participants: target.to
-      });
-    }
+    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
     showToast('已刪除');
   };
@@ -560,6 +368,7 @@ export default function App() {
     const updated = { ...currentGroup, members: currentGroup.members.filter(m => m !== name) };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
+    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
   };
 
   const saveGroupSettings = () => {
@@ -672,12 +481,11 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2">
                 <button 
-                  className="icon-btn text-[11px] font-medium px-2 py-1 rounded border border-line flex items-center gap-1 transition-all hover:bg-paper-2" 
-                  onClick={() => syncGroupData(currentGroup?.code || '')}
-                  title="手動重新拉取 Google Sheet 資料"
+                  className="icon-btn text-[11px] font-medium px-2 py-1 flex items-center gap-1 transition-all text-green-600 bg-green-50/50" 
+                  title="Firebase 即時連線狀態"
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : syncState === 'synced' ? 'bg-green-600' : 'bg-ink-3'}`}></span>
-                  {syncState === 'syncing' ? '同步中' : '更新'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : syncState === 'synced' ? 'bg-green-600' : 'bg-green-600'}`}></span>
+                  即時連線中
                 </button>
                 <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)}>
                   <MoreHorizontal size={18} />
