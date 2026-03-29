@@ -5,6 +5,7 @@ import { Group } from '../types';
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
   authDomain: "expense-splitting-a9b78.firebaseapp.com",
+  databaseURL: "https://expense-splitting-a9b78-default-rtdb.firebaseio.com",
   projectId: "expense-splitting-a9b78",
   storageBucket: "expense-splitting-a9b78.firebasestorage.app",
   messagingSenderId: "259563826188",
