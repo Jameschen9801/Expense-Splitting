@@ -144,8 +144,7 @@ export default function App() {
           name = String(r.Item);
           if (r.Payer) creator = String(r.Payer);
         }
-        if (r.Payer && r.Type === '加入群組') members.add(String(r.Payer));
-        if (r.Payer && r.Type !== '建立群組') members.add(String(r.Payer));
+        if (r.Payer) members.add(String(r.Payer));
         if (r.Participants) {
            String(r.Participants).split(',').forEach((p: string) => {
              if(p.trim()) members.add(p.trim());
@@ -180,8 +179,9 @@ export default function App() {
       });
 
       // 確保群主 (creator) 在 members 陣列的第一位
+      if (creator) members.add(creator);
       let memberArray = Array.from(members);
-      if (creator && memberArray.includes(creator)) {
+      if (creator) {
          memberArray = [creator, ...memberArray.filter(m => m !== creator)];
       }
 
@@ -272,8 +272,7 @@ export default function App() {
              name = String(r.Item);
              if (r.Payer) creator = String(r.Payer);
           }
-          if (r.Payer && r.Type === '加入群組') members.add(String(r.Payer));
-          if (r.Payer && r.Type !== '建立群組') members.add(String(r.Payer));
+          if (r.Payer) members.add(String(r.Payer));
           if (r.Participants) {
              String(r.Participants).split(',').forEach((p: string) => {
                if(p.trim()) members.add(p.trim());
@@ -310,8 +309,9 @@ export default function App() {
         members.add(joinMyName);
         
         // 確保群主在第一位
+        if (creator) members.add(creator);
         let memberArray = Array.from(members);
-        if (creator && memberArray.includes(creator)) {
+        if (creator) {
            memberArray = [creator, ...memberArray.filter(m => m !== creator)];
         }
 
