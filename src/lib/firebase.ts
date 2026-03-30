@@ -3,14 +3,14 @@ import { getDatabase, ref, onValue, set, get, child } from "firebase/database";
 import { Group } from '../types';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBTPJD4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
-  authDomain: "expense-splitting-a9b78.firebaseapp.com",
-  databaseURL: "https://expense-splitting-a9b78-default-rtdb.firebaseio.com",
-  projectId: "expense-splitting-a9b78",
-  storageBucket: "expense-splitting-a9b78.firebasestorage.app",
-  messagingSenderId: "259563826188",
-  appId: "1:259563826188:web:aeab760813e231e2d85229",
-  measurementId: "G-0P2867E9JD"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
