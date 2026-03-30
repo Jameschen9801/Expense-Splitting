@@ -521,7 +521,6 @@ export default function App() {
                         <div key={date}>
                           <div className="flex justify-between items-center py-2.5 border-b border-line mt-1.5 uppercase text-[11px] tracking-[2px] text-ink-3">
                             <span>{date === '未設定日期' ? date : utils.fmtDate(date)}</span>
-                            <span className="text-ink-3">NT$ {utils.fmt((items as Expense[]).reduce((s, e) => s + e.amount, 0))}</span>
                           </div>
                           {(items as Expense[]).map(e => {
                             let myCost = 0;
@@ -603,13 +602,13 @@ export default function App() {
                               <div className="text-[10px] text-ink-3 tracking-wider">{isPos ? '待收回' : isNeg ? '待付款' : '已結清'}</div>
                             </div>
                             <div className={`text-sm font-medium tracking-tight ${isPos ? 'text-green-700' : isNeg ? 'text-red-700' : 'text-ink-3'}`}>
-                              {isPos ? '+' : ''}NT$ {utils.fmt(Math.abs(b))}
+                              {isPos ? '+' : isNeg ? '-' : ''}NT$ {utils.fmt(Math.abs(b))}
                             </div>
                           </div>
                         );
                       })}
                       <div className="flex justify-between items-center py-3 border-t border-line mt-1">
-                        <span className="text-[10px] tracking-[2px] uppercase text-ink-3">總花費</span>
+                        <span className="text-[10px] tracking-[2px] uppercase text-ink-3">群組總花費</span>
                         <span className="text-base font-medium">NT$ {utils.fmt(currentGroup?.expenses.reduce((s, e) => s + e.amount, 0) || 0)}</span>
                       </div>
                     </div>
