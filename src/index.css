@@ -49,6 +49,10 @@
     @apply bg-red-700 text-white;
   }
 
+  .field {
+    @apply mb-5;
+  }
+
   .field-label {
     @apply block text-[11px] tracking-[2px] uppercase text-ink-3 mb-1.5;
   }

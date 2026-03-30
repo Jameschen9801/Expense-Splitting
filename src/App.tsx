@@ -106,7 +106,7 @@ export default function App() {
           desc: '',
           amount: '',
           date: utils.todayStr(),
-          payer: currentGroup.members[0] || '',
+          payer: currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || ''),
           participants: [...currentGroup.members],
           splitMode: 'equal',
           customShares: {}
@@ -117,9 +117,12 @@ export default function App() {
       setIsEditingExpense(false);
     }
     if (key === 'addTransfer' && open && currentGroup) {
+      const defaultFrom = currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || '');
+      const defaultTo = currentGroup.members.find(m => m !== defaultFrom) || '';
+      
       setTfForm({
-        from: currentGroup.members[0] || '',
-        to: currentGroup.members[1] || '',
+        from: defaultFrom,
+        to: defaultTo,
         amount: '',
         date: utils.todayStr(),
         note: ''
