@@ -21,25 +21,30 @@ import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
 import { subscribeToGroup, fetchGroupOnce, syncGroupToCloud } from './lib/firebase';
 
+type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
   const [myName, setMyName] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'expenses' | 'transfers' | 'balance' | 'members'>('expenses');
+  const [activeTab, setActiveTab] = useState<'records' | 'balance' | 'members'>('records');
+  const [recordType, setRecordType] = useState<'expense' | 'transfer'>('expense');
 
   // Modals state
   const [modals, setModals] = useState({
     createGroup: false,
     joinGroup: false,
-    addExpense: false,
-    addTransfer: false,
+    addRecord: false,
     groupSettings: false,
-    expenseDetail: false
+    expenseDetail: false,
+    transferDetail: false
   });
 
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [isEditingExpense, setIsEditingExpense] = useState(false);
+  const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
+  const [isEditingTransfer, setIsEditingTransfer] = useState(false);
   const [syncState, setSyncState] = useState<'syncing' | 'synced' | ''>('');
 
   // Form states
@@ -100,34 +105,40 @@ export default function App() {
 
   const toggleModal = (key: keyof typeof modals, open: boolean) => {
     setModals(prev => ({ ...prev, [key]: open }));
-    if (key === 'addExpense' && open && currentGroup) {
+    if (key === 'addRecord' && open && currentGroup) {
       if (!isEditingExpense) {
         setExpForm({
-          desc: '',
-          amount: '',
-          date: utils.todayStr(),
+          desc: '', amount: '', date: utils.todayStr(),
           payer: currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || ''),
-          participants: [...currentGroup.members],
-          splitMode: 'equal',
-          customShares: {}
+          participants: [...currentGroup.members], splitMode: 'equal', customShares: {}
         });
       }
+      if (!isEditingTransfer) {
+        const defaultFrom = currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || '');
+        const defaultTo = currentGroup.members.find(m => m !== defaultFrom) || '';
+        setTfForm({ from: defaultFrom, to: defaultTo, amount: '', date: utils.todayStr(), note: '' });
+      }
+      if (!isEditingExpense && !isEditingTransfer) {
+        setRecordType('expense');
+      }
     }
-    if (!open && key === 'addExpense') {
+    if (!open && key === 'addRecord') {
       setIsEditingExpense(false);
+      setIsEditingTransfer(false);
     }
-    if (key === 'addTransfer' && open && currentGroup) {
-      const defaultFrom = currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || '');
-      const defaultTo = currentGroup.members.find(m => m !== defaultFrom) || '';
-      
-      setTfForm({
-        from: defaultFrom,
-        to: defaultTo,
-        amount: '',
-        date: utils.todayStr(),
-        note: ''
-      });
-    }
+  };
+
+  const openEditTransfer = (t: Transfer) => {
+    setIsEditingTransfer(true);
+    setTfForm({
+      from: t.from,
+      to: t.to,
+      amount: t.amount.toString(),
+      date: t.date || utils.todayStr(),
+      note: t.note || ''
+    });
+    setModals(prev => ({ ...prev, transferDetail: false, addRecord: true }));
+    setRecordType('transfer');
   };
 
   const openGroup = (code: string) => {
@@ -140,7 +151,7 @@ export default function App() {
     setMyName(mg.myName);
     setSettingsGroupName(data.name);
     setCurrentPage('group');
-    setActiveTab('expenses');
+    setActiveTab('records');
     // Firebase useEffect 會自動幫我們連線並更新
   };
 
@@ -246,7 +257,8 @@ export default function App() {
       customShares
     });
 
-    setModals(prev => ({ ...prev, expenseDetail: false, addExpense: true }));
+    setModals(prev => ({ ...prev, expenseDetail: false, addRecord: true }));
+    setRecordType('expense');
   };
 
   const addExpense = () => {
@@ -293,7 +305,7 @@ export default function App() {
     storage.saveGroup(updated.code, updated);
     syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
-    toggleModal('addExpense', false);
+    toggleModal('addRecord', false);
     setIsEditingExpense(false);
     showToast(isEditingExpense ? '費用已更新' : '費用已新增');
   };
@@ -307,16 +319,26 @@ export default function App() {
     if (isNaN(amt) || amt <= 0) { showToast('請填寫有效金額'); return; }
 
     const tf: Transfer = {
-      id: 't' + Date.now(), from, to, amount: utils.round2(amt), note,
-      date, createdAt: Date.now()
+      id: isEditingTransfer && selectedTransfer ? selectedTransfer.id : 't' + Date.now(),
+      from, to, amount: utils.round2(amt), note,
+      date, createdAt: isEditingTransfer && selectedTransfer ? selectedTransfer.createdAt : Date.now()
     };
-    const updated = { ...currentGroup, transfers: [...currentGroup.transfers, tf] };
+    
+    let updatedTransfers;
+    if (isEditingTransfer && selectedTransfer) {
+      updatedTransfers = currentGroup.transfers.map(t => t.id === selectedTransfer.id ? tf : t);
+    } else {
+      updatedTransfers = [...currentGroup.transfers, tf];
+    }
+    
+    const updated = { ...currentGroup, transfers: updatedTransfers };
     setCurrentGroup(updated);
     storage.saveGroup(updated.code, updated);
     syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
-    toggleModal('addTransfer', false);
-    showToast('轉帳已記錄');
+    toggleModal('addRecord', false);
+    setIsEditingTransfer(false);
+    showToast(isEditingTransfer ? '轉帳已更新' : '轉帳已記錄');
   };
 
   const removeExpense = (id: string) => {
@@ -340,6 +362,7 @@ export default function App() {
     syncGroupToCloud(updated.code, updated); // Firebase 覆寫
 
     showToast('已刪除');
+    toggleModal('transferDetail', false);
   };
 
   const addMember = (name: string) => {
@@ -400,14 +423,20 @@ export default function App() {
   const balances = useMemo(() => currentGroup ? utils.calcBalances(currentGroup) : {}, [currentGroup]);
   const settlements = useMemo(() => utils.calcSettlements(balances), [balances]);
 
-  const groupedExpenses = useMemo<Record<string, Expense[]>>(() => {
+  const groupedRecords = useMemo<Record<string, RecordItem[]>>(() => {
     if (!currentGroup) return {};
-    const sorted = [...currentGroup.expenses].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    const groups: Record<string, Expense[]> = {};
-    sorted.forEach(e => {
-      const key = e.date || '未設定日期';
+    const expenses: RecordItem[] = currentGroup.expenses.map(e => ({ ...e, type: 'expense' }));
+    const transfers: RecordItem[] = currentGroup.transfers.map(t => ({ ...t, type: 'transfer' }));
+    const combined = [...expenses, ...transfers].sort((a, b) => {
+      const dateCmp = (b.date || '').localeCompare(a.date || '');
+      if (dateCmp !== 0) return dateCmp;
+      return b.createdAt - a.createdAt;
+    });
+    const groups: Record<string, RecordItem[]> = {};
+    combined.forEach(item => {
+      const key = item.date || '未設定日期';
       if (!groups[key]) groups[key] = [];
-      groups[key].push(e);
+      groups[key].push(item);
     });
     return groups;
   }, [currentGroup, myName]);
@@ -498,89 +527,77 @@ export default function App() {
             </nav>
 
             <div className="flex border-b border-line bg-paper sticky top-13 z-40 px-5">
-              {(['expenses', 'transfers', 'balance', 'members'] as const).map(tab => (
+              {(['records', 'balance', 'members'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`flex-1 py-3 text-[11px] tracking-[2px] uppercase transition-all border-b-2 -mb-px ${activeTab === tab ? 'text-ink border-ink' : 'text-ink-3 border-transparent'}`}
                 >
-                  {tab === 'expenses' ? '支出' : tab === 'transfers' ? '轉帳' : tab === 'balance' ? '結算' : '成員'}
+                  {tab === 'records' ? '明細' : tab === 'balance' ? '結算' : '成員'}
                 </button>
               ))}
             </div>
 
             <div className="flex-1 p-5 max-w-[680px] mx-auto w-full flex flex-col gap-4">
-              {activeTab === 'expenses' && (
+                            {activeTab === 'records' && (
                 <div className="panel">
                   <div className="panel-header p-4 border-b border-line flex items-center justify-between">
-                    <span className="section-label">費用記錄</span>
-                    <button className="btn btn-sm btn-primary" onClick={() => toggleModal('addExpense', true)}>＋ 新增</button>
+                    <span className="section-label">明細記錄</span>
+                    <button className="btn btn-sm btn-primary" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
                   </div>
                   <div className="px-4.5">
-                    {Object.keys(groupedExpenses).length === 0 ? (
-                      <div className="text-center py-10 text-ink-3 text-xs tracking-wider">尚無費用記錄</div>
+                    {Object.keys(groupedRecords).length === 0 ? (
+                      <div className="text-center py-10 text-ink-3 text-xs tracking-wider">尚無任何記錄</div>
                     ) : (
-                      Object.entries(groupedExpenses).map(([date, items]) => (
+                      (Object.entries(groupedRecords) as [string, RecordItem[]][]).map(([date, items]) => (
                         <div key={date}>
                           <div className="flex justify-between items-center py-2.5 border-b border-line mt-1.5 uppercase text-[11px] tracking-[2px] text-ink-3">
                             <span>{date === '未設定日期' ? date : utils.fmtDate(date)}</span>
                           </div>
-                          {(items as Expense[]).map(e => {
-                            let myCost = 0;
-                            if (e.participants.includes(myName)) {
-                              if (e.splitMode === 'equal') {
-                                myCost = e.amount / e.participants.length;
-                              } else if (e.shares) {
-                                myCost = e.shares.find(s => s.name === myName)?.amount || 0;
+                          {items.map(item => {
+                            if (item.type === 'expense') {
+                              const e = item as Expense;
+                              let myCost = 0;
+                              if (e.participants.includes(myName)) {
+                                if (e.splitMode === 'equal') {
+                                  myCost = e.amount / e.participants.length;
+                                } else if (e.shares) {
+                                  myCost = e.shares.find(s => s.name === myName)?.amount || 0;
+                                }
                               }
-                            }
-                            
-                            return (
-                              <div
-                                key={e.id}
-                                onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
-                                className="py-3 border-b border-line last:border-b-0 flex items-center justify-between gap-3 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-[16px] tracking-wide font-medium text-ink truncate">{e.desc}</div>
-                                  <div className="text-[12px] text-ink-3 tracking-tight mt-0.5 truncate">{e.payer} 先付 NT${utils.fmt(e.amount)}</div>
-                                </div>
-                                {myCost > 0 && (
-                                  <div className="text-right shrink-0">
-                                    <div className="text-[20px] font-medium tracking-[0.5px] text-[#f87171]">NT${utils.fmt(myCost)}</div>
+                              return (
+                                <div
+                                  key={e.id}
+                                  onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
+                                  className="py-3 border-b border-line last:border-b-0 flex items-center justify-between gap-3 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-[16px] tracking-wide font-medium text-ink truncate">{e.desc}</div>
+                                    <div className="text-[12px] text-ink-3 tracking-tight mt-0.5 truncate">{e.payer} 先付 NT${utils.fmt(e.amount)}</div>
                                   </div>
-                                )}
-                              </div>
-                            );
+                                  {myCost > 0 && (
+                                    <div className="text-right shrink-0">
+                                      <div className="text-[20px] font-medium tracking-[0.5px] text-[#f87171]">NT${utils.fmt(myCost)}</div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            } else {
+                              const t = item as Transfer;
+                              return (
+                                <div key={t.id} onClick={() => { setSelectedTransfer(t); toggleModal('transferDetail', true); }} className="py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5">
+                                  <ArrowRight size={14} className="text-ink-4 shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-[14px] font-medium text-ink truncate">{t.from} <span className="text-ink-3 font-normal text-[12px] mx-1">轉給</span> {t.to}</div>
+                                    {t.note && <div className="text-[11px] text-ink-3 mt-0.5 truncate">{t.note}</div>}
+                                  </div>
+                                  <div className="ml-auto text-right">
+                                    <div className="text-[17px] font-medium tracking-[0.5px]">NT${utils.fmt(t.amount)}</div>
+                                  </div>
+                                </div>
+                              );
+                            }
                           })}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'transfers' && (
-                <div className="panel">
-                  <div className="panel-header p-4 border-b border-line flex items-center justify-between">
-                    <span className="section-label">轉帳記錄</span>
-                    <button className="btn btn-sm btn-primary" onClick={() => toggleModal('addTransfer', true)}>＋ 新增</button>
-                  </div>
-                  <div className="px-4.5">
-                    {currentGroup?.transfers.length === 0 ? (
-                      <div className="text-center py-10 text-ink-3 text-xs tracking-wider">尚無轉帳記錄</div>
-                    ) : (
-                      currentGroup?.transfers.slice().reverse().map(t => (
-                        <div key={t.id} className="py-3 border-b border-line last:border-b-0 flex items-center gap-2.5">
-                          <span className="text-sm font-medium">{t.from}</span>
-                          <ArrowRight size={12} className="text-ink-3" />
-                          <span className="text-sm font-medium">{t.to}</span>
-                          <div className="ml-auto text-right">
-                            <div className="text-sm font-medium tracking-tight">NT$ {utils.fmt(t.amount)}</div>
-                            {t.date && <div className="text-[11px] text-ink-3">{t.date}</div>}
-                            {t.note && <div className="text-[11px] text-ink-3">{t.note}</div>}
-                          </div>
-                          <button className="icon-btn ml-2" onClick={() => removeTransfer(t.id)}><X size={14} /></button>
                         </div>
                       ))
                     )}
@@ -750,122 +767,138 @@ export default function App() {
           </Modal>
         )}
 
-        {modals.addExpense && (
-          <Modal title={isEditingExpense ? "編輯費用" : "新增費用"} onClose={() => toggleModal('addExpense', false)}>
-            <div className="field">
-              <label className="field-label">說明</label>
-              <input type="text" value={expForm.desc} onChange={e => setExpForm({ ...expForm, desc: e.target.value })} placeholder="例：晚餐" maxLength={30} />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="field">
-                <label className="field-label">金額 (NT$)</label>
-                <input type="number" value={expForm.amount} onChange={e => setExpForm({ ...expForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
+        {modals.addRecord && (
+          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} onClose={() => toggleModal('addRecord', false)}>
+            {(!isEditingExpense && !isEditingTransfer) && (
+              <div className="flex bg-paper border border-line p-1 rounded-sm mb-5 gap-1 shadow-sm">
+                <button 
+                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-sm transition-all ${recordType === 'expense' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
+                  onClick={() => setRecordType('expense')}
+                >
+                  費用
+                </button>
+                <button 
+                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-sm transition-all ${recordType === 'transfer' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
+                  onClick={() => setRecordType('transfer')}
+                >
+                  轉帳
+                </button>
               </div>
-              <div className="field">
-                <label className="field-label">日期</label>
-                <input type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
-              </div>
-            </div>
-            <div className="field">
-              <label className="field-label">付款人</label>
-              <select value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
-                {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label className="field-label">分攤對象</label>
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {currentGroup?.members.map(m => (
-                  <button
-                    key={m}
-                    onClick={() => {
-                      const updated = expForm.participants.includes(m)
-                        ? expForm.participants.filter(p => p !== m)
-                        : [...expForm.participants, m];
-                      setExpForm({ ...expForm, participants: updated });
-                    }}
-                    className={`px-3 py-1.25 border rounded-full text-xs transition-all ${expForm.participants.includes(m) ? 'border-ink bg-paper-2 text-ink' : 'border-line text-ink-3'}`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="field">
-              <label className="field-label">分攤方式</label>
-              <div className="flex border border-line rounded-sm overflow-hidden mb-3">
-                {(['equal', 'custom', 'percent'] as const).map(mode => (
-                  <button
-                    key={mode}
-                    onClick={() => setExpForm({ ...expForm, splitMode: mode })}
-                    className={`flex-1 py-1.75 text-[11px] tracking-wider transition-all ${expForm.splitMode === mode ? 'bg-ink text-paper' : 'bg-transparent text-ink-3'}`}
-                  >
-                    {mode === 'equal' ? '平均分攤' : mode === 'custom' ? '自訂金額' : '自訂比例%'}
-                  </button>
-                ))}
-              </div>
-              {expForm.splitMode === 'equal' ? (
-                expForm.participants.length > 0 && expForm.amount && (
-                  <div className="text-[11px] text-ink-3 tracking-wider mt-1">每人 NT$ {utils.fmt(utils.round2(parseFloat(expForm.amount) / expForm.participants.length))}</div>
-                )
-              ) : (
-                <div className="flex flex-col gap-2.5 mt-2.5">
-                  {expForm.participants.map(p => (
-                    <div key={p} className="flex items-center gap-2.5">
-                      <div className="w-20 text-sm shrink-0">{p}</div>
-                      <div className="flex-1">
-                        <input
-                          type="number"
-                          value={expForm.customShares[p] || ''}
-                          onChange={e => setExpForm({ ...expForm, customShares: { ...expForm.customShares, [p]: e.target.value } })}
-                          placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
-                          step="0.01"
-                        />
-                      </div>
-                      <div className="text-xs text-ink-3 shrink-0">{expForm.splitMode === 'custom' ? 'NT$' : '%'}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addExpense', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={addExpense}>儲存</button>
-            </div>
-          </Modal>
-        )}
+            )}
 
-        {modals.addTransfer && (
-          <Modal title="記錄轉帳" onClose={() => toggleModal('addTransfer', false)}>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="field">
-                <label className="field-label">付款人</label>
-                <select value={tfForm.from} onChange={e => setTfForm({ ...tfForm, from: e.target.value })}>
-                  {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label className="field-label">收款人</label>
-                <select value={tfForm.to} onChange={e => setTfForm({ ...tfForm, to: e.target.value })}>
-                  {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="field">
-              <label className="field-label">金額 (NT$)</label>
-              <input type="number" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
-            </div>
-            <div className="field">
-              <label className="field-label">日期</label>
-              <input type="date" value={tfForm.date} onChange={e => setTfForm({ ...tfForm, date: e.target.value })} />
-            </div>
-            <div className="field">
-              <label className="field-label">備註（選填）</label>
-              <input type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
-            </div>
+            {recordType === 'expense' ? (
+              <>
+                <div className="field">
+                  <label className="field-label">說明</label>
+                  <input type="text" value={expForm.desc} onChange={e => setExpForm({ ...expForm, desc: e.target.value })} placeholder="例：晚餐" maxLength={30} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="field">
+                    <label className="field-label">金額 (NT$)</label>
+                    <input type="number" value={expForm.amount} onChange={e => setExpForm({ ...expForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
+                  </div>
+                  <div className="field">
+                    <label className="field-label">日期</label>
+                    <input type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
+                  </div>
+                </div>
+                <div className="field">
+                  <label className="field-label">付款人</label>
+                  <select value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
+                    {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="field-label">分攤對象</label>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {currentGroup?.members.map(m => (
+                      <button
+                        key={m}
+                        onClick={() => {
+                          const updated = expForm.participants.includes(m)
+                            ? expForm.participants.filter(p => p !== m)
+                            : [...expForm.participants, m];
+                          setExpForm({ ...expForm, participants: updated });
+                        }}
+                        className={`px-3 py-1.25 border rounded-full text-xs transition-all ${expForm.participants.includes(m) ? 'border-ink bg-paper-2 text-ink' : 'border-line text-ink-3'}`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
+                  <label className="field-label">分攤方式</label>
+                  <div className="flex border border-line rounded-sm overflow-hidden mb-3">
+                    {(['equal', 'custom', 'percent'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setExpForm({ ...expForm, splitMode: mode })}
+                        className={`flex-1 py-1.75 text-[11px] tracking-wider transition-all ${expForm.splitMode === mode ? 'bg-ink text-paper' : 'bg-transparent text-ink-3'}`}
+                      >
+                        {mode === 'equal' ? '平均分攤' : mode === 'custom' ? '自訂金額' : '自訂比例%'}
+                      </button>
+                    ))}
+                  </div>
+                  {expForm.splitMode === 'equal' ? (
+                    expForm.participants.length > 0 && expForm.amount && (
+                      <div className="text-[11px] text-ink-3 tracking-wider mt-1">每人 NT$ {utils.fmt(utils.round2(parseFloat(expForm.amount) / expForm.participants.length))}</div>
+                    )
+                  ) : (
+                    <div className="flex flex-col gap-2.5 mt-2.5">
+                      {expForm.participants.map(p => (
+                        <div key={p} className="flex items-center gap-2.5">
+                          <div className="w-20 text-sm shrink-0">{p}</div>
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              value={expForm.customShares[p] || ''}
+                              onChange={e => setExpForm({ ...expForm, customShares: { ...expForm.customShares, [p]: e.target.value } })}
+                              placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
+                              step="0.01"
+                            />
+                          </div>
+                          <div className="text-xs text-ink-3 shrink-0">{expForm.splitMode === 'custom' ? 'NT$' : '%'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="field">
+                    <label className="field-label">付款人</label>
+                    <select value={tfForm.from} onChange={e => setTfForm({ ...tfForm, from: e.target.value })}>
+                      {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label className="field-label">收款人</label>
+                    <select value={tfForm.to} onChange={e => setTfForm({ ...tfForm, to: e.target.value })}>
+                      {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="field">
+                  <label className="field-label">金額 (NT$)</label>
+                  <input type="number" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
+                </div>
+                <div className="field">
+                  <label className="field-label">日期</label>
+                  <input type="date" value={tfForm.date} onChange={e => setTfForm({ ...tfForm, date: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label className="field-label">備註（選填）</label>
+                  <input type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
+                </div>
+              </>
+            )}
+
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addTransfer', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={addTransfer}>儲存</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={recordType === 'expense' ? addExpense : addTransfer}>儲存</button>
             </div>
           </Modal>
         )}
@@ -932,6 +965,41 @@ export default function App() {
               </button>
               <button className="btn btn-danger w-full" onClick={() => removeExpense(selectedExpense.id)}>
                 <Trash2 size={14} className="mr-1.5" /> 刪除此筆費用
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {modals.transferDetail && selectedTransfer && (
+          <Modal title="轉帳詳情" onClose={() => toggleModal('transferDetail', false)}>
+            <div className="mb-4.5">
+              <div className="flex items-center gap-2 text-xl font-medium mb-1">
+                {selectedTransfer.from} <ArrowRight size={16} className="text-ink-3" /> {selectedTransfer.to}
+              </div>
+              <div className="text-2xl font-medium tracking-tight mb-3">NT$ {utils.fmt(selectedTransfer.amount)}</div>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <div className="field-label">日期</div>
+                  <div className="text-sm">{selectedTransfer.date ? utils.fmtDate(selectedTransfer.date) : '未設定'}</div>
+                </div>
+                <div>
+                  <div className="field-label">建立時間</div>
+                  <div className="text-xs text-ink-3">{new Date(selectedTransfer.createdAt).toLocaleString('zh-TW')}</div>
+                </div>
+                {selectedTransfer.note && (
+                  <div className="col-span-2">
+                    <div className="field-label">備註</div>
+                    <div className="text-sm">{selectedTransfer.note}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 mt-2">
+              <button className="btn btn-primary w-full" onClick={() => openEditTransfer(selectedTransfer)}>
+                編輯此筆轉帳
+              </button>
+              <button className="btn btn-danger w-full" onClick={() => removeTransfer(selectedTransfer.id)}>
+                <Trash2 size={14} className="mr-1.5" /> 刪除此筆轉帳
               </button>
             </div>
           </Modal>

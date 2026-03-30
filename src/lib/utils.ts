@@ -1,4 +1,4 @@
-import { Group, MyGroup, Settlement, Expense } from './types';
+import { Group, MyGroup, Settlement, Expense } from '../types';
 
 const MY_GROUPS_KEY = 'warikan_my_groups';
 const GROUP_PREFIX = 'warikan_group_';
