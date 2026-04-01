@@ -844,49 +844,60 @@ export default function App() {
                     expForm.participants.length > 0 && expForm.amount && (
                       <div className="text-[11px] text-ink-3 tracking-wider mt-1">每人 NT$ {utils.fmt(utils.round2(parseFloat(expForm.amount) / expForm.participants.length))}</div>
                     )
-                  ) : (
-                    <div className="flex flex-col gap-2.5 mt-2.5">
-                      {expForm.participants.map(p => (
-                        <div key={p} className="flex items-center gap-2.5">
-                          <div className="w-20 text-sm shrink-0">{p}</div>
-                          <div className="flex-1">
-                            <input
-                              type="number"
-                              value={expForm.customShares[p] || ''}
-                              onChange={e =>
-                                setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }))
-                              }
-                              onBlur={e => {
-                                const newVal = e.target.value;
-                                const newShares = { ...expForm.customShares, [p]: newVal };
-
-                                const total = expForm.splitMode === 'custom'
-                                  ? parseFloat(expForm.amount) || 0
-                                  : 100;
-                                const filledVal = parseFloat(newVal) || 0;
-                                const otherParticipants = expForm.participants.filter(x => x !== p);
-                                const emptyOthers = otherParticipants.filter(x => !newShares[x] || newShares[x] === '');
-                                const filledOthersTotal = otherParticipants
-                                  .filter(x => newShares[x] && newShares[x] !== '')
-                                  .reduce((sum, x) => sum + (parseFloat(newShares[x]) || 0), 0);
-
-                                const remaining = total - filledVal - filledOthersTotal;
-                                if (emptyOthers.length > 0 && remaining >= 0) {
-                                  const each = utils.round2(remaining / emptyOthers.length);
-                                  emptyOthers.forEach(x => { newShares[x] = each.toString(); });
+                  ) : (() => {
+                    const total = expForm.splitMode === 'custom'
+                      ? parseFloat(expForm.amount) || 0
+                      : 100;
+                    const filledTotal = expForm.participants.reduce(
+                      (sum, x) => sum + (parseFloat(expForm.customShares[x]) || 0), 0
+                    );
+                    const remaining = utils.round2(total - filledTotal);
+                    const emptyParticipants = expForm.participants.filter(
+                      x => !expForm.customShares[x] || expForm.customShares[x] === ''
+                    );
+                    const canAutoFill = emptyParticipants.length > 0 && remaining > 0;
+                    const unit = expForm.splitMode === 'custom' ? 'NT$' : '%';
+                    return (
+                      <div className="flex flex-col gap-2.5 mt-2.5">
+                        {expForm.participants.map(p => (
+                          <div key={p} className="flex items-center gap-2.5">
+                            <div className="w-20 text-sm shrink-0">{p}</div>
+                            <div className="flex-1">
+                              <input
+                                type="number"
+                                value={expForm.customShares[p] || ''}
+                                onChange={e =>
+                                  setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }))
                                 }
-
+                                placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
+                                step="0.01"
+                              />
+                            </div>
+                            <div className="text-xs text-ink-3 shrink-0 w-8 text-right">{unit}</div>
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between mt-1 pt-2 border-t border-line">
+                          <span className={`text-xs tracking-wider ${Math.abs(remaining) < 0.01 ? 'text-green-600' : remaining < 0 ? 'text-red-500' : 'text-ink-3'}`}>
+                            剩餘：{remaining < 0 ? '-' : ''}{unit}{utils.fmt(Math.abs(remaining))}
+                          </span>
+                          {canAutoFill && (
+                            <button
+                              type="button"
+                              className="text-[11px] tracking-wider text-ink border border-line px-2.5 py-1 rounded-sm hover:bg-paper-2 transition-all"
+                              onClick={() => {
+                                const each = utils.round2(remaining / emptyParticipants.length);
+                                const newShares = { ...expForm.customShares };
+                                emptyParticipants.forEach(x => { newShares[x] = each.toString(); });
                                 setExpForm(f => ({ ...f, customShares: newShares }));
                               }}
-                              placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
-                              step="0.01"
-                            />
-                          </div>
-                          <div className="text-xs text-ink-3 shrink-0">{expForm.splitMode === 'custom' ? 'NT$' : '%'}</div>
+                            >
+                              平均分配剩餘
+                            </button>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </>
             ) : (
