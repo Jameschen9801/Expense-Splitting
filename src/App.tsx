@@ -853,20 +853,22 @@ export default function App() {
                             <input
                               type="number"
                               value={expForm.customShares[p] || ''}
-                              onChange={e => {
+                              onChange={e =>
+                                setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }))
+                              }
+                              onBlur={e => {
                                 const newVal = e.target.value;
                                 const newShares = { ...expForm.customShares, [p]: newVal };
 
-                                // Auto-fill remaining amount evenly to participants with empty fields
                                 const total = expForm.splitMode === 'custom'
                                   ? parseFloat(expForm.amount) || 0
                                   : 100;
                                 const filledVal = parseFloat(newVal) || 0;
                                 const otherParticipants = expForm.participants.filter(x => x !== p);
-                                const emptyOthers = otherParticipants.filter(x => !expForm.customShares[x] || expForm.customShares[x] === '');
+                                const emptyOthers = otherParticipants.filter(x => !newShares[x] || newShares[x] === '');
                                 const filledOthersTotal = otherParticipants
-                                  .filter(x => expForm.customShares[x] && expForm.customShares[x] !== '')
-                                  .reduce((sum, x) => sum + (parseFloat(expForm.customShares[x]) || 0), 0);
+                                  .filter(x => newShares[x] && newShares[x] !== '')
+                                  .reduce((sum, x) => sum + (parseFloat(newShares[x]) || 0), 0);
 
                                 const remaining = total - filledVal - filledOthersTotal;
                                 if (emptyOthers.length > 0 && remaining >= 0) {
@@ -874,7 +876,7 @@ export default function App() {
                                   emptyOthers.forEach(x => { newShares[x] = each.toString(); });
                                 }
 
-                                setExpForm({ ...expForm, customShares: newShares });
+                                setExpForm(f => ({ ...f, customShares: newShares }));
                               }}
                               placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
                               step="0.01"
