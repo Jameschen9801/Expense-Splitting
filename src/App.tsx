@@ -853,7 +853,29 @@ export default function App() {
                             <input
                               type="number"
                               value={expForm.customShares[p] || ''}
-                              onChange={e => setExpForm({ ...expForm, customShares: { ...expForm.customShares, [p]: e.target.value } })}
+                              onChange={e => {
+                                const newVal = e.target.value;
+                                const newShares = { ...expForm.customShares, [p]: newVal };
+
+                                // Auto-fill remaining amount evenly to participants with empty fields
+                                const total = expForm.splitMode === 'custom'
+                                  ? parseFloat(expForm.amount) || 0
+                                  : 100;
+                                const filledVal = parseFloat(newVal) || 0;
+                                const otherParticipants = expForm.participants.filter(x => x !== p);
+                                const emptyOthers = otherParticipants.filter(x => !expForm.customShares[x] || expForm.customShares[x] === '');
+                                const filledOthersTotal = otherParticipants
+                                  .filter(x => expForm.customShares[x] && expForm.customShares[x] !== '')
+                                  .reduce((sum, x) => sum + (parseFloat(expForm.customShares[x]) || 0), 0);
+
+                                const remaining = total - filledVal - filledOthersTotal;
+                                if (emptyOthers.length > 0 && remaining >= 0) {
+                                  const each = utils.round2(remaining / emptyOthers.length);
+                                  emptyOthers.forEach(x => { newShares[x] = each.toString(); });
+                                }
+
+                                setExpForm({ ...expForm, customShares: newShares });
+                              }}
                               placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
                               step="0.01"
                             />
