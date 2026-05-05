@@ -75,7 +75,20 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    setMyGroups(storage.getMyGroups());
+    const groups = storage.getMyGroups();
+    setMyGroups(groups);
+    const lastCode = storage.getLastGroup();
+    if (lastCode && groups.find(g => g.code === lastCode)) {
+      const data = storage.getGroup(lastCode);
+      const mg = groups.find(g => g.code === lastCode);
+      if (data && mg) {
+        setCurrentGroup(data);
+        setMyName(mg.myName);
+        setSettingsGroupName(data.name);
+        setCurrentPage('group');
+        setActiveTab('records');
+      }
+    }
   }, []);
 
   // 當使用者停留在群組頁面時，自動開啟 Firebase 監聽雙向綁定
@@ -152,12 +165,14 @@ export default function App() {
     setSettingsGroupName(data.name);
     setCurrentPage('group');
     setActiveTab('records');
+    storage.setLastGroup(code);
     // Firebase useEffect 會自動幫我們連線並更新
   };
 
   const goHome = () => {
     setCurrentPage('home');
     setMyGroups(storage.getMyGroups());
+    storage.clearLastGroup();
   };
 
   const createGroup = () => {
@@ -666,6 +681,41 @@ export default function App() {
                             </button>
                           </div>
                         ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="panel mt-4">
+                    <div className="panel-header p-4 border-b border-line"><span className="section-label">轉帳紀錄</span></div>
+                    <div className="px-4.5">
+                      {(currentGroup?.transfers.length || 0) === 0 ? (
+                        <div className="text-center py-8 text-ink-3 text-xs tracking-wider">尚無轉帳紀錄</div>
+                      ) : (
+                        [...(currentGroup?.transfers || [])]
+                          .sort((a, b) => {
+                            const dateCmp = (b.date || '').localeCompare(a.date || '');
+                            if (dateCmp !== 0) return dateCmp;
+                            return b.createdAt - a.createdAt;
+                          })
+                          .map(t => (
+                            <div
+                              key={t.id}
+                              onClick={() => { setSelectedTransfer(t); toggleModal('transferDetail', true); }}
+                              className="py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
+                            >
+                              <ArrowRight size={14} className="text-ink-4 shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[14px] font-medium text-ink truncate">
+                                  {t.from} <span className="text-ink-3 font-normal text-[12px] mx-1">轉給</span> {t.to}
+                                </div>
+                                <div className="text-[11px] text-ink-3 mt-0.5 truncate">
+                                  {t.date ? utils.fmtDate(t.date) : ''}{t.note ? ` · ${t.note}` : ''}
+                                </div>
+                              </div>
+                              <div className="ml-auto text-right shrink-0">
+                                <div className="text-[17px] font-medium tracking-[0.5px]">NT${utils.fmt(t.amount)}</div>
+                              </div>
+                            </div>
+                          ))
                       )}
                     </div>
                   </div>

@@ -2,6 +2,7 @@ import { Group, MyGroup, Settlement, Expense } from '../types';
 
 const MY_GROUPS_KEY = 'warikan_my_groups';
 const GROUP_PREFIX = 'warikan_group_';
+const LAST_GROUP_KEY = 'warikan_last_group';
 
 export const storage = {
   getMyGroups: (): MyGroup[] => {
@@ -23,7 +24,10 @@ export const storage = {
   },
   saveGroup: (code: string, group: Group) => {
     localStorage.setItem(GROUP_PREFIX + code, JSON.stringify(group));
-  }
+  },
+  getLastGroup: (): string | null => localStorage.getItem(LAST_GROUP_KEY),
+  setLastGroup: (code: string) => localStorage.setItem(LAST_GROUP_KEY, code),
+  clearLastGroup: () => localStorage.removeItem(LAST_GROUP_KEY),
 };
 
 export const utils = {
