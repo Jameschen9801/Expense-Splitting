@@ -3,25 +3,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ArrowLeft,
   Plus,
   MoreHorizontal,
   X,
   Copy,
-  Check,
   ArrowRight,
   Trash2,
-  Info,
-  ShoppingBag
+  RotateCcw,
+  RefreshCw
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
-import { subscribeToGroup, fetchGroupOnce, syncGroupToCloud } from './lib/firebase';
+import {
+  addMemberToCloud,
+  createGroupInCloud,
+  fetchGroupOnce,
+  removeExpenseFromCloud,
+  removeMemberFromCloud,
+  removeTransferFromCloud,
+  renameGroupInCloud,
+  subscribeToGroup,
+  upsertExpenseInCloud,
+  upsertTransferInCloud,
+} from './lib/firebase';
 
 type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
+type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
@@ -45,7 +55,10 @@ export default function App() {
   const [isEditingExpense, setIsEditingExpense] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
   const [isEditingTransfer, setIsEditingTransfer] = useState(false);
-  const [syncState, setSyncState] = useState<'syncing' | 'synced' | ''>('');
+  const [syncState, setSyncState] = useState<'syncing' | 'synced' | 'error' | ''>('');
+  const [syncRetryKey, setSyncRetryKey] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   // Form states
   const [newGroupName, setNewGroupName] = useState('');
@@ -72,7 +85,10 @@ export default function App() {
   });
 
   const [settingsGroupName, setSettingsGroupName] = useState('');
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const syncTimerRef = useRef<number | null>(null);
+  const pendingMutationsRef = useRef<Array<() => Promise<Group>>>([]);
 
   useEffect(() => {
     const groups = storage.getMyGroups();
@@ -94,30 +110,109 @@ export default function App() {
   // 當使用者停留在群組頁面時，自動開啟 Firebase 監聽雙向綁定
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    let disposed = false;
     if (currentPage === 'group' && currentGroup?.code) {
       setSyncState('syncing');
-      unsubscribe = subscribeToGroup(currentGroup.code, (cloudData) => {
-        if (cloudData) {
-          // 當雲端有任何風吹草動變更，立刻覆寫到畫面與本地！
-          setCurrentGroup(cloudData);
-          storage.saveGroup(currentGroup.code, cloudData);
-        }
-        setSyncState('synced'); // 綠燈
-        setTimeout(() => setSyncState(''), 2000); // 熄滅
-      });
+      subscribeToGroup(currentGroup.code, (cloudData) => {
+          if (cloudData) {
+            setCurrentGroup(cloudData);
+            storage.saveGroup(currentGroup.code, cloudData);
+          }
+          if (pendingMutationsRef.current.length > 0) {
+            setSyncState('error');
+          } else {
+            setSyncState('synced');
+            if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+            syncTimerRef.current = window.setTimeout(() => setSyncState(''), 2000);
+          }
+        }, () => setSyncState('error'))
+        .then(stopListening => {
+          if (disposed) stopListening();
+          else unsubscribe = stopListening;
+        })
+        .catch(() => setSyncState('error'));
     }
     return () => {
+      disposed = true;
       if (unsubscribe) unsubscribe();
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
     };
-  }, [currentPage, currentGroup?.code]);
+  }, [currentPage, currentGroup?.code, syncRetryKey]);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2200);
+  useEffect(() => () => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+  }, []);
+
+  const showToast = (message: string, action?: Omit<ToastState, 'message'>) => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    setToast({ message, ...action });
+    toastTimerRef.current = window.setTimeout(() => setToast(null), action ? 5000 : 2600);
+  };
+
+  const enterGroup = (data: Group, name: string) => {
+    setCurrentGroup(data);
+    setMyName(name);
+    setSettingsGroupName(data.name);
+    setCurrentPage('group');
+    setActiveTab('records');
+    storage.setLastGroup(data.code);
+  };
+
+  const persistGroupMutation = async (
+    optimisticGroup: Group,
+    mutation: () => Promise<Group>,
+    successMessage?: string,
+  ) => {
+    setCurrentGroup(optimisticGroup);
+    storage.saveGroup(optimisticGroup.code, optimisticGroup);
+    setSyncState('syncing');
+    try {
+      const cloudGroup = await mutation();
+      setCurrentGroup(cloudGroup);
+      storage.saveGroup(cloudGroup.code, cloudGroup);
+      setSyncState('synced');
+      if (successMessage) showToast(successMessage);
+      return true;
+    } catch {
+      pendingMutationsRef.current.push(mutation);
+      setSyncState('error');
+      showToast('已保存在此裝置，請按上方「重試同步」');
+      return false;
+    }
+  };
+
+  const retryPendingMutations = async () => {
+    if (pendingMutationsRef.current.length === 0) {
+      setSyncState('syncing');
+      setSyncRetryKey(key => key + 1);
+      return;
+    }
+    setIsSaving(true);
+    setSyncState('syncing');
+    try {
+      let latestGroup: Group | null = null;
+      while (pendingMutationsRef.current.length > 0) {
+        const mutation = pendingMutationsRef.current[0];
+        latestGroup = await mutation();
+        pendingMutationsRef.current.shift();
+      }
+      if (latestGroup) {
+        setCurrentGroup(latestGroup);
+        storage.saveGroup(latestGroup.code, latestGroup);
+      }
+      setSyncState('synced');
+      showToast('所有待同步變更已上傳');
+    } catch {
+      setSyncState('error');
+      showToast('同步仍未完成，請確認網路後再試一次');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const toggleModal = (key: keyof typeof modals, open: boolean) => {
     setModals(prev => ({ ...prev, [key]: open }));
+    setFormError('');
     if (key === 'addRecord' && open && currentGroup) {
       if (!isEditingExpense) {
         setExpForm({
@@ -160,13 +255,7 @@ export default function App() {
     const data = storage.getGroup(code);
     if (!data) return;
 
-    setCurrentGroup(data);
-    setMyName(mg.myName);
-    setSettingsGroupName(data.name);
-    setCurrentPage('group');
-    setActiveTab('records');
-    storage.setLastGroup(code);
-    // Firebase useEffect 會自動幫我們連線並更新
+    enterGroup(data, mg.myName);
   };
 
   const goHome = () => {
@@ -175,82 +264,97 @@ export default function App() {
     storage.clearLastGroup();
   };
 
-  const createGroup = () => {
+  const createGroup = async () => {
     if (!newGroupName.trim() || !newGroupMyName.trim()) {
-      showToast('請填寫群組名稱與你的名字');
+      setFormError('請填寫群組名稱與你的名字');
       return;
     }
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const data: Group = {
-      name: newGroupName,
-      code,
-      members: [newGroupMyName],
-      expenses: [],
-      transfers: [],
-      createdAt: Date.now()
-    };
-    storage.saveGroup(code, data);
-    
-    // 初始化一份空的 Firebase 資料
-    syncGroupToCloud(code, data);
+    setIsSaving(true);
+    setFormError('');
+    try {
+      let data: Group | null = null;
+      for (let attempt = 0; attempt < 5 && !data; attempt++) {
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        const candidate: Group = {
+          name: newGroupName.trim(),
+          code,
+          members: [newGroupMyName.trim()],
+          expenses: [],
+          transfers: [],
+          createdAt: Date.now()
+        };
+        if (await createGroupInCloud(candidate)) data = candidate;
+      }
+      if (!data) throw new Error('無法建立唯一邀請碼');
 
-    const updated = [...myGroups, { code, name: newGroupName, myName: newGroupMyName }];
-    storage.saveMyGroups(updated);
-    setMyGroups(updated);
-
-    toggleModal('createGroup', false);
-    setNewGroupName('');
-    setNewGroupMyName('');
-    openGroup(code);
+      storage.saveGroup(data.code, data);
+      const updated = [...myGroups, { code: data.code, name: data.name, myName: newGroupMyName.trim() }];
+      storage.saveMyGroups(updated);
+      setMyGroups(updated);
+      toggleModal('createGroup', false);
+      setNewGroupName('');
+      setNewGroupMyName('');
+      enterGroup(data, newGroupMyName.trim());
+      showToast('群組已建立');
+    } catch {
+      setFormError('建立失敗，請確認網路連線後再試一次');
+      setSyncState('error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const joinGroup = async () => {
     if (!joinCode.trim() || !joinMyName.trim()) {
-      showToast('請填寫邀請碼與你的名字');
+      setFormError('請填寫邀請碼與你的名字');
       return;
     }
-    
+    if (!/^\d{6}$/.test(joinCode.trim())) {
+      setFormError('邀請碼必須是 6 位數字');
+      return;
+    }
+
+    setIsSaving(true);
+    setFormError('');
     setSyncState('syncing');
-    let data = storage.getGroup(joinCode);
-    
-    if (!data) {
-      showToast('本地無資料，正從 Firebase 同步中...');
-      try {
-        const cloudData = await fetchGroupOnce(joinCode);
-        if (!cloudData) {
-          showToast('雲端找不到此邀請碼！');
-          setSyncState('');
-          return;
-        }
-        data = cloudData;
-        showToast('🎉 雲端群組同步成功！');
-      } catch (err) {
-        showToast('雲端同步失敗，請檢查網路。');
+    try {
+      const code = joinCode.trim();
+      const name = joinMyName.trim();
+      const cloudData = await fetchGroupOnce(code);
+      if (!cloudData) {
+        setFormError('找不到此邀請碼，請向群組成員確認');
         setSyncState('');
         return;
       }
-    }
+      const existingLocalMembership = myGroups.some(group => group.code === code && group.myName === name);
+      if (cloudData.members.includes(name) && !existingLocalMembership) {
+        setFormError('此名稱已有人使用，請換一個顯示名稱');
+        setSyncState('');
+        return;
+      }
+      const data = cloudData.members.includes(name)
+        ? cloudData
+        : await addMemberToCloud(code, name);
+      storage.saveGroup(code, data);
 
-    if (!data.members.includes(joinMyName)) {
-      data.members.push(joinMyName);
-    }
-    storage.saveGroup(joinCode, data);
-    
-    // 將自己加入並直接暴力覆寫回 Firebase 即可！
-    syncGroupToCloud(joinCode, data);
-
-    const updated = [...myGroups];
-    if (!updated.find(g => g.code === joinCode)) {
-      updated.push({ code: joinCode, name: data.name, myName: joinMyName });
+      const updated = myGroups.some(group => group.code === code)
+        ? myGroups.map(group => group.code === code ? { ...group, name: data.name, myName: name } : group)
+        : [...myGroups, { code, name: data.name, myName: name }];
       storage.saveMyGroups(updated);
       setMyGroups(updated);
+
+      toggleModal('joinGroup', false);
+      setJoinCode('');
+      setJoinMyName('');
+      enterGroup(data, name);
+      setSyncState('synced');
+      showToast('已加入群組');
+    } catch {
+      setFormError('加入失敗，請確認網路連線後再試一次');
+      setSyncState('error');
+    } finally {
+      setIsSaving(false);
     }
-    
-    toggleModal('joinGroup', false);
-    setJoinCode('');
-    setJoinMyName('');
-    openGroup(joinCode);
-    setSyncState('');
   };
 
   const openEditExpense = (e: Expense) => {
@@ -276,35 +380,41 @@ export default function App() {
     setRecordType('expense');
   };
 
-  const addExpense = () => {
+  const addExpense = async () => {
     if (!currentGroup) return;
     const { desc, amount, payer, participants, splitMode, date, customShares } = expForm;
     const amt = parseFloat(amount);
-    if (!desc.trim()) { showToast('請填寫說明'); return; }
-    if (isNaN(amt) || amt <= 0) { showToast('請填寫有效金額'); return; }
-    if (!payer) { showToast('請選擇付款人'); return; }
-    if (participants.length === 0) { showToast('請選擇至少一位分攤對象'); return; }
+    setFormError('');
+    if (!desc.trim()) { setFormError('請填寫費用說明'); return; }
+    if (isNaN(amt) || amt <= 0) { setFormError('請填寫大於 0 的有效金額'); return; }
+    if (!payer) { setFormError('請選擇付款人'); return; }
+    if (participants.length === 0) { setFormError('請選擇至少一位分攤對象'); return; }
 
     let shares: Share[] = [];
     if (splitMode !== 'equal') {
-      let total = 0;
-      participants.forEach(p => {
+      const rawShares = participants.map(p => {
         const val = parseFloat(customShares[p] || '0');
-        total += val;
-        shares.push({ name: p, amount: val });
+        return { name: p, amount: val };
       });
+      if (rawShares.some(share => !Number.isFinite(share.amount) || share.amount < 0)) {
+        setFormError('分攤數值必須是 0 或正數');
+        return;
+      }
+      const total = rawShares.reduce((sum, share) => sum + share.amount, 0);
 
       if (splitMode === 'percent') {
-        if (Math.abs(total - 100) > 0.01) { showToast('比例總和須為 100%'); return; }
-        shares = shares.map(s => ({ name: s.name, amount: utils.round2(amt * s.amount / 100) }));
+        if (rawShares.some(share => share.amount > 100)) { setFormError('單一成員的比例不能超過 100%'); return; }
+        if (Math.abs(total - 100) > 0.001) { setFormError('比例總和必須等於 100%'); return; }
+        shares = utils.percentShares(amt, rawShares);
       } else {
-        if (Math.abs(amt - total) > 0.05) { showToast(`金額加總與費用不符`); return; }
+        if (utils.toCents(amt) !== utils.toCents(total)) { setFormError('分攤金額加總必須等於費用金額'); return; }
+        shares = rawShares.map(share => ({ ...share, amount: utils.fromCents(utils.toCents(share.amount)) }));
       }
     }
 
     const expense: Expense = {
       id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + Date.now(),
-      desc, amount: utils.round2(amt), payer, participants, splitMode, shares,
+      desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
     };
 
@@ -316,26 +426,31 @@ export default function App() {
     }
 
     const updated = { ...currentGroup, expenses: updatedExpenses };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
-
-    toggleModal('addRecord', false);
-    setIsEditingExpense(false);
-    showToast(isEditingExpense ? '費用已更新' : '費用已新增');
+    setIsSaving(true);
+    const success = await persistGroupMutation(
+      updated,
+      () => upsertExpenseInCloud(updated.code, expense),
+      isEditingExpense ? '費用已更新' : '費用已新增',
+    );
+    setIsSaving(false);
+    if (success) {
+      toggleModal('addRecord', false);
+      setIsEditingExpense(false);
+    }
   };
 
-  const addTransfer = () => {
+  const addTransfer = async () => {
     if (!currentGroup) return;
     const { from, to, amount, date, note } = tfForm;
     const amt = parseFloat(amount);
-    if (!from || !to) { showToast('請選擇付款人與收款人'); return; }
-    if (from === to) { showToast('付款人與收款人不能相同'); return; }
-    if (isNaN(amt) || amt <= 0) { showToast('請填寫有效金額'); return; }
+    setFormError('');
+    if (!from || !to) { setFormError('請選擇付款人與收款人'); return; }
+    if (from === to) { setFormError('付款人與收款人不能相同'); return; }
+    if (isNaN(amt) || amt <= 0) { setFormError('請填寫大於 0 的有效金額'); return; }
 
     const tf: Transfer = {
       id: isEditingTransfer && selectedTransfer ? selectedTransfer.id : 't' + Date.now(),
-      from, to, amount: utils.round2(amt), note,
+      from, to, amount: utils.fromCents(utils.toCents(amt)), note: note.trim(),
       date, createdAt: isEditingTransfer && selectedTransfer ? selectedTransfer.createdAt : Date.now()
     };
     
@@ -347,49 +462,76 @@ export default function App() {
     }
     
     const updated = { ...currentGroup, transfers: updatedTransfers };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
-
-    toggleModal('addRecord', false);
-    setIsEditingTransfer(false);
-    showToast(isEditingTransfer ? '轉帳已更新' : '轉帳已記錄');
+    setIsSaving(true);
+    const success = await persistGroupMutation(
+      updated,
+      () => upsertTransferInCloud(updated.code, tf),
+      isEditingTransfer ? '轉帳已更新' : '轉帳已記錄',
+    );
+    setIsSaving(false);
+    if (success) {
+      toggleModal('addRecord', false);
+      setIsEditingTransfer(false);
+    }
   };
 
-  const removeExpense = (id: string) => {
+  const removeExpense = async (id: string) => {
     if (!currentGroup) return;
     const target = currentGroup.expenses.find(e => e.id === id);
+    if (!target) return;
     const updated = { ...currentGroup, expenses: currentGroup.expenses.filter(e => e.id !== id) };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
-
-    showToast('已刪除');
     toggleModal('expenseDetail', false);
+    const success = await persistGroupMutation(
+      updated,
+      () => removeExpenseFromCloud(updated.code, id),
+    );
+    if (success) {
+      showToast('費用已刪除', {
+        actionLabel: '復原',
+        onAction: async () => {
+          const restored = { ...updated, expenses: [...updated.expenses, target] };
+          setToast(null);
+          await persistGroupMutation(restored, () => upsertExpenseInCloud(updated.code, target), '費用已復原');
+        },
+      });
+    }
   };
 
-  const removeTransfer = (id: string) => {
+  const removeTransfer = async (id: string) => {
     if (!currentGroup) return;
     const target = currentGroup.transfers.find(t => t.id === id);
+    if (!target) return;
     const updated = { ...currentGroup, transfers: currentGroup.transfers.filter(t => t.id !== id) };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
-
-    showToast('已刪除');
     toggleModal('transferDetail', false);
+    const success = await persistGroupMutation(
+      updated,
+      () => removeTransferFromCloud(updated.code, id),
+    );
+    if (success) {
+      showToast('轉帳已刪除', {
+        actionLabel: '復原',
+        onAction: async () => {
+          const restored = { ...updated, transfers: [...updated.transfers, target] };
+          setToast(null);
+          await persistGroupMutation(restored, () => upsertTransferInCloud(updated.code, target), '轉帳已復原');
+        },
+      });
+    }
   };
 
-  const addMember = (name: string) => {
-    if (!currentGroup || !name.trim()) return;
-    if (currentGroup.members.includes(name)) { showToast('此成員已存在'); return; }
-    const updated = { ...currentGroup, members: [...currentGroup.members, name] };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    showToast(`已新增 ${name}`);
+  const addMember = async (name: string) => {
+    const trimmedName = name.trim();
+    if (!currentGroup || !trimmedName) return false;
+    if (currentGroup.members.includes(trimmedName)) { showToast('此成員已存在'); return false; }
+    const updated = { ...currentGroup, members: [...currentGroup.members, trimmedName] };
+    return persistGroupMutation(
+      updated,
+      () => addMemberToCloud(updated.code, trimmedName),
+      `已新增 ${trimmedName}`,
+    );
   };
 
-  const removeMember = (name: string) => {
+  const removeMember = async (name: string) => {
     if (!currentGroup) return;
     if (name === myName) { showToast('無法移除自己'); return; }
     
@@ -408,21 +550,29 @@ export default function App() {
       .some(e => e.payer === name || (e as any).participants?.includes(name) || (e as any).from === name || (e as any).to === name);
     if (inUse) { showToast('此成員有費用記錄，無法移除'); return; }
     const updated = { ...currentGroup, members: currentGroup.members.filter(m => m !== name) };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    syncGroupToCloud(updated.code, updated); // Firebase 覆寫
+    await persistGroupMutation(
+      updated,
+      () => removeMemberFromCloud(updated.code, name),
+      `已移除 ${name}`,
+    );
   };
 
-  const saveGroupSettings = () => {
+  const saveGroupSettings = async () => {
     if (!currentGroup || !settingsGroupName.trim()) return;
-    const updated = { ...currentGroup, name: settingsGroupName };
-    setCurrentGroup(updated);
-    storage.saveGroup(updated.code, updated);
-    const updatedMyGroups = myGroups.map(g => g.code === updated.code ? { ...g, name: settingsGroupName } : g);
+    const name = settingsGroupName.trim();
+    const updated = { ...currentGroup, name };
+    setIsSaving(true);
+    const success = await persistGroupMutation(
+      updated,
+      () => renameGroupInCloud(updated.code, name),
+      '群組名稱已更新',
+    );
+    setIsSaving(false);
+    if (!success) return;
+    const updatedMyGroups = myGroups.map(g => g.code === updated.code ? { ...g, name } : g);
     setMyGroups(updatedMyGroups);
     storage.saveMyGroups(updatedMyGroups);
     toggleModal('groupSettings', false);
-    showToast('已儲存');
   };
 
   const leaveGroup = () => {
@@ -457,16 +607,9 @@ export default function App() {
   }, [currentGroup, myName]);
 
   return (
-    <div className="min-h-screen flex flex-col font-sans">
-      <AnimatePresence mode="wait">
-        {currentPage === 'home' ? (
-          <motion.div
-            key="home"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col min-h-screen"
-          >
+    <div className="min-h-[100dvh] flex flex-col font-sans">
+      {currentPage === 'home' ? (
+          <div className="page-enter flex flex-col min-h-[100dvh]">
             <nav className="topbar h-13 bg-paper border-b border-line px-5 flex items-center justify-between sticky top-0 z-50">
               <div>
                 <div className="font-serif text-[17px] font-semibold tracking-[3px]">分帳小工具</div>
@@ -474,7 +617,7 @@ export default function App() {
               </div>
             </nav>
 
-            <div className="flex-1 flex flex-col items-center justify-center p-6 gap-12">
+            <div className="flex-1 flex flex-col items-center justify-center p-5 sm:p-6 gap-8 sm:gap-10">
               <div className="text-center">
                 <div className="w-10 h-px bg-line mx-auto my-5"></div>
                 <p className="text-xs tracking-[2px] text-ink-3">與朋友一起記錄每一筆花費</p>
@@ -512,30 +655,38 @@ export default function App() {
                 <button className="btn w-full md:w-auto" onClick={() => toggleModal('joinGroup', true)}>加入群組</button>
               </div>
             </div>
-          </motion.div>
+          </div>
         ) : (
-          <motion.div
-            key="group"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex flex-col min-h-screen"
-          >
+          <div className="page-enter flex flex-col min-h-[100dvh]">
             <nav className="topbar h-13 bg-paper border-b border-line px-5 flex items-center justify-between sticky top-0 z-50">
-              <button className="icon-btn text-xl" onClick={goHome}><ArrowLeft size={20} /></button>
+              <button className="icon-btn text-xl" onClick={goHome} aria-label="返回我的群組"><ArrowLeft size={20} /></button>
               <div className="text-center">
                 <div className="font-serif text-sm tracking-[2px]">{currentGroup?.name}</div>
                 <div className="text-[10px] tracking-[2px] text-ink-3">{currentGroup?.code}</div>
               </div>
               <div className="flex items-center gap-2">
-                <button 
-                  className="icon-btn text-[11px] font-medium px-2 py-1 flex items-center gap-1 transition-all text-green-600 bg-green-50/50" 
-                  title="Firebase 即時連線狀態"
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : syncState === 'synced' ? 'bg-green-600' : 'bg-green-600'}`}></span>
-                  即時連線中
-                </button>
-                <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)}>
+                {syncState === 'error' ? (
+                  <button
+                    type="button"
+                    className="sync-status text-red-700 bg-red-50 hover:bg-red-100"
+                    onClick={retryPendingMutations}
+                    disabled={isSaving}
+                    title="重新上傳尚未同步的變更"
+                  >
+                    <RefreshCw size={13} aria-hidden="true" />
+                    重試同步
+                  </button>
+                ) : (
+                  <div
+                    className={`sync-status ${syncState === 'syncing' ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50'}`}
+                    role="status"
+                    title="雲端同步狀態"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-green-600'}`}></span>
+                    {syncState === 'syncing' ? '同步中' : '已連線'}
+                  </div>
+                )}
+                <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)} aria-label="開啟群組設定">
                   <MoreHorizontal size={18} />
                 </button>
               </div>
@@ -575,16 +726,17 @@ export default function App() {
                               let myCost = 0;
                               if (e.participants.includes(myName)) {
                                 if (e.splitMode === 'equal') {
-                                  myCost = e.amount / e.participants.length;
+                                  myCost = utils.equalShares(e.amount, e.participants).find(share => share.name === myName)?.amount || 0;
                                 } else if (e.shares) {
                                   myCost = e.shares.find(s => s.name === myName)?.amount || 0;
                                 }
                               }
                               return (
-                                <div
+                                <button
+                                  type="button"
                                   key={e.id}
                                   onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
-                                  className="py-3 border-b border-line last:border-b-0 flex items-center justify-between gap-3 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
+                                  className="w-[calc(100%+2.25rem)] text-left py-3 border-b border-line last:border-b-0 flex items-center justify-between gap-3 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5 focus-visible:bg-paper-2"
                                 >
                                   <div className="min-w-0 flex-1">
                                     <div className="text-[16px] tracking-wide font-medium text-ink truncate">{e.desc}</div>
@@ -592,15 +744,16 @@ export default function App() {
                                   </div>
                                   {myCost > 0 && (
                                     <div className="text-right shrink-0">
-                                      <div className="text-[20px] font-medium tracking-[0.5px] text-[#f87171]">NT${utils.fmt(myCost)}</div>
+                                      <div className="text-[11px] text-ink-3 mb-0.5">你的分攤</div>
+                                      <div className="text-[18px] font-medium tracking-[0.5px] text-red-700">NT${utils.fmt(myCost)}</div>
                                     </div>
                                   )}
-                                </div>
+                                </button>
                               );
                             } else {
                               const t = item as Transfer;
                               return (
-                                <div key={t.id} onClick={() => { setSelectedTransfer(t); toggleModal('transferDetail', true); }} className="py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5">
+                                <button type="button" key={t.id} onClick={() => { setSelectedTransfer(t); toggleModal('transferDetail', true); }} className="w-[calc(100%+2.25rem)] text-left py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 focus-visible:bg-paper-2 -mx-4.5 px-4.5">
                                   <ArrowRight size={14} className="text-ink-4 shrink-0" />
                                   <div className="min-w-0 flex-1">
                                     <div className="text-[14px] font-medium text-ink truncate">{t.from} <span className="text-ink-3 font-normal text-[12px] mx-1">轉給</span> {t.to}</div>
@@ -609,7 +762,7 @@ export default function App() {
                                   <div className="ml-auto text-right">
                                     <div className="text-[17px] font-medium tracking-[0.5px]">NT${utils.fmt(t.amount)}</div>
                                   </div>
-                                </div>
+                                </button>
                               );
                             }
                           })}
@@ -666,18 +819,26 @@ export default function App() {
                             </div>
                             <button
                               className="btn btn-sm btn-ghost w-full text-[11px] tracking-wider"
-                              onClick={() => {
+                              disabled={isSaving}
+                              onClick={async () => {
+                                setIsSaving(true);
                                 const tf: Transfer = {
                                   id: 't' + Date.now(), from: s.from, to: s.to, amount: s.amount,
                                   note: '結算轉帳', date: utils.todayStr(), createdAt: Date.now()
                                 };
                                 const updated = { ...currentGroup!, transfers: [...currentGroup!.transfers, tf] };
-                                setCurrentGroup(updated);
-                                storage.saveGroup(updated.code, updated);
-                                showToast(`已記錄：${s.from} → ${s.to} NT$ ${utils.fmt(s.amount)}`);
+                                try {
+                                  await persistGroupMutation(
+                                    updated,
+                                    () => upsertTransferInCloud(updated.code, tf),
+                                    `已記錄：${s.from} → ${s.to} NT$ ${utils.fmt(s.amount)}`,
+                                  );
+                                } finally {
+                                  setIsSaving(false);
+                                }
                               }}
                             >
-                              ✓ &nbsp;完成轉帳，記錄此筆
+                              {isSaving ? '同步中…' : '✓ 完成轉帳，記錄此筆'}
                             </button>
                           </div>
                         ))
@@ -697,10 +858,11 @@ export default function App() {
                             return b.createdAt - a.createdAt;
                           })
                           .map(t => (
-                            <div
+                            <button
+                              type="button"
                               key={t.id}
                               onClick={() => { setSelectedTransfer(t); toggleModal('transferDetail', true); }}
-                              className="py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5"
+                              className="w-[calc(100%+2.25rem)] text-left py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 focus-visible:bg-paper-2 -mx-4.5 px-4.5"
                             >
                               <ArrowRight size={14} className="text-ink-4 shrink-0" />
                               <div className="min-w-0 flex-1">
@@ -714,7 +876,7 @@ export default function App() {
                               <div className="ml-auto text-right shrink-0">
                                 <div className="text-[17px] font-medium tracking-[0.5px]">NT${utils.fmt(t.amount)}</div>
                               </div>
-                            </div>
+                            </button>
                           ))
                       )}
                     </div>
@@ -777,25 +939,25 @@ export default function App() {
                 </div>
               )}
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
       {/* Modals */}
-      <AnimatePresence>
+      <>
         {modals.createGroup && (
           <Modal title="建立群組" onClose={() => toggleModal('createGroup', false)}>
             <div className="field">
-              <label className="field-label">群組名稱</label>
-              <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="例：京都旅行" maxLength={20} />
+              <label className="field-label" htmlFor="create-group-name">群組名稱</label>
+              <input id="create-group-name" type="text" value={newGroupName} onChange={e => { setNewGroupName(e.target.value); setFormError(''); }} placeholder="例：京都旅行" maxLength={20} autoComplete="off" />
             </div>
             <div className="field">
-              <label className="field-label">你的名字</label>
-              <input type="text" value={newGroupMyName} onChange={e => setNewGroupMyName(e.target.value)} placeholder="你在群組中的顯示名稱" maxLength={12} />
+              <label className="field-label" htmlFor="create-member-name">你的名字</label>
+              <input id="create-member-name" type="text" value={newGroupMyName} onChange={e => { setNewGroupMyName(e.target.value); setFormError(''); }} placeholder="你在群組中的顯示名稱" maxLength={12} autoComplete="name" />
             </div>
+            {formError && <div className="form-error" role="alert">{formError}</div>}
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('createGroup', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={createGroup}>建立</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('createGroup', false)} disabled={isSaving}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={createGroup} disabled={isSaving}>{isSaving ? '建立中…' : '建立'}</button>
             </div>
           </Modal>
         )}
@@ -803,16 +965,17 @@ export default function App() {
         {modals.joinGroup && (
           <Modal title="加入群組" onClose={() => toggleModal('joinGroup', false)}>
             <div className="field">
-              <label className="field-label">邀請碼（6位數字）</label>
-              <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value)} placeholder="123456" maxLength={6} className="text-xl tracking-[6px] font-mono" />
+              <label className="field-label" htmlFor="join-code">邀請碼（6 位數字）</label>
+              <input id="join-code" type="text" inputMode="numeric" pattern="[0-9]*" value={joinCode} onChange={e => { setJoinCode(e.target.value.replace(/\D/g, '')); setFormError(''); }} placeholder="123456" maxLength={6} className="text-xl tracking-[6px] font-mono" autoComplete="one-time-code" />
             </div>
             <div className="field">
-              <label className="field-label">你的名字</label>
-              <input type="text" value={joinMyName} onChange={e => setJoinMyName(e.target.value)} placeholder="你在群組中的顯示名稱" maxLength={12} />
+              <label className="field-label" htmlFor="join-member-name">你的名字</label>
+              <input id="join-member-name" type="text" value={joinMyName} onChange={e => { setJoinMyName(e.target.value); setFormError(''); }} placeholder="你在群組中的顯示名稱" maxLength={12} autoComplete="name" />
             </div>
+            {formError && <div className="form-error" role="alert">{formError}</div>}
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('joinGroup', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={joinGroup}>加入</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('joinGroup', false)} disabled={isSaving}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={joinGroup} disabled={isSaving}>{isSaving ? '加入中…' : '加入'}</button>
             </div>
           </Modal>
         )}
@@ -921,6 +1084,7 @@ export default function App() {
                                 }
                                 placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
                                 step="0.01"
+                                min="0"
                               />
                             </div>
                             <div className="text-xs text-ink-3 shrink-0 w-8 text-right">{unit}</div>
@@ -935,9 +1099,20 @@ export default function App() {
                               type="button"
                               className="text-[11px] tracking-wider text-ink border border-line px-2.5 py-1 rounded-sm hover:bg-paper-2 transition-all"
                               onClick={() => {
-                                const each = utils.round2(remaining / emptyParticipants.length);
                                 const newShares = { ...expForm.customShares };
-                                emptyParticipants.forEach(x => { newShares[x] = each.toString(); });
+                                if (expForm.splitMode === 'custom') {
+                                  utils.equalShares(remaining, emptyParticipants).forEach(share => {
+                                    newShares[share.name] = share.amount.toFixed(2);
+                                  });
+                                } else {
+                                  const remainingBasisPoints = Math.round(remaining * 100);
+                                  const base = Math.floor(remainingBasisPoints / emptyParticipants.length);
+                                  let remainder = remainingBasisPoints - base * emptyParticipants.length;
+                                  emptyParticipants.forEach(name => {
+                                    const basisPoints = base + (remainder-- > 0 ? 1 : 0);
+                                    newShares[name] = (basisPoints / 100).toFixed(2);
+                                  });
+                                }
                                 setExpForm(f => ({ ...f, customShares: newShares }));
                               }}
                             >
@@ -981,9 +1156,10 @@ export default function App() {
               </>
             )}
 
+            {formError && <div className="form-error" role="alert">{formError}</div>}
             <div className="flex justify-end gap-2 mt-4">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={recordType === 'expense' ? addExpense : addTransfer}>儲存</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)} disabled={isSaving}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={recordType === 'expense' ? addExpense : addTransfer} disabled={isSaving}>{isSaving ? '同步中…' : '儲存'}</button>
             </div>
           </Modal>
         )}
@@ -999,7 +1175,7 @@ export default function App() {
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('groupSettings', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={saveGroupSettings}>儲存</button>
+              <button className="btn btn-primary btn-sm" onClick={saveGroupSettings} disabled={isSaving}>{isSaving ? '同步中…' : '儲存'}</button>
             </div>
           </Modal>
         )}
@@ -1030,9 +1206,9 @@ export default function App() {
               <div className="field-label mb-2">各人分攤金額</div>
               <div className="flex flex-col">
                 {selectedExpense.splitMode === 'equal' ? (
-                  selectedExpense.participants.map(p => (
-                    <div key={p} className="flex justify-between py-1.5 border-b border-line text-sm">
-                      <span>{p}</span><span>NT$ {utils.fmt(utils.round2(selectedExpense.amount / selectedExpense.participants.length))}</span>
+                  utils.equalShares(selectedExpense.amount, selectedExpense.participants).map(share => (
+                    <div key={share.name} className="flex justify-between py-1.5 border-b border-line text-sm">
+                      <span>{share.name}</span><span>NT$ {utils.fmt(share.amount)}</span>
                     </div>
                   ))
                 ) : (
@@ -1089,40 +1265,95 @@ export default function App() {
             </div>
           </Modal>
         )}
-      </AnimatePresence>
+      </>
 
       {/* Toast */}
-      <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 bg-ink text-paper px-5 py-2.5 rounded-sm text-xs tracking-wider z-[999] transition-opacity duration-200 pointer-events-none ${toast ? 'opacity-100' : 'opacity-0'}`}>
-        {toast}
+      <div
+        className={`fixed bottom-5 left-1/2 -translate-x-1/2 bg-ink text-paper px-4 py-3 rounded-sm text-sm z-[999] transition-opacity duration-200 flex items-center gap-4 max-w-[calc(100%-2rem)] shadow-lg ${toast ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        role="status"
+        aria-live="polite"
+      >
+        <span>{toast?.message}</span>
+        {toast?.onAction && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-paper underline underline-offset-4 font-medium whitespace-nowrap min-h-8"
+            onClick={toast.onAction}
+          >
+            <RotateCcw size={14} aria-hidden="true" />
+            {toast.actionLabel}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 function Modal({ title, children, onClose }: { title: string, children: React.ReactNode, onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const titleId = `dialog-${title.replace(/\s/g, '-')}`;
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const firstFocusable = dialog?.querySelector<HTMLElement>(focusableSelector);
+    (firstFocusable || dialog)?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll(focusableSelector)) as HTMLElement[];
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, []);
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-ink/40 z-[200] flex items-center justify-center p-5"
+    <div
+      className="modal-backdrop fixed inset-0 bg-ink/40 z-[200] flex items-center justify-center p-5"
       onClick={onClose}
     >
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 12 }}
-        className="bg-paper border border-line rounded-sm w-full max-w-[440px] max-h-[90vh] overflow-y-auto shadow-lg"
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="modal-panel bg-paper border border-line rounded-sm w-full max-w-[440px] max-h-[90vh] overflow-y-auto shadow-lg"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-4.5 border-b border-line flex items-center justify-between">
-          <span className="font-serif text-[15px] tracking-[2px]">{title}</span>
-          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+          <span id={titleId} className="font-serif text-[15px] tracking-[2px]">{title}</span>
+          <button className="icon-btn" onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button>
         </div>
         <div className="p-5">
           {children}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

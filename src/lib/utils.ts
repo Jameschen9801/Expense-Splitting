@@ -1,4 +1,4 @@
-import { Group, MyGroup, Settlement, Expense } from '../types';
+import { Group, MyGroup, Settlement, Expense, Share } from '../types';
 
 const MY_GROUPS_KEY = 'warikan_my_groups';
 const GROUP_PREFIX = 'warikan_group_';
@@ -32,6 +32,8 @@ export const storage = {
 
 export const utils = {
   round2: (n: number) => Math.round(n * 100) / 100,
+  toCents: (n: number) => Math.round(n * 100),
+  fromCents: (n: number) => n / 100,
   fmt: (n: number) => Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
   fmtDate: (dateStr: string) => {
     if (!dateStr) return '未設定日期';
@@ -42,40 +44,62 @@ export const utils = {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   },
+  equalShares: (amount: number, participants: string[]): Share[] => {
+    if (participants.length === 0) return [];
+    const totalCents = utils.toCents(amount);
+    const baseCents = Math.floor(totalCents / participants.length);
+    let remainder = totalCents - baseCents * participants.length;
+    return participants.map(name => {
+      const cents = baseCents + (remainder-- > 0 ? 1 : 0);
+      return { name, amount: utils.fromCents(cents) };
+    });
+  },
+  percentShares: (amount: number, percentages: Share[]): Share[] => {
+    const totalCents = utils.toCents(amount);
+    let allocated = 0;
+    return percentages.map((share, index) => {
+      const cents = index === percentages.length - 1
+        ? totalCents - allocated
+        : Math.round(totalCents * share.amount / 100);
+      allocated += cents;
+      return { name: share.name, amount: utils.fromCents(cents) };
+    });
+  },
   calcBalances: (group: Group) => {
     const bal: Record<string, number> = {};
     group.members.forEach(m => bal[m] = 0);
 
     group.expenses.forEach(e => {
-      bal[e.payer] = (bal[e.payer] || 0) + e.amount;
+      bal[e.payer] = (bal[e.payer] || 0) + utils.toCents(e.amount);
       if (e.splitMode === 'equal') {
-        const share = utils.round2(e.amount / e.participants.length);
-        e.participants.forEach(p => {
-          bal[p] = (bal[p] || 0) - share;
+        utils.equalShares(e.amount, e.participants).forEach(share => {
+          bal[share.name] = (bal[share.name] || 0) - utils.toCents(share.amount);
         });
       } else if (e.shares) {
         e.shares.forEach(s => {
-          bal[s.name] = (bal[s.name] || 0) - utils.round2(s.amount);
+          bal[s.name] = (bal[s.name] || 0) - utils.toCents(s.amount);
         });
       }
     });
 
     group.transfers.forEach(t => {
-      bal[t.from] = (bal[t.from] || 0) + t.amount;
-      bal[t.to] = (bal[t.to] || 0) - t.amount;
+      bal[t.from] = (bal[t.from] || 0) + utils.toCents(t.amount);
+      bal[t.to] = (bal[t.to] || 0) - utils.toCents(t.amount);
     });
 
-    return bal;
+    return Object.fromEntries(Object.entries(bal).map(([name, cents]) => [name, utils.fromCents(cents)]));
   },
   calcSettlements: (balances: Record<string, number>): Settlement[] => {
     const debtors = Object.entries(balances)
-      .filter(([, v]) => v < -0.005)
-      .map(([k, v]) => ({ name: k, amt: -v }))
+      .map(([name, amount]) => ({ name, cents: utils.toCents(amount) }))
+      .filter(item => item.cents < 0)
+      .map(item => ({ name: item.name, amt: -item.cents }))
       .sort((a, b) => b.amt - a.amt);
     
     const creditors = Object.entries(balances)
-      .filter(([, v]) => v > 0.005)
-      .map(([k, v]) => ({ name: k, amt: v }))
+      .map(([name, amount]) => ({ name, cents: utils.toCents(amount) }))
+      .filter(item => item.cents > 0)
+      .map(item => ({ name: item.name, amt: item.cents }))
       .sort((a, b) => b.amt - a.amt);
 
     const result: Settlement[] = [];
@@ -88,11 +112,11 @@ export const utils = {
       const d = dCopy[i];
       const c = cCopy[j];
       const a = Math.min(d.amt, c.amt);
-      result.push({ from: d.name, to: c.name, amount: utils.round2(a) });
+      result.push({ from: d.name, to: c.name, amount: utils.fromCents(a) });
       d.amt -= a;
       c.amt -= a;
-      if (d.amt < 0.005) i++;
-      if (c.amt < 0.005) j++;
+      if (d.amt === 0) i++;
+      if (c.amt === 0) j++;
     }
     return result;
   },
