@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Group } from '../types';
 import { utils } from './utils';
+import { withoutUndefined } from './firebaseData';
 
 test('平均分攤會保留每一分錢', () => {
   const shares = utils.equalShares(100, ['A', 'B', 'C']);
@@ -47,4 +48,17 @@ test('餘額總和為零且能產生完整結算', () => {
     { from: 'B', to: 'A', amount: 33.33 },
     { from: 'C', to: 'A', amount: 33.33 },
   ]);
+});
+
+test('Firebase 資料不包含 undefined 欄位', () => {
+  const value = withoutUndefined({
+    splitMode: 'equal',
+    percentages: undefined,
+    nested: { note: undefined, amount: 100 },
+  });
+
+  assert.deepEqual(value, {
+    splitMode: 'equal',
+    nested: { amount: 100 },
+  });
 });

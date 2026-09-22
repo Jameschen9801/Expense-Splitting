@@ -33,6 +33,9 @@ import {
 type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
 type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
 
+const FAILED_EXPENSE_RECOVERY_START = Date.parse('2026-09-22T09:28:00Z');
+const FAILED_EXPENSE_RECOVERY_END = Date.parse('2026-09-22T10:15:00Z');
+
 const editableShares = (expense: Expense) => {
   if (expense.splitMode === 'percent') {
     if (expense.percentages?.length) return expense.percentages;
@@ -106,6 +109,7 @@ export default function App() {
   const toastTimerRef = useRef<number | null>(null);
   const syncTimerRef = useRef<number | null>(null);
   const pendingMutationsRef = useRef<Array<() => Promise<Group>>>([]);
+  const recoveryInProgressRef = useRef(false);
 
   useEffect(() => {
     const groups = storage.getMyGroups();
@@ -130,8 +134,36 @@ export default function App() {
     let disposed = false;
     if (currentPage === 'group' && currentGroup?.code) {
       setSyncState('syncing');
-      subscribeToGroup(currentGroup.code, (cloudData) => {
+      subscribeToGroup(currentGroup.code, async (cloudData) => {
           if (cloudData) {
+            const cachedData = storage.getGroup(currentGroup.code);
+            const recoverableExpenses = cachedData?.expenses.filter(expense =>
+              expense.createdAt >= FAILED_EXPENSE_RECOVERY_START
+              && expense.createdAt <= FAILED_EXPENSE_RECOVERY_END
+              && !cloudData.expenses.some(cloudExpense => cloudExpense.id === expense.id)
+            ) || [];
+
+            if (recoverableExpenses.length > 0 && !recoveryInProgressRef.current) {
+              recoveryInProgressRef.current = true;
+              setSyncState('syncing');
+              try {
+                let recoveredGroup = cloudData;
+                for (const expense of recoverableExpenses) {
+                  recoveredGroup = await upsertExpenseInCloud(currentGroup.code, expense);
+                }
+                setCurrentGroup(recoveredGroup);
+                storage.saveGroup(currentGroup.code, recoveredGroup);
+                setSyncState('synced');
+                showToast(`已補回 ${recoverableExpenses.length} 筆未同步費用`);
+              } catch {
+                setCurrentGroup(cachedData);
+                setSyncState('error');
+                showToast('費用仍保存在此裝置，請稍後重試同步');
+              } finally {
+                recoveryInProgressRef.current = false;
+              }
+              return;
+            }
             setCurrentGroup(cloudData);
             storage.saveGroup(currentGroup.code, cloudData);
           }
@@ -221,7 +253,7 @@ export default function App() {
       showToast('所有待同步變更已上傳');
     } catch {
       setSyncState('error');
-      showToast('同步仍未完成，請確認網路後再試一次');
+      showToast('同步仍未完成，請稍後再試一次');
     } finally {
       setIsSaving(false);
     }
@@ -454,7 +486,8 @@ export default function App() {
 
     const expense: Expense = {
       id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + Date.now(),
-      desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares, percentages,
+      desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
+      ...(percentages ? { percentages } : {}),
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
     };
 

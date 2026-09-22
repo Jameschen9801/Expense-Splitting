@@ -1,5 +1,6 @@
 import type { Database, Unsubscribe } from 'firebase/database';
 import { Expense, Group, Transfer } from '../types';
+import { withoutUndefined } from './firebaseData';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -77,7 +78,7 @@ const updateGroup = async (
   const groupRef = ref(database, 'groups/' + groupCode);
   const result = await runTransaction(groupRef, current => {
     if (!current) return;
-    return updater(normalizeGroup(current as Group));
+    return withoutUndefined(updater(normalizeGroup(current as Group)));
   });
   if (!result.committed || !result.snapshot.exists()) {
     throw new Error('群組不存在或雲端更新失敗');
@@ -91,7 +92,7 @@ export const createGroupInCloud = async (groupData: Group): Promise<boolean> => 
     import('firebase/database'),
   ]);
   const groupRef = ref(database, 'groups/' + groupData.code);
-  const result = await runTransaction(groupRef, current => current ? undefined : groupData);
+  const result = await runTransaction(groupRef, current => current ? undefined : withoutUndefined(groupData));
   return result.committed;
 };
 
