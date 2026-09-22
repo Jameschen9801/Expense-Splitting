@@ -699,7 +699,7 @@ export default function App() {
                       <button
                         key={g.code}
                         onClick={() => openGroup(g.code)}
-                        className="bg-paper border border-line p-4 text-left flex items-center justify-between transition-all hover:border-ink hover:shadow-sm rounded-sm"
+                        className="bg-paper border border-line p-4 text-left flex items-center justify-between transition-all hover:border-ink hover:shadow-sm rounded-xl"
                       >
                         <div>
                           <div className="text-sm font-medium tracking-wide">{g.name}</div>
@@ -991,7 +991,7 @@ export default function App() {
                 <div className="panel">
                   <div className="panel-header p-4 border-b border-line"><span className="section-label">群組成員</span></div>
                   <div className="p-4.5">
-                    <div className="bg-paper-2 border border-line p-3 flex items-center justify-between mb-3 rounded-sm">
+                    <div className="bg-paper-2 border border-line p-3 flex items-center justify-between mb-3 rounded-xl">
                       <div>
                         <div className="text-[10px] tracking-[2px] text-ink-3 mb-1">邀請碼</div>
                         <div className="font-mono text-xl tracking-[6px] text-ink">{currentGroup?.code}</div>
@@ -1086,15 +1086,15 @@ export default function App() {
         {modals.addRecord && (
           <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} onClose={() => toggleModal('addRecord', false)}>
             {(!isEditingExpense && !isEditingTransfer) && (
-              <div className="flex bg-paper border border-line p-1 rounded-sm mb-5 gap-1 shadow-sm">
+              <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">
                 <button 
-                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-sm transition-all ${recordType === 'expense' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
+                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-full transition-all ${recordType === 'expense' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
                   onClick={() => setRecordType('expense')}
                 >
                   費用
                 </button>
                 <button 
-                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-sm transition-all ${recordType === 'transfer' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
+                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-full transition-all ${recordType === 'transfer' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
                   onClick={() => setRecordType('transfer')}
                 >
                   轉帳
@@ -1160,7 +1160,7 @@ export default function App() {
                 </div>
                 <div className="field">
                   <label className="field-label">分攤方式</label>
-                  <div className="flex border border-line rounded-sm overflow-hidden mb-3">
+                  <div className="flex border border-line rounded-full overflow-hidden mb-3">
                     {(['equal', 'custom', 'percent'] as const).map(mode => (
                       <button
                         type="button"
@@ -1220,7 +1220,7 @@ export default function App() {
                           {canAutoFill && (
                             <button
                               type="button"
-                              className="min-h-10 text-xs text-ink border border-line px-3 py-1.5 rounded-sm hover:bg-paper-2 transition-all"
+                              className="min-h-10 text-xs text-ink border border-line px-3 py-1.5 rounded-full hover:bg-paper-2 transition-all"
                               onClick={() => {
                                 const newShares = { ...expForm.customShares };
                                 if (expForm.splitMode === 'custom') {
@@ -1423,7 +1423,7 @@ export default function App() {
 
       {/* Toast */}
       <div
-        className={`fixed bottom-5 left-1/2 -translate-x-1/2 bg-ink text-paper px-4 py-3 rounded-sm text-sm z-[999] transition-opacity duration-200 flex items-center gap-4 max-w-[calc(100%-2rem)] shadow-lg ${toast ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed bottom-5 left-1/2 -translate-x-1/2 bg-ink text-paper px-4 py-3 rounded-2xl text-sm z-[999] transition-opacity duration-200 flex items-center gap-4 max-w-[calc(100%-2rem)] shadow-lg ${toast ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         role="status"
         aria-live="polite"
       >
@@ -1498,7 +1498,7 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="modal-panel bg-paper border border-line rounded-t-2xl sm:rounded-sm w-full max-w-[440px] max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto shadow-lg"
+        className="modal-panel bg-paper border border-line rounded-t-3xl sm:rounded-2xl w-full max-w-[440px] max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto shadow-lg"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-4.5 border-b border-line flex items-center justify-between">

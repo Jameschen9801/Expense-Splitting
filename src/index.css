@@ -41,7 +41,7 @@
 
 @layer components {
   .btn {
-    @apply inline-flex min-h-11 items-center justify-center gap-1.5 border border-ink bg-transparent px-4.5 py-2 text-sm font-normal tracking-wide transition-colors duration-150 rounded-sm cursor-pointer whitespace-nowrap active:translate-y-px;
+    @apply inline-flex min-h-11 items-center justify-center gap-1.5 border border-ink bg-transparent px-4.5 py-2 text-sm font-normal tracking-wide transition-colors duration-150 rounded-full cursor-pointer whitespace-nowrap active:translate-y-px;
   }
   .btn:hover {
     @apply bg-ink text-paper;
@@ -59,7 +59,7 @@
     @apply cursor-not-allowed opacity-50 active:translate-y-0;
   }
   .icon-btn {
-    @apply inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-ink-2 transition-colors hover:bg-paper-2 focus-visible:bg-paper-2;
+    @apply inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-ink-2 transition-colors hover:bg-paper-2 focus-visible:bg-paper-2;
   }
   .btn-ghost {
     @apply border-line text-ink-2;
@@ -83,7 +83,7 @@
   }
 
   .panel {
-    @apply bg-paper border border-line rounded-sm shadow-sm;
+    @apply bg-paper border border-line rounded-xl shadow-sm;
   }
 
   .section-label {
@@ -94,7 +94,7 @@
     @apply inline-block border-2 border-stamp text-stamp text-[10px] tracking-[3px] uppercase px-2 py-0.75 -rotate-2 font-serif;
   }
   .sync-status {
-    @apply min-h-9 px-2.5 flex items-center gap-1.5 rounded-sm text-xs font-medium whitespace-nowrap;
+    @apply min-h-9 px-3 flex items-center gap-1.5 rounded-full text-xs font-medium whitespace-nowrap;
   }
   .form-error {
     @apply border-l-2 border-red-700 bg-red-50 px-3 py-2.5 text-sm leading-relaxed text-red-800;
@@ -109,10 +109,10 @@
     animation: modal-panel-enter 180ms ease-out both;
   }
   .record-search {
-    @apply w-full min-h-11 bg-paper border border-line rounded-sm px-3 py-2.5 text-base text-ink placeholder:text-ink-3;
+    @apply w-full min-h-11 bg-paper border border-line rounded-xl px-3 py-2.5 text-base text-ink placeholder:text-ink-3;
   }
   .filter-button {
-    @apply min-h-10 rounded-sm border px-2 text-xs font-medium transition-colors;
+    @apply min-h-10 rounded-full border px-3 text-xs font-medium transition-colors;
   }
   .mobile-add-button {
     @apply fixed right-5 z-[60] inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-ink px-5 text-sm font-medium text-paper shadow-lg active:translate-y-px;
@@ -122,7 +122,7 @@
     @apply text-3xl font-medium tracking-tight py-3;
   }
   .quick-select-button {
-    @apply min-h-10 rounded-sm border border-line bg-paper px-2 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink;
+    @apply min-h-10 rounded-full border border-line bg-paper px-3 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink;
   }
   .member-toggle {
     @apply min-h-11 rounded-full border px-4 py-2 text-sm transition-colors;
@@ -141,7 +141,7 @@
     content: "−";
   }
   .expense-summary {
-    @apply mb-4 rounded-sm border border-line bg-paper-2 px-3.5 py-3 text-sm leading-relaxed text-ink-2;
+    @apply mb-4 rounded-xl border border-line bg-paper-2 px-3.5 py-3 text-sm leading-relaxed text-ink-2;
   }
   .sticky-action-bar {
     @apply sticky bottom-0 z-10 -mx-5 border-t border-line bg-paper px-5 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 sm:static sm:mx-0 sm:border-0 sm:px-0 sm:py-0;
