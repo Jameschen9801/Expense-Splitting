@@ -1287,18 +1287,6 @@ export default function App() {
                     <input id="expense-date" type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
                   </div>
                 </details>
-                {(() => {
-                  const amount = parseFloat(expForm.amount);
-                  if (!Number.isFinite(amount) || amount <= 0 || !expForm.payer || expForm.participants.length === 0) return null;
-                  const splitLabel = expForm.splitMode === 'equal'
-                    ? `平均分攤，每人約 NT$ ${utils.fmt(utils.round2(amount / expForm.participants.length))}`
-                    : expForm.splitMode === 'custom' ? '依自訂金額分攤' : '依自訂比例分攤';
-                  return (
-                    <div className="expense-summary" aria-live="polite">
-                      <strong>{expForm.payer}</strong> 支付 NT$ {utils.fmt(amount)}，由 {expForm.participants.length} 人{splitLabel}。
-                    </div>
-                  );
-                })()}
               </>
             ) : (
               <>
@@ -1486,6 +1474,27 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
   }, [onClose]);
 
   useEffect(() => {
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const root = document.documentElement;
+    const previousBodyStyles = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    const previousRootOverflow = root.style.overflow;
+
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    body.style.overflow = 'hidden';
+    root.style.overflow = 'hidden';
+
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
     const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -1516,6 +1525,14 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      body.style.position = previousBodyStyles.position;
+      body.style.top = previousBodyStyles.top;
+      body.style.left = previousBodyStyles.left;
+      body.style.right = previousBodyStyles.right;
+      body.style.width = previousBodyStyles.width;
+      body.style.overflow = previousBodyStyles.overflow;
+      root.style.overflow = previousRootOverflow;
+      window.scrollTo(0, scrollY);
       previouslyFocused?.focus();
     };
   }, []);
