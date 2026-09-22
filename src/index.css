@@ -108,6 +108,44 @@
   .modal-panel {
     animation: modal-panel-enter 180ms ease-out both;
   }
+  .record-search {
+    @apply w-full min-h-11 bg-paper border border-line rounded-sm px-3 py-2.5 text-base text-ink placeholder:text-ink-3;
+  }
+  .filter-button {
+    @apply min-h-10 rounded-sm border px-2 text-xs font-medium transition-colors;
+  }
+  .mobile-add-button {
+    @apply fixed right-5 z-[60] inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-ink px-5 text-sm font-medium text-paper shadow-lg active:translate-y-px;
+    bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  }
+  .expense-amount-input {
+    @apply text-3xl font-medium tracking-tight py-3;
+  }
+  .quick-select-button {
+    @apply min-h-10 rounded-sm border border-line bg-paper px-2 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink;
+  }
+  .member-toggle {
+    @apply min-h-11 rounded-full border px-4 py-2 text-sm transition-colors;
+  }
+  .expense-more {
+    @apply mb-4 border-y border-line py-1;
+  }
+  .expense-more summary {
+    @apply flex min-h-11 cursor-pointer list-none items-center justify-between text-sm text-ink-2;
+  }
+  .expense-more summary::after {
+    content: "+";
+    @apply text-lg text-ink-3;
+  }
+  .expense-more[open] summary::after {
+    content: "−";
+  }
+  .expense-summary {
+    @apply mb-4 rounded-sm border border-line bg-paper-2 px-3.5 py-3 text-sm leading-relaxed text-ink-2;
+  }
+  .sticky-action-bar {
+    @apply sticky bottom-0 z-10 -mx-5 border-t border-line bg-paper px-5 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 sm:static sm:mx-0 sm:border-0 sm:px-0 sm:py-0;
+  }
 }
 
 input[type="text"], input[type="number"], input[type="date"], select, textarea {

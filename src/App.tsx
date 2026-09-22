@@ -33,6 +33,21 @@ import {
 type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
 type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
 
+const editableShares = (expense: Expense) => {
+  if (expense.splitMode === 'percent') {
+    if (expense.percentages?.length) return expense.percentages;
+    if (expense.amount <= 0 || !expense.shares?.length) return [];
+    const percentages = expense.shares.map(share => ({
+      name: share.name,
+      amount: utils.round2((share.amount / expense.amount) * 100),
+    }));
+    const difference = utils.round2(100 - percentages.reduce((sum, share) => sum + share.amount, 0));
+    percentages[percentages.length - 1].amount = utils.round2(percentages[percentages.length - 1].amount + difference);
+    return percentages;
+  }
+  return expense.shares || [];
+};
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
@@ -40,6 +55,8 @@ export default function App() {
   const [myName, setMyName] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'records' | 'balance' | 'members'>('records');
   const [recordType, setRecordType] = useState<'expense' | 'transfer'>('expense');
+  const [recordSearch, setRecordSearch] = useState('');
+  const [recordFilter, setRecordFilter] = useState<'all' | 'mine' | 'paid'>('all');
 
   // Modals state
   const [modals, setModals] = useState({
@@ -360,8 +377,8 @@ export default function App() {
   const openEditExpense = (e: Expense) => {
     setIsEditingExpense(true);
     const customShares: Record<string, string> = {};
-    if (e.splitMode !== 'equal' && e.shares) {
-      e.shares.forEach(s => {
+    if (e.splitMode !== 'equal') {
+      editableShares(e).forEach(s => {
         customShares[s.name] = s.amount.toString();
       });
     }
@@ -380,7 +397,28 @@ export default function App() {
     setRecordType('expense');
   };
 
-  const addExpense = async () => {
+  const duplicateExpense = (expense: Expense) => {
+    const customShares: Record<string, string> = {};
+    editableShares(expense).forEach(share => {
+      customShares[share.name] = share.amount.toString();
+    });
+    setSelectedExpense(null);
+    setIsEditingExpense(false);
+    setExpForm({
+      desc: expense.desc,
+      amount: expense.amount.toString(),
+      date: utils.todayStr(),
+      payer: expense.payer,
+      participants: [...expense.participants],
+      splitMode: expense.splitMode,
+      customShares,
+    });
+    setFormError('');
+    setRecordType('expense');
+    setModals(prev => ({ ...prev, expenseDetail: false, addRecord: true }));
+  };
+
+  const addExpense = async (keepOpen = false) => {
     if (!currentGroup) return;
     const { desc, amount, payer, participants, splitMode, date, customShares } = expForm;
     const amt = parseFloat(amount);
@@ -391,6 +429,7 @@ export default function App() {
     if (participants.length === 0) { setFormError('請選擇至少一位分攤對象'); return; }
 
     let shares: Share[] = [];
+    let percentages: Share[] | undefined;
     if (splitMode !== 'equal') {
       const rawShares = participants.map(p => {
         const val = parseFloat(customShares[p] || '0');
@@ -406,6 +445,7 @@ export default function App() {
         if (rawShares.some(share => share.amount > 100)) { setFormError('單一成員的比例不能超過 100%'); return; }
         if (Math.abs(total - 100) > 0.001) { setFormError('比例總和必須等於 100%'); return; }
         shares = utils.percentShares(amt, rawShares);
+        percentages = rawShares;
       } else {
         if (utils.toCents(amt) !== utils.toCents(total)) { setFormError('分攤金額加總必須等於費用金額'); return; }
         shares = rawShares.map(share => ({ ...share, amount: utils.fromCents(utils.toCents(share.amount)) }));
@@ -414,7 +454,7 @@ export default function App() {
 
     const expense: Expense = {
       id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + Date.now(),
-      desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
+      desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares, percentages,
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
     };
 
@@ -427,15 +467,27 @@ export default function App() {
 
     const updated = { ...currentGroup, expenses: updatedExpenses };
     setIsSaving(true);
-    const success = await persistGroupMutation(
+    await persistGroupMutation(
       updated,
       () => upsertExpenseInCloud(updated.code, expense),
       isEditingExpense ? '費用已更新' : '費用已新增',
     );
     setIsSaving(false);
-    if (success) {
+    setIsEditingExpense(false);
+    setSelectedExpense(null);
+    if (keepOpen && !isEditingExpense) {
+      setExpForm({
+        desc: '',
+        amount: '',
+        date: utils.todayStr(),
+        payer: updated.members.includes(myName) ? myName : (updated.members[0] || ''),
+        participants: [...updated.members],
+        splitMode: 'equal',
+        customShares: {},
+      });
+      setFormError('');
+    } else {
       toggleModal('addRecord', false);
-      setIsEditingExpense(false);
     }
   };
 
@@ -463,16 +515,14 @@ export default function App() {
     
     const updated = { ...currentGroup, transfers: updatedTransfers };
     setIsSaving(true);
-    const success = await persistGroupMutation(
+    await persistGroupMutation(
       updated,
       () => upsertTransferInCloud(updated.code, tf),
       isEditingTransfer ? '轉帳已更新' : '轉帳已記錄',
     );
     setIsSaving(false);
-    if (success) {
-      toggleModal('addRecord', false);
-      setIsEditingTransfer(false);
-    }
+    toggleModal('addRecord', false);
+    setIsEditingTransfer(false);
   };
 
   const removeExpense = async (id: string) => {
@@ -592,7 +642,21 @@ export default function App() {
     if (!currentGroup) return {};
     const expenses: RecordItem[] = currentGroup.expenses.map(e => ({ ...e, type: 'expense' }));
     const transfers: RecordItem[] = currentGroup.transfers.map(t => ({ ...t, type: 'transfer' }));
-    const combined = [...expenses, ...transfers].sort((a, b) => {
+    const query = recordSearch.trim().toLocaleLowerCase('zh-TW');
+    const combined = [...expenses, ...transfers].filter(item => {
+      const isExpense = item.type === 'expense';
+      const isMine = isExpense
+        ? item.participants.includes(myName)
+        : item.from === myName || item.to === myName;
+      const isPaidByMe = isExpense ? item.payer === myName : item.from === myName;
+      if (recordFilter === 'mine' && !isMine) return false;
+      if (recordFilter === 'paid' && !isPaidByMe) return false;
+      if (!query) return true;
+      const searchable = isExpense
+        ? [item.desc, item.payer, ...item.participants]
+        : [item.from, item.to, item.note || ''];
+      return searchable.some(value => value.toLocaleLowerCase('zh-TW').includes(query));
+    }).sort((a, b) => {
       const dateCmp = (b.date || '').localeCompare(a.date || '');
       if (dateCmp !== 0) return dateCmp;
       return b.createdAt - a.createdAt;
@@ -604,7 +668,7 @@ export default function App() {
       groups[key].push(item);
     });
     return groups;
-  }, [currentGroup, myName]);
+  }, [currentGroup, myName, recordFilter, recordSearch]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col font-sans">
@@ -705,15 +769,45 @@ export default function App() {
             </div>
 
             <div className="flex-1 p-5 max-w-[680px] mx-auto w-full flex flex-col gap-4">
-                            {activeTab === 'records' && (
-                <div className="panel">
+              {activeTab === 'records' && (
+                <div className="panel pb-20 sm:pb-0">
                   <div className="panel-header p-4 border-b border-line flex items-center justify-between">
                     <span className="section-label">明細記錄</span>
-                    <button className="btn btn-sm btn-primary" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
+                    <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
+                  </div>
+                  <div className="p-3 border-b border-line bg-paper-2/60">
+                    <label className="sr-only" htmlFor="record-search">搜尋記帳明細</label>
+                    <input
+                      id="record-search"
+                      type="search"
+                      value={recordSearch}
+                      onChange={event => setRecordSearch(event.target.value)}
+                      placeholder="搜尋說明或成員"
+                      className="record-search"
+                    />
+                    <div className="grid grid-cols-3 gap-1 mt-3" aria-label="明細篩選">
+                      {([
+                        ['all', '全部'],
+                        ['mine', '與我相關'],
+                        ['paid', '我付款的'],
+                      ] as const).map(([value, label]) => (
+                        <button
+                          type="button"
+                          key={value}
+                          onClick={() => setRecordFilter(value)}
+                          aria-pressed={recordFilter === value}
+                          className={`filter-button ${recordFilter === value ? 'bg-ink text-paper border-ink' : 'bg-paper text-ink-2 border-line'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="px-4.5">
                     {Object.keys(groupedRecords).length === 0 ? (
-                      <div className="text-center py-10 text-ink-3 text-xs tracking-wider">尚無任何記錄</div>
+                      <div className="text-center py-10 text-ink-3 text-sm leading-relaxed">
+                        {recordSearch || recordFilter !== 'all' ? '找不到符合條件的記錄' : '尚無任何記錄'}
+                      </div>
                     ) : (
                       (Object.entries(groupedRecords) as [string, RecordItem[]][]).map(([date, items]) => (
                         <div key={date}>
@@ -770,6 +864,15 @@ export default function App() {
                       ))
                     )}
                   </div>
+                  <button
+                    type="button"
+                    className="mobile-add-button sm:hidden"
+                    onClick={() => toggleModal('addRecord', true)}
+                    aria-label="新增費用或轉帳"
+                  >
+                    <Plus size={22} aria-hidden="true" />
+                    新增
+                  </button>
                 </div>
               )}
 
@@ -948,7 +1051,7 @@ export default function App() {
           <Modal title="建立群組" onClose={() => toggleModal('createGroup', false)}>
             <div className="field">
               <label className="field-label" htmlFor="create-group-name">群組名稱</label>
-              <input id="create-group-name" type="text" value={newGroupName} onChange={e => { setNewGroupName(e.target.value); setFormError(''); }} placeholder="例：京都旅行" maxLength={20} autoComplete="off" />
+              <input id="create-group-name" data-autofocus type="text" value={newGroupName} onChange={e => { setNewGroupName(e.target.value); setFormError(''); }} placeholder="例：京都旅行" maxLength={20} autoComplete="off" />
             </div>
             <div className="field">
               <label className="field-label" htmlFor="create-member-name">你的名字</label>
@@ -966,7 +1069,7 @@ export default function App() {
           <Modal title="加入群組" onClose={() => toggleModal('joinGroup', false)}>
             <div className="field">
               <label className="field-label" htmlFor="join-code">邀請碼（6 位數字）</label>
-              <input id="join-code" type="text" inputMode="numeric" pattern="[0-9]*" value={joinCode} onChange={e => { setJoinCode(e.target.value.replace(/\D/g, '')); setFormError(''); }} placeholder="123456" maxLength={6} className="text-xl tracking-[6px] font-mono" autoComplete="one-time-code" />
+              <input id="join-code" data-autofocus type="text" inputMode="numeric" pattern="[0-9]*" value={joinCode} onChange={e => { setJoinCode(e.target.value.replace(/\D/g, '')); setFormError(''); }} placeholder="123456" maxLength={6} className="text-xl tracking-[6px] font-mono" autoComplete="one-time-code" />
             </div>
             <div className="field">
               <label className="field-label" htmlFor="join-member-name">你的名字</label>
@@ -1002,30 +1105,44 @@ export default function App() {
             {recordType === 'expense' ? (
               <>
                 <div className="field">
-                  <label className="field-label">說明</label>
-                  <input type="text" value={expForm.desc} onChange={e => setExpForm({ ...expForm, desc: e.target.value })} placeholder="例：晚餐" maxLength={30} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="field">
-                    <label className="field-label">金額 (NT$)</label>
-                    <input type="number" value={expForm.amount} onChange={e => setExpForm({ ...expForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
-                  </div>
-                  <div className="field">
-                    <label className="field-label">日期</label>
-                    <input type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
-                  </div>
+                  <label className="field-label" htmlFor="expense-amount">金額 (NT$)</label>
+                  <input
+                    id="expense-amount"
+                    data-autofocus
+                    type="number"
+                    inputMode="decimal"
+                    value={expForm.amount}
+                    onChange={e => { setExpForm({ ...expForm, amount: e.target.value }); setFormError(''); }}
+                    placeholder="0"
+                    step="0.01"
+                    min="0"
+                    className="expense-amount-input"
+                  />
                 </div>
                 <div className="field">
-                  <label className="field-label">付款人</label>
-                  <select value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
+                  <label className="field-label" htmlFor="expense-description">說明</label>
+                  <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint="next" />
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="expense-payer">誰先付款</label>
+                  <select id="expense-payer" value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
                     {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
                 <div className="field">
-                  <label className="field-label">分攤對象</label>
-                  <div className="flex flex-wrap gap-1.5 mt-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="field-label mb-0">誰要分攤</span>
+                    <span className="text-xs text-ink-3">已選 {expForm.participants.length}／{currentGroup?.members.length || 0} 人</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 mt-2" aria-label="快速選擇分攤對象">
+                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: [...(currentGroup?.members || [])] })}>全員</button>
+                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: (currentGroup?.members || []).filter(member => member !== expForm.payer) })}>除付款人</button>
+                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: currentGroup?.members.includes(myName) ? [myName] : [] })}>只有我</button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
                     {currentGroup?.members.map(m => (
                       <button
+                        type="button"
                         key={m}
                         onClick={() => {
                           const updated = expForm.participants.includes(m)
@@ -1033,7 +1150,8 @@ export default function App() {
                             : [...expForm.participants, m];
                           setExpForm({ ...expForm, participants: updated });
                         }}
-                        className={`px-3 py-1.25 border rounded-full text-xs transition-all ${expForm.participants.includes(m) ? 'border-ink bg-paper-2 text-ink' : 'border-line text-ink-3'}`}
+                        aria-pressed={expForm.participants.includes(m)}
+                        className={`member-toggle ${expForm.participants.includes(m) ? 'border-ink bg-ink text-paper' : 'border-line text-ink-2 bg-paper'}`}
                       >
                         {m}
                       </button>
@@ -1045,9 +1163,14 @@ export default function App() {
                   <div className="flex border border-line rounded-sm overflow-hidden mb-3">
                     {(['equal', 'custom', 'percent'] as const).map(mode => (
                       <button
+                        type="button"
                         key={mode}
-                        onClick={() => setExpForm({ ...expForm, splitMode: mode })}
-                        className={`flex-1 py-1.75 text-[11px] tracking-wider transition-all ${expForm.splitMode === mode ? 'bg-ink text-paper' : 'bg-transparent text-ink-3'}`}
+                        onClick={() => setExpForm({
+                          ...expForm,
+                          splitMode: mode,
+                          customShares: mode === expForm.splitMode ? expForm.customShares : {},
+                        })}
+                        className={`flex-1 min-h-11 px-1 py-2 text-xs transition-all ${expForm.splitMode === mode ? 'bg-ink text-paper' : 'bg-transparent text-ink-2'}`}
                       >
                         {mode === 'equal' ? '平均分攤' : mode === 'custom' ? '自訂金額' : '自訂比例%'}
                       </button>
@@ -1055,7 +1178,7 @@ export default function App() {
                   </div>
                   {expForm.splitMode === 'equal' ? (
                     expForm.participants.length > 0 && expForm.amount && (
-                      <div className="text-[11px] text-ink-3 tracking-wider mt-1">每人 NT$ {utils.fmt(utils.round2(parseFloat(expForm.amount) / expForm.participants.length))}</div>
+                      <div className="text-xs text-ink-3 mt-1">每人約 NT$ {utils.fmt(utils.round2(parseFloat(expForm.amount) / expForm.participants.length))}</div>
                     )
                   ) : (() => {
                     const total = expForm.splitMode === 'custom'
@@ -1097,7 +1220,7 @@ export default function App() {
                           {canAutoFill && (
                             <button
                               type="button"
-                              className="text-[11px] tracking-wider text-ink border border-line px-2.5 py-1 rounded-sm hover:bg-paper-2 transition-all"
+                              className="min-h-10 text-xs text-ink border border-line px-3 py-1.5 rounded-sm hover:bg-paper-2 transition-all"
                               onClick={() => {
                                 const newShares = { ...expForm.customShares };
                                 if (expForm.splitMode === 'custom') {
@@ -1124,6 +1247,25 @@ export default function App() {
                     );
                   })()}
                 </div>
+                <details className="expense-more" open={isEditingExpense}>
+                  <summary>日期與更多設定</summary>
+                  <div className="field mt-4 mb-1">
+                    <label className="field-label" htmlFor="expense-date">日期</label>
+                    <input id="expense-date" type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
+                  </div>
+                </details>
+                {(() => {
+                  const amount = parseFloat(expForm.amount);
+                  if (!Number.isFinite(amount) || amount <= 0 || !expForm.payer || expForm.participants.length === 0) return null;
+                  const splitLabel = expForm.splitMode === 'equal'
+                    ? `平均分攤，每人約 NT$ ${utils.fmt(utils.round2(amount / expForm.participants.length))}`
+                    : expForm.splitMode === 'custom' ? '依自訂金額分攤' : '依自訂比例分攤';
+                  return (
+                    <div className="expense-summary" aria-live="polite">
+                      <strong>{expForm.payer}</strong> 支付 NT$ {utils.fmt(amount)}，由 {expForm.participants.length} 人{splitLabel}。
+                    </div>
+                  );
+                })()}
               </>
             ) : (
               <>
@@ -1157,9 +1299,18 @@ export default function App() {
             )}
 
             {formError && <div className="form-error" role="alert">{formError}</div>}
-            <div className="flex justify-end gap-2 mt-4">
+            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2 mt-4 sticky-action-bar">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)} disabled={isSaving}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={recordType === 'expense' ? addExpense : addTransfer} disabled={isSaving}>{isSaving ? '同步中…' : '儲存'}</button>
+              {recordType === 'expense' && !isEditingExpense && (
+                <button className="btn btn-ghost btn-sm" onClick={() => addExpense(true)} disabled={isSaving}>{isSaving ? '儲存中…' : '儲存並繼續'}</button>
+              )}
+              <button
+                className={`btn btn-primary btn-sm sm:col-span-1 ${recordType === 'expense' && !isEditingExpense ? 'col-span-2' : 'col-span-1'}`}
+                onClick={() => recordType === 'expense' ? addExpense(false) : addTransfer()}
+                disabled={isSaving}
+              >
+                {isSaving ? '儲存中…' : '儲存'}
+              </button>
             </div>
           </Modal>
         )}
@@ -1223,6 +1374,9 @@ export default function App() {
             <div className="flex flex-col gap-2 mt-2">
               <button className="btn btn-primary w-full" onClick={() => openEditExpense(selectedExpense)}>
                 編輯此筆費用
+              </button>
+              <button className="btn btn-ghost w-full" onClick={() => duplicateExpense(selectedExpense)}>
+                <Copy size={14} className="mr-1.5" /> 複製為新費用
               </button>
               <button className="btn btn-danger w-full" onClick={() => removeExpense(selectedExpense.id)}>
                 <Trash2 size={14} className="mr-1.5" /> 刪除此筆費用
@@ -1302,7 +1456,8 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
     const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const firstFocusable = dialog?.querySelector<HTMLElement>(focusableSelector);
+    const firstFocusable = dialog?.querySelector<HTMLElement>('[data-autofocus]')
+      || dialog?.querySelector<HTMLElement>(focusableSelector);
     (firstFocusable || dialog)?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1334,7 +1489,7 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
 
   return (
     <div
-      className="modal-backdrop fixed inset-0 bg-ink/40 z-[200] flex items-center justify-center p-5"
+      className="modal-backdrop fixed inset-0 bg-ink/40 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-5"
       onClick={onClose}
     >
       <div
@@ -1343,7 +1498,7 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="modal-panel bg-paper border border-line rounded-sm w-full max-w-[440px] max-h-[90vh] overflow-y-auto shadow-lg"
+        className="modal-panel bg-paper border border-line rounded-t-2xl sm:rounded-sm w-full max-w-[440px] max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto shadow-lg"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-4.5 border-b border-line flex items-center justify-between">

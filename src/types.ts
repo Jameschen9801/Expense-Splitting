@@ -15,6 +15,7 @@ export interface Expense {
   participants: string[];
   splitMode: 'equal' | 'custom' | 'percent';
   shares?: Share[];
+  percentages?: Share[];
   date: string;
   createdAt: number;
 }
