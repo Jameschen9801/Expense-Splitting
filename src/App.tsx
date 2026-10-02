@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
 import {
   ArrowLeft,
   Plus,
@@ -17,20 +17,18 @@ import {
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
+import { sync } from './lib/sync';
+import type { GroupChange } from './lib/outbox';
+import { Drafts } from './lib/drafts';
+import { RecordsList, type RecordItem } from './components/RecordsList';
 import {
   addMemberToCloud,
   createGroupInCloud,
   fetchGroupOnce,
-  removeExpenseFromCloud,
-  removeMemberFromCloud,
-  removeTransferFromCloud,
-  renameGroupInCloud,
+  subscribeToConnection,
   subscribeToGroup,
-  upsertExpenseInCloud,
-  upsertTransferInCloud,
 } from './lib/firebase';
 
-type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
 type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
 
 const FAILED_EXPENSE_RECOVERY_START = Date.parse('2026-09-22T09:28:00Z');
@@ -107,9 +105,70 @@ export default function App() {
   const [settingsGroupName, setSettingsGroupName] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
-  const syncTimerRef = useRef<number | null>(null);
-  const pendingMutationsRef = useRef<Array<() => Promise<Group>>>([]);
-  const recoveryInProgressRef = useRef(false);
+  useSyncExternalStore(sync.subscribe, sync.getVersion);
+  const syncStatus = sync.getStatus(currentGroup?.code || '');
+  const groupCodeRef = useRef(currentGroup?.code);
+  groupCodeRef.current = currentGroup?.code;
+
+  useEffect(() => {
+    if (!modals.addRecord || !currentGroup || isSaving) return;
+    try {
+      const defaultPayer = currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || '');
+      const changedDefaults = expForm.payer !== defaultPayer || expForm.splitMode !== 'equal'
+        || expForm.date !== utils.todayStr() || tfForm.date !== utils.todayStr()
+        || tfForm.from !== defaultPayer || tfForm.to !== (currentGroup.members.find(name => name !== defaultPayer) || '')
+        || expForm.participants.length !== currentGroup.members.length
+        || currentGroup.members.some(name => !expForm.participants.includes(name));
+      new Drafts(localStorage).save(currentGroup.code, myName, {
+        recordType, expense: expForm, transfer: tfForm,
+        expenseId: isEditingExpense ? selectedExpense?.id : undefined,
+        transferId: isEditingTransfer ? selectedTransfer?.id : undefined,
+      }, changedDefaults);
+    } catch { setFormError('草稿無法保存，請確認裝置儲存空間'); }
+  }, [modals.addRecord, currentGroup?.code, myName, expForm, tfForm, recordType, isEditingExpense, isEditingTransfer, selectedExpense?.id, selectedTransfer?.id, isSaving]);
+
+  const clearRecordDraft = () => {
+    if (currentGroup) {
+      try { new Drafts(localStorage).clear(currentGroup.code, myName); }
+      catch { showToast('紀錄已保存，但草稿未能清除'); }
+    }
+  };
+
+  const showExpenseDetail = useCallback((expense: Expense) => {
+    setSelectedExpense(expense);
+    setFormError('');
+    setModals(previous => ({ ...previous, expenseDetail: true }));
+  }, []);
+  const showTransferDetail = useCallback((transfer: Transfer) => {
+    setSelectedTransfer(transfer);
+    setFormError('');
+    setModals(previous => ({ ...previous, transferDetail: true }));
+  }, []);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let disposed = false;
+    subscribeToConnection(sync.setConnected).then(unsubscribe => {
+      if (disposed) unsubscribe();
+      else stop = unsubscribe;
+    }).catch(() => sync.setConnected(false));
+    const retry = () => { if (document.visibilityState === 'visible') sync.flushAll(); };
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      disposed = true;
+      stop?.();
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, []);
+
+  useEffect(() => sync.subscribe(() => {
+    const code = groupCodeRef.current;
+    if (!code) return;
+    const cached = storage.getGroup(code);
+    if (cached) setCurrentGroup(sync.merge(cached));
+  }), []);
 
   useEffect(() => {
     const groups = storage.getMyGroups();
@@ -119,7 +178,7 @@ export default function App() {
       const data = storage.getGroup(lastCode);
       const mg = groups.find(g => g.code === lastCode);
       if (data && mg) {
-        setCurrentGroup(data);
+        setCurrentGroup(sync.merge(data));
         setMyName(mg.myName);
         setSettingsGroupName(data.name);
         setCurrentPage('group');
@@ -134,57 +193,47 @@ export default function App() {
     let disposed = false;
     if (currentPage === 'group' && currentGroup?.code) {
       setSyncState('syncing');
-      subscribeToGroup(currentGroup.code, async (cloudData) => {
+      subscribeToGroup(currentGroup.code, (cloudData) => {
+          if (disposed) return;
           if (cloudData) {
             const cachedData = storage.getGroup(currentGroup.code);
+            const recoveryKey = `warikan_recovery_v2_${currentGroup.code}`;
             const recoverableExpenses = cachedData?.expenses.filter(expense =>
               expense.createdAt >= FAILED_EXPENSE_RECOVERY_START
               && expense.createdAt <= FAILED_EXPENSE_RECOVERY_END
               && !cloudData.expenses.some(cloudExpense => cloudExpense.id === expense.id)
             ) || [];
 
-            if (recoverableExpenses.length > 0 && !recoveryInProgressRef.current) {
-              recoveryInProgressRef.current = true;
-              setSyncState('syncing');
+            if (!localStorage.getItem(recoveryKey)) {
               try {
-                let recoveredGroup = cloudData;
                 for (const expense of recoverableExpenses) {
-                  recoveredGroup = await upsertExpenseInCloud(currentGroup.code, expense);
+                  sync.enqueue(currentGroup.code, { type: 'expense.put', expense });
                 }
-                setCurrentGroup(recoveredGroup);
-                storage.saveGroup(currentGroup.code, recoveredGroup);
-                setSyncState('synced');
-                showToast(`已補回 ${recoverableExpenses.length} 筆未同步費用`);
+                localStorage.setItem(recoveryKey, '1');
               } catch {
-                setCurrentGroup(cachedData);
                 setSyncState('error');
-                showToast('費用仍保存在此裝置，請稍後重試同步');
-              } finally {
-                recoveryInProgressRef.current = false;
+                return;
               }
-              return;
             }
-            setCurrentGroup(cloudData);
-            storage.saveGroup(currentGroup.code, cloudData);
-          }
-          if (pendingMutationsRef.current.length > 0) {
-            setSyncState('error');
+            const merged = sync.merge(cloudData);
+            setCurrentGroup(merged);
+            try {
+              storage.saveGroup(currentGroup.code, merged);
+              setSyncState('synced');
+            } catch { setSyncState('error'); }
           } else {
-            setSyncState('synced');
-            if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
-            syncTimerRef.current = window.setTimeout(() => setSyncState(''), 2000);
+            setSyncState('error');
           }
-        }, () => setSyncState('error'))
+        }, () => { if (!disposed) setSyncState('error'); })
         .then(stopListening => {
           if (disposed) stopListening();
           else unsubscribe = stopListening;
         })
-        .catch(() => setSyncState('error'));
+        .catch(() => { if (!disposed) setSyncState('error'); });
     }
     return () => {
       disposed = true;
       if (unsubscribe) unsubscribe();
-      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
     };
   }, [currentPage, currentGroup?.code, syncRetryKey]);
 
@@ -199,7 +248,7 @@ export default function App() {
   };
 
   const enterGroup = (data: Group, name: string) => {
-    setCurrentGroup(data);
+    setCurrentGroup(sync.merge(data));
     setMyName(name);
     setSettingsGroupName(data.name);
     setCurrentPage('group');
@@ -209,60 +258,60 @@ export default function App() {
 
   const persistGroupMutation = async (
     optimisticGroup: Group,
-    mutation: () => Promise<Group>,
+    change: GroupChange,
     successMessage?: string,
   ) => {
-    setCurrentGroup(optimisticGroup);
-    storage.saveGroup(optimisticGroup.code, optimisticGroup);
-    setSyncState('syncing');
     try {
-      const cloudGroup = await mutation();
-      setCurrentGroup(cloudGroup);
-      storage.saveGroup(cloudGroup.code, cloudGroup);
-      setSyncState('synced');
+      sync.enqueue(optimisticGroup.code, change);
+      const merged = sync.merge(storage.getGroup(optimisticGroup.code) || optimisticGroup);
+      setCurrentGroup(merged);
+      // The outbox is already durable even if writing the display cache fails.
+      try { storage.saveGroup(merged.code, merged); }
+      catch { showToast('紀錄已保存，顯示快取暫時無法更新'); }
       if (successMessage) showToast(successMessage);
       return true;
     } catch {
-      pendingMutationsRef.current.push(mutation);
-      setSyncState('error');
-      showToast('已保存在此裝置，請按上方「重試同步」');
+      setFormError('此裝置無法保存資料，請確認儲存空間後再試；草稿尚未清除');
+      showToast('儲存未完成，請保留輸入內容');
       return false;
     }
   };
 
   const retryPendingMutations = async () => {
-    if (pendingMutationsRef.current.length === 0) {
-      setSyncState('syncing');
-      setSyncRetryKey(key => key + 1);
-      return;
-    }
-    setIsSaving(true);
-    setSyncState('syncing');
-    try {
-      let latestGroup: Group | null = null;
-      while (pendingMutationsRef.current.length > 0) {
-        const mutation = pendingMutationsRef.current[0];
-        latestGroup = await mutation();
-        pendingMutationsRef.current.shift();
-      }
-      if (latestGroup) {
-        setCurrentGroup(latestGroup);
-        storage.saveGroup(latestGroup.code, latestGroup);
-      }
-      setSyncState('synced');
-      showToast('所有待同步變更已上傳');
-    } catch {
-      setSyncState('error');
-      showToast('同步仍未完成，請稍後再試一次');
-    } finally {
-      setIsSaving(false);
-    }
+    if (!currentGroup) return;
+    setSyncRetryKey(key => key + 1);
+    if (!syncStatus.connected) { showToast('目前離線，已保存的紀錄會在連線恢復後自動同步'); return; }
+    const success = await sync.flush(currentGroup.code);
+    showToast(success ? '所有待同步變更已上傳' : '仍有待同步紀錄，會保留在此裝置');
   };
 
   const toggleModal = (key: keyof typeof modals, open: boolean) => {
     setModals(prev => ({ ...prev, [key]: open }));
     setFormError('');
     if (key === 'addRecord' && open && currentGroup) {
+      const draft = new Drafts(localStorage).read(currentGroup.code, myName);
+      if (draft) {
+        const expense = currentGroup.expenses.find(item => item.id === draft.expenseId);
+        const transfer = currentGroup.transfers.find(item => item.id === draft.transferId);
+        if ((!draft.expenseId || expense) && (!draft.transferId || transfer)) {
+          setExpForm({ ...draft.expense,
+            payer: currentGroup.members.includes(draft.expense.payer) ? draft.expense.payer : (currentGroup.members[0] || ''),
+            participants: draft.expense.participants.filter(name => currentGroup.members.includes(name)),
+          });
+          setTfForm({ ...draft.transfer,
+            from: currentGroup.members.includes(draft.transfer.from) ? draft.transfer.from : (currentGroup.members[0] || ''),
+            to: currentGroup.members.includes(draft.transfer.to) ? draft.transfer.to : '',
+          });
+          setRecordType(draft.recordType);
+          setSelectedExpense(expense || null);
+          setSelectedTransfer(transfer || null);
+          setIsEditingExpense(!!expense);
+          setIsEditingTransfer(!!transfer);
+          showToast('已恢復上次未完成的記帳草稿');
+          return;
+        }
+        clearRecordDraft();
+      }
       if (!isEditingExpense) {
         setExpForm({
           desc: '', amount: '', date: utils.todayStr(),
@@ -456,7 +505,7 @@ export default function App() {
     const amt = parseFloat(amount);
     setFormError('');
     if (!desc.trim()) { setFormError('請填寫費用說明'); return; }
-    if (isNaN(amt) || amt <= 0) { setFormError('請填寫大於 0 的有效金額'); return; }
+    if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return; }
     if (!payer) { setFormError('請選擇付款人'); return; }
     if (participants.length === 0) { setFormError('請選擇至少一位分攤對象'); return; }
 
@@ -485,7 +534,7 @@ export default function App() {
     }
 
     const expense: Expense = {
-      id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + Date.now(),
+      id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + crypto.randomUUID(),
       desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
       ...(percentages ? { percentages } : {}),
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
@@ -500,12 +549,14 @@ export default function App() {
 
     const updated = { ...currentGroup, expenses: updatedExpenses };
     setIsSaving(true);
-    await persistGroupMutation(
+    const saved = await persistGroupMutation(
       updated,
-      () => upsertExpenseInCloud(updated.code, expense),
+      { type: 'expense.put', expense },
       isEditingExpense ? '費用已更新' : '費用已新增',
     );
     setIsSaving(false);
+    if (!saved) return;
+    clearRecordDraft();
     setIsEditingExpense(false);
     setSelectedExpense(null);
     if (keepOpen && !isEditingExpense) {
@@ -518,6 +569,8 @@ export default function App() {
         splitMode: 'equal',
         customShares: {},
       });
+      const from = updated.members.includes(myName) ? myName : (updated.members[0] || '');
+      setTfForm({ from, to: updated.members.find(name => name !== from) || '', amount: '', date: utils.todayStr(), note: '' });
       setFormError('');
     } else {
       toggleModal('addRecord', false);
@@ -531,10 +584,10 @@ export default function App() {
     setFormError('');
     if (!from || !to) { setFormError('請選擇付款人與收款人'); return; }
     if (from === to) { setFormError('付款人與收款人不能相同'); return; }
-    if (isNaN(amt) || amt <= 0) { setFormError('請填寫大於 0 的有效金額'); return; }
+    if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return; }
 
     const tf: Transfer = {
-      id: isEditingTransfer && selectedTransfer ? selectedTransfer.id : 't' + Date.now(),
+      id: isEditingTransfer && selectedTransfer ? selectedTransfer.id : 't' + crypto.randomUUID(),
       from, to, amount: utils.fromCents(utils.toCents(amt)), note: note.trim(),
       date, createdAt: isEditingTransfer && selectedTransfer ? selectedTransfer.createdAt : Date.now()
     };
@@ -548,12 +601,14 @@ export default function App() {
     
     const updated = { ...currentGroup, transfers: updatedTransfers };
     setIsSaving(true);
-    await persistGroupMutation(
+    const saved = await persistGroupMutation(
       updated,
-      () => upsertTransferInCloud(updated.code, tf),
+      { type: 'transfer.put', transfer: tf },
       isEditingTransfer ? '轉帳已更新' : '轉帳已記錄',
     );
     setIsSaving(false);
+    if (!saved) return;
+    clearRecordDraft();
     toggleModal('addRecord', false);
     setIsEditingTransfer(false);
   };
@@ -566,7 +621,7 @@ export default function App() {
     toggleModal('expenseDetail', false);
     const success = await persistGroupMutation(
       updated,
-      () => removeExpenseFromCloud(updated.code, id),
+      { type: 'expense.remove', id },
     );
     if (success) {
       showToast('費用已刪除', {
@@ -574,7 +629,7 @@ export default function App() {
         onAction: async () => {
           const restored = { ...updated, expenses: [...updated.expenses, target] };
           setToast(null);
-          await persistGroupMutation(restored, () => upsertExpenseInCloud(updated.code, target), '費用已復原');
+          await persistGroupMutation(restored, { type: 'expense.put', expense: target }, '費用已復原');
         },
       });
     }
@@ -588,7 +643,7 @@ export default function App() {
     toggleModal('transferDetail', false);
     const success = await persistGroupMutation(
       updated,
-      () => removeTransferFromCloud(updated.code, id),
+      { type: 'transfer.remove', id },
     );
     if (success) {
       showToast('轉帳已刪除', {
@@ -596,7 +651,7 @@ export default function App() {
         onAction: async () => {
           const restored = { ...updated, transfers: [...updated.transfers, target] };
           setToast(null);
-          await persistGroupMutation(restored, () => upsertTransferInCloud(updated.code, target), '轉帳已復原');
+          await persistGroupMutation(restored, { type: 'transfer.put', transfer: target }, '轉帳已復原');
         },
       });
     }
@@ -609,7 +664,7 @@ export default function App() {
     const updated = { ...currentGroup, members: [...currentGroup.members, trimmedName] };
     return persistGroupMutation(
       updated,
-      () => addMemberToCloud(updated.code, trimmedName),
+      { type: 'member.add', name: trimmedName },
       `已新增 ${trimmedName}`,
     );
   };
@@ -635,7 +690,7 @@ export default function App() {
     const updated = { ...currentGroup, members: currentGroup.members.filter(m => m !== name) };
     await persistGroupMutation(
       updated,
-      () => removeMemberFromCloud(updated.code, name),
+      { type: 'member.remove', name },
       `已移除 ${name}`,
     );
   };
@@ -647,7 +702,7 @@ export default function App() {
     setIsSaving(true);
     const success = await persistGroupMutation(
       updated,
-      () => renameGroupInCloud(updated.code, name),
+      { type: 'group.rename', name },
       '群組名稱已更新',
     );
     setIsSaving(false);
@@ -762,25 +817,25 @@ export default function App() {
                 <div className="text-[10px] tracking-[2px] text-ink-3">{currentGroup?.code}</div>
               </div>
               <div className="flex items-center gap-2">
-                {syncState === 'error' ? (
+                {syncStatus.pending > 0 || syncStatus.error || syncState === 'error' ? (
                   <button
                     type="button"
-                    className="sync-status text-red-700 bg-red-50 hover:bg-red-100"
+                    className={`sync-status ${syncStatus.syncing ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50 hover:bg-red-100'}`}
                     onClick={retryPendingMutations}
-                    disabled={isSaving}
+                    disabled={syncStatus.syncing}
                     title="重新上傳尚未同步的變更"
                   >
                     <RefreshCw size={13} aria-hidden="true" />
-                    重試同步
+                    {syncStatus.pending > 0 ? `${!syncStatus.connected ? '離線・' : syncStatus.syncing ? '同步中 ' : '待同步 '}${syncStatus.pending} 筆` : '重試同步'}
                   </button>
                 ) : (
                   <div
-                    className={`sync-status ${syncState === 'syncing' ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50'}`}
+                    className={`sync-status ${!syncStatus.connected ? 'text-ink-2 bg-paper-2' : syncState === 'syncing' ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50'}`}
                     role="status"
                     title="雲端同步狀態"
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-green-600'}`}></span>
-                    {syncState === 'syncing' ? '同步中' : '已連線'}
+                    <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.connected ? 'bg-ink-3' : syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-green-600'}`}></span>
+                    {!syncStatus.connected ? '離線' : syncState === 'syncing' ? '同步中' : '已同步'}
                   </div>
                 )}
                 <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)} aria-label="開啟群組設定">
@@ -836,67 +891,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                  <div className="px-4.5">
-                    {Object.keys(groupedRecords).length === 0 ? (
-                      <div className="text-center py-10 text-ink-3 text-sm leading-relaxed">
-                        {recordSearch || recordFilter !== 'all' ? '找不到符合條件的記錄' : '尚無任何記錄'}
-                      </div>
-                    ) : (
-                      (Object.entries(groupedRecords) as [string, RecordItem[]][]).map(([date, items]) => (
-                        <div key={date}>
-                          <div className="flex justify-between items-center py-2.5 border-b border-line mt-1.5 uppercase text-[11px] tracking-[2px] text-ink-3">
-                            <span>{date === '未設定日期' ? date : utils.fmtDate(date)}</span>
-                          </div>
-                          {items.map(item => {
-                            if (item.type === 'expense') {
-                              const e = item as Expense;
-                              let myCost = 0;
-                              if (e.participants.includes(myName)) {
-                                if (e.splitMode === 'equal') {
-                                  myCost = utils.equalShares(e.amount, e.participants).find(share => share.name === myName)?.amount || 0;
-                                } else if (e.shares) {
-                                  myCost = e.shares.find(s => s.name === myName)?.amount || 0;
-                                }
-                              }
-                              return (
-                                <button
-                                  type="button"
-                                  key={e.id}
-                                  onClick={() => { setSelectedExpense(e); toggleModal('expenseDetail', true); }}
-                                  className="w-[calc(100%+2.25rem)] text-left py-3 border-b border-line last:border-b-0 flex items-center justify-between gap-3 cursor-pointer hover:bg-paper-2 -mx-4.5 px-4.5 focus-visible:bg-paper-2"
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-[16px] tracking-wide font-medium text-ink truncate">{e.desc}</div>
-                                    <div className="text-[12px] text-ink-3 tracking-tight mt-0.5 truncate">{e.payer} 先付 NT${utils.fmt(e.amount)}</div>
-                                  </div>
-                                  {myCost > 0 && (
-                                    <div className="text-right shrink-0">
-                                      <div className="text-[11px] text-ink-3 mb-0.5">你的分攤</div>
-                                      <div className="text-[18px] font-medium tracking-[0.5px] text-red-700">NT${utils.fmt(myCost)}</div>
-                                    </div>
-                                  )}
-                                </button>
-                              );
-                            } else {
-                              const t = item as Transfer;
-                              return (
-                                <button type="button" key={t.id} onClick={() => { setSelectedTransfer(t); toggleModal('transferDetail', true); }} className="w-[calc(100%+2.25rem)] text-left py-3 border-b border-line last:border-b-0 flex items-center gap-2.5 cursor-pointer hover:bg-paper-2 focus-visible:bg-paper-2 -mx-4.5 px-4.5">
-                                  <ArrowRight size={14} className="text-ink-4 shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-[14px] font-medium text-ink truncate">{t.from} <span className="text-ink-3 font-normal text-[12px] mx-1">轉給</span> {t.to}</div>
-                                    {t.note && <div className="text-[11px] text-ink-3 mt-0.5 truncate">{t.note}</div>}
-                                  </div>
-                                  <div className="ml-auto text-right">
-                                    <div className="text-[17px] font-medium tracking-[0.5px]">NT${utils.fmt(t.amount)}</div>
-                                  </div>
-                                </button>
-                              );
-                            }
-                          })}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <RecordsList groups={groupedRecords} myName={myName} filtered={!!recordSearch || recordFilter !== 'all'} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
                   <button
                     type="button"
                     className="mobile-add-button sm:hidden"
@@ -959,14 +954,14 @@ export default function App() {
                               onClick={async () => {
                                 setIsSaving(true);
                                 const tf: Transfer = {
-                                  id: 't' + Date.now(), from: s.from, to: s.to, amount: s.amount,
+                                  id: 't' + crypto.randomUUID(), from: s.from, to: s.to, amount: s.amount,
                                   note: '結算轉帳', date: utils.todayStr(), createdAt: Date.now()
                                 };
                                 const updated = { ...currentGroup!, transfers: [...currentGroup!.transfers, tf] };
                                 try {
                                   await persistGroupMutation(
                                     updated,
-                                    () => upsertTransferInCloud(updated.code, tf),
+                                    { type: 'transfer.put', transfer: tf },
                                     `已記錄：${s.from} → ${s.to} NT$ ${utils.fmt(s.amount)}`,
                                   );
                                 } finally {
@@ -1117,7 +1112,21 @@ export default function App() {
         )}
 
         {modals.addRecord && (
-          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} onClose={() => toggleModal('addRecord', false)}>
+          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} onClose={() => toggleModal('addRecord', false)} footer={
+            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)} disabled={isSaving}>取消</button>
+              {recordType === 'expense' && !isEditingExpense && (
+                <button className="btn btn-ghost btn-sm" onClick={() => addExpense(true)} disabled={isSaving}>{isSaving ? '儲存中…' : '儲存並繼續'}</button>
+              )}
+              <button
+                className={`btn btn-primary btn-sm sm:col-span-1 ${recordType === 'expense' && !isEditingExpense ? 'col-span-2' : 'col-span-1'}`}
+                onClick={() => recordType === 'expense' ? addExpense(false) : addTransfer()}
+                disabled={isSaving}
+              >
+                {isSaving ? '儲存中…' : '儲存'}
+              </button>
+            </div>
+          }>
             {(!isEditingExpense && !isEditingTransfer) && (
               <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">
                 <button 
@@ -1320,19 +1329,6 @@ export default function App() {
             )}
 
             {formError && <div className="form-error" role="alert">{formError}</div>}
-            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2 mt-4 sticky-action-bar">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)} disabled={isSaving}>取消</button>
-              {recordType === 'expense' && !isEditingExpense && (
-                <button className="btn btn-ghost btn-sm" onClick={() => addExpense(true)} disabled={isSaving}>{isSaving ? '儲存中…' : '儲存並繼續'}</button>
-              )}
-              <button
-                className={`btn btn-primary btn-sm sm:col-span-1 ${recordType === 'expense' && !isEditingExpense ? 'col-span-2' : 'col-span-1'}`}
-                onClick={() => recordType === 'expense' ? addExpense(false) : addTransfer()}
-                disabled={isSaving}
-              >
-                {isSaving ? '儲存中…' : '儲存'}
-              </button>
-            </div>
           </Modal>
         )}
 
@@ -1464,8 +1460,10 @@ export default function App() {
   );
 }
 
-function Modal({ title, children, onClose }: { title: string, children: React.ReactNode, onClose: () => void }) {
+function Modal({ title, children, onClose, footer }: { title: string, children: React.ReactNode, onClose: () => void, footer?: React.ReactNode }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   const titleId = `dialog-${title.replace(/\s/g, '-')}`;
 
@@ -1495,12 +1493,34 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
     body.style.overflow = 'hidden';
     root.style.overflow = 'hidden';
 
+    const viewport = window.visualViewport;
+    let frame = 0;
+    const resize = (event?: Event) => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (backdropRef.current) {
+          backdropRef.current.style.height = `${viewport?.height || window.innerHeight}px`;
+          backdropRef.current.style.top = `${viewport?.offsetTop || 0}px`;
+        }
+        const focused = document.activeElement;
+        if (event?.type !== 'scroll' && focused instanceof HTMLElement && contentRef.current?.contains(focused)) {
+          const field = focused.getBoundingClientRect();
+          const area = contentRef.current.getBoundingClientRect();
+          if (field.top < area.top || field.bottom > area.bottom) focused.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    };
+    resize();
+    viewport?.addEventListener('resize', resize);
+    viewport?.addEventListener('scroll', resize);
+    window.addEventListener('resize', resize);
+
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
     const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const firstFocusable = dialog?.querySelector<HTMLElement>('[data-autofocus]')
       || dialog?.querySelector<HTMLElement>(focusableSelector);
-    (firstFocusable || dialog)?.focus();
+    (firstFocusable || dialog)?.focus({ preventScroll: true });
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -1525,6 +1545,10 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      viewport?.removeEventListener('resize', resize);
+      viewport?.removeEventListener('scroll', resize);
+      window.removeEventListener('resize', resize);
+      cancelAnimationFrame(frame);
       body.style.position = previousBodyStyles.position;
       body.style.top = previousBodyStyles.top;
       body.style.left = previousBodyStyles.left;
@@ -1533,13 +1557,14 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
       body.style.overflow = previousBodyStyles.overflow;
       root.style.overflow = previousRootOverflow;
       window.scrollTo(0, scrollY);
-      previouslyFocused?.focus();
+      previouslyFocused?.focus({ preventScroll: true });
     };
   }, []);
 
   return (
     <div
-      className="modal-backdrop fixed inset-0 bg-ink/40 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-5"
+      ref={backdropRef}
+      className="modal-backdrop fixed left-0 right-0 top-0 h-[100dvh] bg-ink/40 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-5"
       onClick={onClose}
     >
       <div
@@ -1548,16 +1573,17 @@ function Modal({ title, children, onClose }: { title: string, children: React.Re
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="modal-panel bg-paper border border-line rounded-t-3xl sm:rounded-2xl w-full max-w-[440px] max-h-[92dvh] sm:max-h-[90vh] overflow-y-auto shadow-lg"
+        className="modal-panel flex flex-col bg-paper border border-line rounded-t-3xl sm:rounded-2xl w-full max-w-[440px] max-h-[92%] sm:max-h-[90%] overflow-hidden shadow-lg"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-4.5 border-b border-line flex items-center justify-between">
+        <div className="p-4.5 border-b border-line flex shrink-0 items-center justify-between">
           <span id={titleId} className="font-serif text-[15px] tracking-[2px]">{title}</span>
           <button className="icon-btn" onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button>
         </div>
-        <div className="p-5">
+        <div ref={contentRef} className="modal-content min-h-0 overflow-y-auto p-5">
           {children}
         </div>
+        {footer && <div className="modal-footer shrink-0 border-t border-line px-5 pt-3">{footer}</div>}
       </div>
     </div>
   );

@@ -38,6 +38,11 @@ const normalizeGroup = (data: Group): Group => ({
   members: data.members || [],
 });
 
+export const subscribeToConnection = async (onChange: (connected: boolean) => void): Promise<Unsubscribe> => {
+  const [database, { ref, onValue }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
+  return onValue(ref(database, '.info/connected'), snapshot => onChange(snapshot.val() === true), () => onChange(false));
+};
+
 export const subscribeToGroup = (
   groupCode: string,
   onUpdate: (data: Group | null) => void,
