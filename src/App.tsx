@@ -22,9 +22,20 @@ import type { GroupChange } from './lib/outbox';
 import { Drafts } from './lib/drafts';
 import { RecordsList, type RecordItem } from './components/RecordsList';
 import { Modal } from './components/Modal';
-import type { KeyboardField } from './components/KeyboardInputBar';
+import { RecordEditor } from './components/RecordEditor';
+import { Statistics } from './components/Statistics';
+import { HistoryLog } from './components/HistoryLog';
+import { DataSettings } from './components/DataSettings';
+import { fingerprint } from './lib/audit';
+import { categories, categoryLabel, categoryOf } from './lib/categories';
+import { appUpdates } from './lib/appUpdates';
+import type { ExpenseForm, TransferForm } from './lib/drafts';
 import {
-  addMemberToCloud,
+  joinGroupInCloud,
+  ensureDeviceIdentity,
+  currentDeviceUid,
+  memberNameKey,
+  validMemberName,
   createGroupInCloud,
   fetchGroupOnce,
   subscribeToConnection,
@@ -56,10 +67,15 @@ export default function App() {
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
   const [myName, setMyName] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'records' | 'balance' | 'members'>('records');
+  const [activeTab, setActiveTab] = useState<'records' | 'balance' | 'members' | 'stats'>('records');
   const [recordType, setRecordType] = useState<'expense' | 'transfer'>('expense');
   const [recordSearch, setRecordSearch] = useState('');
   const [recordFilter, setRecordFilter] = useState<'all' | 'mine' | 'paid'>('all');
+  const [recordMonth, setRecordMonth] = useState('');
+  const [recordCategory, setRecordCategory] = useState('');
+  const [dataSettings, setDataSettings] = useState(false);
+  const [deviceUid, setDeviceUid] = useState('');
+  const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
 
   // Modals state
   const [modals, setModals] = useState({
@@ -86,7 +102,7 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [joinMyName, setJoinMyName] = useState('');
 
-  const [expForm, setExpForm] = useState({
+  const [expForm, setExpForm] = useState<ExpenseForm>({
     desc: '',
     amount: '',
     date: utils.todayStr(),
@@ -105,49 +121,15 @@ export default function App() {
   });
 
   const [settingsGroupName, setSettingsGroupName] = useState('');
-  const keyboardFields = useMemo<KeyboardField[]>(() => {
-    if (recordType === 'transfer') return [
-      { id: 'transfer-amount', label: '轉帳金額 (NT$)', value: tfForm.amount, type: 'number', inputMode: 'decimal', placeholder: '0.00',
-        onChange: value => { setTfForm(form => ({ ...form, amount: value })); setFormError(''); } },
-      { id: 'transfer-note', label: '轉帳備註', value: tfForm.note, maxLength: 30, placeholder: '例：已轉帳至銀行帳戶',
-        onChange: value => { setTfForm(form => ({ ...form, note: value })); setFormError(''); } },
-    ];
-    return [
-      { id: 'expense-amount', label: '金額 (NT$)', value: expForm.amount, type: 'number', inputMode: 'decimal', placeholder: '0',
-        onChange: value => { setExpForm(form => ({ ...form, amount: value })); setFormError(''); } },
-      { id: 'expense-description', label: '說明', value: expForm.desc, maxLength: 30, placeholder: '例：晚餐、計程車',
-        onChange: value => { setExpForm(form => ({ ...form, desc: value })); setFormError(''); } },
-      ...(expForm.splitMode === 'equal' ? [] : expForm.participants.map(name => ({
-        id: `expense-share-${encodeURIComponent(name)}`,
-        label: `${name} ${expForm.splitMode === 'custom' ? '分攤金額 (NT$)' : '分攤比例 (%)'}`,
-        value: expForm.customShares[name] || '', type: 'number' as const, inputMode: 'decimal' as const, placeholder: '0',
-        onChange: (value: string) => { setExpForm(form => ({ ...form, customShares: { ...form.customShares, [name]: value } })); setFormError(''); },
-      }))),
-    ];
-  }, [recordType, expForm, tfForm]);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   useSyncExternalStore(sync.subscribe, sync.getVersion);
   const syncStatus = sync.getStatus(currentGroup?.code || '');
   const groupCodeRef = useRef(currentGroup?.code);
   groupCodeRef.current = currentGroup?.code;
-
-  useEffect(() => {
-    if (!modals.addRecord || !currentGroup || isSaving) return;
-    try {
-      const defaultPayer = currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || '');
-      const changedDefaults = expForm.payer !== defaultPayer || expForm.splitMode !== 'equal'
-        || expForm.date !== utils.todayStr() || tfForm.date !== utils.todayStr()
-        || tfForm.from !== defaultPayer || tfForm.to !== (currentGroup.members.find(name => name !== defaultPayer) || '')
-        || expForm.participants.length !== currentGroup.members.length
-        || currentGroup.members.some(name => !expForm.participants.includes(name));
-      new Drafts(localStorage).save(currentGroup.code, myName, {
-        recordType, expense: expForm, transfer: tfForm,
-        expenseId: isEditingExpense ? selectedExpense?.id : undefined,
-        transferId: isEditingTransfer ? selectedTransfer?.id : undefined,
-      }, changedDefaults);
-    } catch { setFormError('草稿無法保存，請確認裝置儲存空間'); }
-  }, [modals.addRecord, currentGroup?.code, myName, expForm, tfForm, recordType, isEditingExpense, isEditingTransfer, selectedExpense?.id, selectedTransfer?.id, isSaving]);
+  const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
+  const memberMonths = useMemo(() => [...new Set([...(currentGroup?.expenses || []), ...(currentGroup?.transfers || [])].map(record => record.date?.slice(0, 7)).filter(Boolean))].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers]);
+  useEffect(() => { ensureDeviceIdentity().then(setDeviceUid).catch(() => {}); }, []);
 
   const clearRecordDraft = () => {
     if (currentGroup) {
@@ -275,6 +257,7 @@ export default function App() {
     setSettingsGroupName(data.name);
     setCurrentPage('group');
     setActiveTab('records');
+    setRecordMonth(''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
     storage.setLastGroup(data.code);
   };
 
@@ -284,7 +267,12 @@ export default function App() {
     successMessage?: string,
   ) => {
     try {
-      sync.enqueue(optimisticGroup.code, change);
+      const base = storage.getGroup(optimisticGroup.code) || currentGroup || optimisticGroup;
+      const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
+      const before = change.type.startsWith('expense.') ? (isEditingExpense && selectedExpense?.id === target ? selectedExpense : base.expenses.find(record => record.id === target))
+        : change.type.startsWith('transfer.') ? (isEditingTransfer && selectedTransfer?.id === target ? selectedTransfer : base.transfers.find(record => record.id === target)) : undefined;
+      const meta = { id: crypto.randomUUID(), actor: myName, actorUid: currentDeviceUid(), at: Date.now(), ...(target ? { expected: fingerprint(before) } : {}) };
+      sync.enqueue(optimisticGroup.code, { ...change, meta });
       const merged = sync.merge(storage.getGroup(optimisticGroup.code) || optimisticGroup);
       setCurrentGroup(merged);
       // The outbox is already durable even if writing the display cache fails.
@@ -389,6 +377,7 @@ export default function App() {
       setFormError('請填寫群組名稱與你的名字');
       return;
     }
+    if (!validMemberName(newGroupMyName.trim())) { setFormError('名字最多 12 字，請勿使用 . # $ / [ ] 或保留字'); return; }
     setIsSaving(true);
     setFormError('');
     try {
@@ -416,8 +405,8 @@ export default function App() {
       setNewGroupMyName('');
       enterGroup(data, newGroupMyName.trim());
       showToast('群組已建立');
-    } catch {
-      setFormError('建立失敗，請確認網路連線後再試一次');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : '建立暫時未完成，請稍後再試');
       setSyncState('error');
     } finally {
       setIsSaving(false);
@@ -447,14 +436,14 @@ export default function App() {
         return;
       }
       const existingLocalMembership = myGroups.some(group => group.code === code && group.myName === name);
-      if (cloudData.members.includes(name) && !existingLocalMembership) {
+      const unclaimedMember = !!cloudData.security && !cloudData.security.names[memberNameKey(name)];
+      const sameDevice = cloudData.security?.names[memberNameKey(name)] === currentDeviceUid();
+      if (cloudData.members.includes(name) && !existingLocalMembership && !unclaimedMember && !sameDevice) {
         setFormError('此名稱已有人使用，請換一個顯示名稱');
         setSyncState('');
         return;
       }
-      const data = cloudData.members.includes(name)
-        ? cloudData
-        : await addMemberToCloud(code, name);
+      const data = await joinGroupInCloud(code, name);
       storage.saveGroup(code, data);
 
       const updated = myGroups.some(group => group.code === code)
@@ -469,8 +458,8 @@ export default function App() {
       enterGroup(data, name);
       setSyncState('synced');
       showToast('已加入群組');
-    } catch {
-      setFormError('加入失敗，請確認網路連線後再試一次');
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : '加入暫時未完成，請稍後再試');
       setSyncState('error');
     } finally {
       setIsSaving(false);
@@ -493,6 +482,7 @@ export default function App() {
       payer: e.payer,
       participants: [...e.participants],
       splitMode: e.splitMode,
+      category: e.category || 'other',
       customShares
     });
 
@@ -514,6 +504,7 @@ export default function App() {
       payer: expense.payer,
       participants: [...expense.participants],
       splitMode: expense.splitMode,
+      category: expense.category || 'other',
       customShares,
     });
     setFormError('');
@@ -521,15 +512,16 @@ export default function App() {
     setModals(prev => ({ ...prev, expenseDetail: false, addRecord: true }));
   };
 
-  const addExpense = async (keepOpen = false) => {
-    if (!currentGroup) return;
-    const { desc, amount, payer, participants, splitMode, date, customShares } = expForm;
+  const addExpense = async (form: ExpenseForm, keepOpen = false): Promise<boolean> => {
+    if (!currentGroup) return false;
+    const { desc, amount, payer, participants, splitMode, date, customShares } = form;
     const amt = parseFloat(amount);
     setFormError('');
-    if (!desc.trim()) { setFormError('請填寫費用說明'); return; }
-    if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return; }
-    if (!payer) { setFormError('請選擇付款人'); return; }
-    if (participants.length === 0) { setFormError('請選擇至少一位分攤對象'); return; }
+    if (!desc.trim()) { setFormError('請填寫費用說明'); return false; }
+    if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return false; }
+    if (!payer || !currentGroup.members.includes(payer)) { setFormError('請選擇有效付款人'); return false; }
+    if (participants.length === 0 || participants.some(name => !currentGroup.members.includes(name))) { setFormError('請選擇有效的分攤對象'); return false; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { setFormError('請填寫日期'); return false; }
 
     let shares: Share[] = [];
     let percentages: Share[] | undefined;
@@ -540,17 +532,17 @@ export default function App() {
       });
       if (rawShares.some(share => !Number.isFinite(share.amount) || share.amount < 0)) {
         setFormError('分攤數值必須是 0 或正數');
-        return;
+        return false;
       }
       const total = rawShares.reduce((sum, share) => sum + share.amount, 0);
 
       if (splitMode === 'percent') {
-        if (rawShares.some(share => share.amount > 100)) { setFormError('單一成員的比例不能超過 100%'); return; }
-        if (Math.abs(total - 100) > 0.001) { setFormError('比例總和必須等於 100%'); return; }
+        if (rawShares.some(share => share.amount > 100)) { setFormError('單一成員的比例不能超過 100%'); return false; }
+        if (Math.abs(total - 100) > 0.001) { setFormError('比例總和必須等於 100%'); return false; }
         shares = utils.percentShares(amt, rawShares);
         percentages = rawShares;
       } else {
-        if (utils.toCents(amt) !== utils.toCents(total)) { setFormError('分攤金額加總必須等於費用金額'); return; }
+        if (utils.toCents(amt) !== utils.toCents(total)) { setFormError('分攤金額加總必須等於費用金額'); return false; }
         shares = rawShares.map(share => ({ ...share, amount: utils.fromCents(utils.toCents(share.amount)) }));
       }
     }
@@ -558,6 +550,7 @@ export default function App() {
     const expense: Expense = {
       id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + crypto.randomUUID(),
       desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
+      category: form.category || 'other',
       ...(percentages ? { percentages } : {}),
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
     };
@@ -577,7 +570,7 @@ export default function App() {
       isEditingExpense ? '費用已更新' : '費用已新增',
     );
     setIsSaving(false);
-    if (!saved) return;
+    if (!saved) return false;
     clearRecordDraft();
     setIsEditingExpense(false);
     setSelectedExpense(null);
@@ -597,16 +590,18 @@ export default function App() {
     } else {
       toggleModal('addRecord', false);
     }
+    return true;
   };
 
-  const addTransfer = async () => {
-    if (!currentGroup) return;
-    const { from, to, amount, date, note } = tfForm;
+  const addTransfer = async (form: TransferForm): Promise<boolean> => {
+    if (!currentGroup) return false;
+    const { from, to, amount, date, note } = form;
     const amt = parseFloat(amount);
     setFormError('');
-    if (!from || !to) { setFormError('請選擇付款人與收款人'); return; }
-    if (from === to) { setFormError('付款人與收款人不能相同'); return; }
-    if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return; }
+    if (!from || !to || !currentGroup.members.includes(from) || !currentGroup.members.includes(to)) { setFormError('請選擇有效的付款人與收款人'); return false; }
+    if (from === to) { setFormError('付款人與收款人不能相同'); return false; }
+    if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return false; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { setFormError('請填寫日期'); return false; }
 
     const tf: Transfer = {
       id: isEditingTransfer && selectedTransfer ? selectedTransfer.id : 't' + crypto.randomUUID(),
@@ -629,10 +624,11 @@ export default function App() {
       isEditingTransfer ? '轉帳已更新' : '轉帳已記錄',
     );
     setIsSaving(false);
-    if (!saved) return;
+    if (!saved) return false;
     clearRecordDraft();
     toggleModal('addRecord', false);
     setIsEditingTransfer(false);
+    return true;
   };
 
   const removeExpense = async (id: string) => {
@@ -682,6 +678,8 @@ export default function App() {
   const addMember = async (name: string) => {
     const trimmedName = name.trim();
     if (!currentGroup || !trimmedName) return false;
+    if (currentGroup.security && !validMemberName(trimmedName)) { showToast('名字最多 12 字，請勿使用 . # $ / [ ] 或保留字'); return false; }
+    if (currentGroup.security && !isOwner) { showToast('只有群主可新增預設成員，朋友仍可使用邀請碼自行加入'); return false; }
     if (currentGroup.members.includes(trimmedName)) { showToast('此成員已存在'); return false; }
     const updated = { ...currentGroup, members: [...currentGroup.members, trimmedName] };
     return persistGroupMutation(
@@ -697,7 +695,7 @@ export default function App() {
     
     // 檢查是否為群主（群主永遠是 members 的第 0 個索引）
     const creator = currentGroup.members[0];
-    if (myName !== creator) { 
+    if (!isOwner) {
        showToast('⚠️ 權限不足：只有群主可以刪除成員'); 
        return; 
     }
@@ -719,6 +717,7 @@ export default function App() {
 
   const saveGroupSettings = async () => {
     if (!currentGroup || !settingsGroupName.trim()) return;
+    if (currentGroup.security && !isOwner) { setFormError('只有群主可以修改群組名稱'); return; }
     const name = settingsGroupName.trim();
     const updated = { ...currentGroup, name };
     setIsSaving(true);
@@ -761,9 +760,11 @@ export default function App() {
       const isPaidByMe = isExpense ? item.payer === myName : item.from === myName;
       if (recordFilter === 'mine' && !isMine) return false;
       if (recordFilter === 'paid' && !isPaidByMe) return false;
+      if (recordMonth && !item.date?.startsWith(recordMonth + '-')) return false;
+      if (recordCategory && (!isExpense || categoryOf(item) !== recordCategory)) return false;
       if (!query) return true;
       const searchable = isExpense
-        ? [item.desc, item.payer, ...item.participants]
+        ? [item.desc, item.payer, ...item.participants, categoryLabel(item.category)]
         : [item.from, item.to, item.note || ''];
       return searchable.some(value => value.toLocaleLowerCase('zh-TW').includes(query));
     }).sort((a, b) => {
@@ -778,7 +779,7 @@ export default function App() {
       groups[key].push(item);
     });
     return groups;
-  }, [currentGroup, myName, recordFilter, recordSearch]);
+  }, [currentGroup, myName, recordFilter, recordSearch, recordMonth, recordCategory]);
 
   return (
     <div className="min-h-[100dvh] flex flex-col font-sans">
@@ -789,6 +790,7 @@ export default function App() {
                 <div className="font-serif text-[17px] font-semibold tracking-[3px]">分帳小工具</div>
                 <div className="text-[10px] tracking-[4px] text-ink-3 uppercase">分帳應用</div>
               </div>
+              <button type="button" className="icon-btn" aria-label="開啟資料與 App 設定" onClick={() => setDataSettings(true)}><MoreHorizontal size={18} /></button>
             </nav>
 
             <div className="flex-1 flex flex-col items-center justify-center p-5 sm:p-6 gap-8 sm:gap-10">
@@ -867,18 +869,36 @@ export default function App() {
             </nav>
 
             <div className="flex border-b border-line bg-paper sticky top-13 z-40 px-5">
-              {(['records', 'balance', 'members'] as const).map(tab => (
+              {(['records', 'balance', 'stats', 'members'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   className={`flex-1 py-3 text-[11px] tracking-[2px] uppercase transition-all border-b-2 -mb-px ${activeTab === tab ? 'text-ink border-ink' : 'text-ink-3 border-transparent'}`}
                 >
-                  {tab === 'records' ? '明細' : tab === 'balance' ? '結算' : '成員'}
+                  {tab === 'records' ? '明細' : tab === 'balance' ? '結算' : tab === 'stats' ? '統計' : '成員'}
                 </button>
               ))}
             </div>
 
             <div className="flex-1 p-5 max-w-[680px] mx-auto w-full flex flex-col gap-4">
+              {syncStatus.reason && <div className="rounded-2xl border border-line p-4 text-sm bg-paper">
+                <p role="alert">{syncStatus.reason}</p>
+                {syncStatus.conflict && <div className="mt-3">
+                  <p className="text-xs text-ink-3 leading-relaxed mb-3">另一位成員已更新這筆紀錄。你的變更保留在此裝置，請選擇保留哪個版本；選擇雲端版本會放棄此筆尚未同步的修改。</p>
+                  {(() => {
+                    const conflict = syncStatus.conflict;
+                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers].find(record => record.id === conflict.targetId);
+                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || []].find(record => record.id === conflict.targetId);
+                    const describe = (record?: Expense | Transfer) => record ? ('desc' in record ? record.desc : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
+                    return <div className="text-xs mb-3 space-y-2 break-words"><p>雲端：{describe(cloud)}</p><p>此裝置：{describe(mine)}</p></div>;
+                  })()}
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn btn-sm" onClick={() => { try { sync.resolveConflict(currentGroup!.code, 'cloud'); } catch { showToast('儲存空間不足，尚未變更任何待同步紀錄'); } }}>保留雲端版本</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => { try { sync.resolveConflict(currentGroup!.code, 'mine'); } catch { showToast('儲存空間不足，尚未變更任何待同步紀錄'); } }}>使用此裝置版本</button>
+                  </div>
+                </div>}
+              </div>}
+              {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} />}
               {activeTab === 'records' && (
                 <div className="panel pb-20 sm:pb-0">
                   <div className="panel-header p-4 border-b border-line flex items-center justify-between">
@@ -912,8 +932,12 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <div><label className="sr-only" htmlFor="record-month">明細月份</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部月份</option>{memberMonths.map(month => <option key={month} value={month}>{month}</option>)}</select></div>
+                      <div><label className="sr-only" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">全部分類／轉帳</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+                    </div>
                   </div>
-                  <RecordsList groups={groupedRecords} myName={myName} filtered={!!recordSearch || recordFilter !== 'all'} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
+                  <RecordsList groups={groupedRecords} myName={myName} filtered={!!recordSearch || recordFilter !== 'all' || !!recordMonth || !!recordCategory} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
                   <button
                     type="button"
                     className="mobile-add-button sm:hidden"
@@ -1058,8 +1082,8 @@ export default function App() {
                         <div key={m} className="flex items-center py-3 border-b border-line last:border-b-0 gap-3">
                           <div className="w-7 h-7 border border-line rounded-full flex items-center justify-center text-[11px] font-medium text-ink-2 shrink-0">{m.charAt(0)}</div>
                           <div className="flex-1 text-sm">{m} {m === myName && <span className="text-[10px] text-ink-3 tracking-wider">（我）</span>}</div>
-                          {currentGroup.members.length > 1 && m !== myName && (
-                            <button className="icon-btn" onClick={() => removeMember(m)}><X size={14} /></button>
+                          {isOwner && currentGroup.members.length > 1 && m !== myName && (
+                            <button className="icon-btn" aria-label={'移除 ' + m} onClick={() => removeMember(m)}><X size={14} /></button>
                           )}
                         </div>
                       ))}
@@ -1071,6 +1095,7 @@ export default function App() {
                         <input
                           type="text"
                           id="newMemberInput"
+                          disabled={!!currentGroup?.security && !isOwner}
                           placeholder="姓名"
                           className="flex-1"
                           maxLength={12}
@@ -1081,7 +1106,7 @@ export default function App() {
                             }
                           }}
                         />
-                        <button className="btn btn-sm btn-primary" onClick={() => {
+                        <button className="btn btn-sm btn-primary" disabled={!!currentGroup?.security && !isOwner} onClick={() => {
                           const input = document.getElementById('newMemberInput') as HTMLInputElement;
                           addMember(input.value);
                           input.value = '';
@@ -1133,242 +1158,30 @@ export default function App() {
           </Modal>
         )}
 
-        {modals.addRecord && (
-          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} onClose={() => toggleModal('addRecord', false)} footer={
-            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
-              <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)} disabled={isSaving}>取消</button>
-              {recordType === 'expense' && !isEditingExpense && (
-                <button className="btn btn-ghost btn-sm" onClick={() => addExpense(true)} disabled={isSaving}>{isSaving ? '儲存中…' : '儲存並繼續'}</button>
-              )}
-              <button
-                className={`btn btn-primary btn-sm sm:col-span-1 ${recordType === 'expense' && !isEditingExpense ? 'col-span-2' : 'col-span-1'}`}
-                onClick={() => recordType === 'expense' ? addExpense(false) : addTransfer()}
-                disabled={isSaving}
-              >
-                {isSaving ? '儲存中…' : '儲存'}
-              </button>
-            </div>
-          }>
-            {(!isEditingExpense && !isEditingTransfer) && (
-              <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">
-                <button 
-                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-full transition-all ${recordType === 'expense' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
-                  onClick={() => setRecordType('expense')}
-                >
-                  費用
-                </button>
-                <button 
-                  className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-full transition-all ${recordType === 'transfer' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
-                  onClick={() => setRecordType('transfer')}
-                >
-                  轉帳
-                </button>
-              </div>
-            )}
-
-            {recordType === 'expense' ? (
-              <>
-                <div className="field">
-                  <label className="field-label" htmlFor="expense-amount">金額 (NT$)</label>
-                  <input
-                    id="expense-amount"
-                    data-autofocus
-                    type="number"
-                    inputMode="decimal"
-                    value={expForm.amount}
-                    onChange={e => { setExpForm({ ...expForm, amount: e.target.value }); setFormError(''); }}
-                    placeholder="0"
-                    step="0.01"
-                    min="0"
-                    className="expense-amount-input"
-                  />
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="expense-description">說明</label>
-                  <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint="next" />
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="expense-payer">誰先付款</label>
-                  <select id="expense-payer" value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
-                    {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="field">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="field-label mb-0">誰要分攤</span>
-                    <span className="text-xs text-ink-3">已選 {expForm.participants.length}／{currentGroup?.members.length || 0} 人</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-1.5 mt-2" aria-label="快速選擇分攤對象">
-                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: [...(currentGroup?.members || [])] })}>全員</button>
-                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: (currentGroup?.members || []).filter(member => member !== expForm.payer) })}>除付款人</button>
-                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: currentGroup?.members.includes(myName) ? [myName] : [] })}>只有我</button>
-                  </div>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {currentGroup?.members.map(m => (
-                      <button
-                        type="button"
-                        key={m}
-                        onClick={() => {
-                          const updated = expForm.participants.includes(m)
-                            ? expForm.participants.filter(p => p !== m)
-                            : [...expForm.participants, m];
-                          setExpForm({ ...expForm, participants: updated });
-                        }}
-                        aria-pressed={expForm.participants.includes(m)}
-                        className={`member-toggle ${expForm.participants.includes(m) ? 'border-ink bg-ink text-paper' : 'border-line text-ink-2 bg-paper'}`}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="field">
-                  <label className="field-label">分攤方式</label>
-                  <div className="flex border border-line rounded-full overflow-hidden mb-3">
-                    {(['equal', 'custom', 'percent'] as const).map(mode => (
-                      <button
-                        type="button"
-                        key={mode}
-                        onClick={() => setExpForm({
-                          ...expForm,
-                          splitMode: mode,
-                          customShares: mode === expForm.splitMode ? expForm.customShares : {},
-                        })}
-                        className={`flex-1 min-h-11 px-1 py-2 text-xs transition-all ${expForm.splitMode === mode ? 'bg-ink text-paper' : 'bg-transparent text-ink-2'}`}
-                      >
-                        {mode === 'equal' ? '平均分攤' : mode === 'custom' ? '自訂金額' : '自訂比例%'}
-                      </button>
-                    ))}
-                  </div>
-                  {expForm.splitMode === 'equal' ? (
-                    expForm.participants.length > 0 && expForm.amount && (
-                      <div className="text-xs text-ink-3 mt-1">每人約 NT$ {utils.fmt(utils.round2(parseFloat(expForm.amount) / expForm.participants.length))}</div>
-                    )
-                  ) : (() => {
-                    const total = expForm.splitMode === 'custom'
-                      ? parseFloat(expForm.amount) || 0
-                      : 100;
-                    const filledTotal = expForm.participants.reduce(
-                      (sum, x) => sum + (parseFloat(expForm.customShares[x]) || 0), 0
-                    );
-                    const remaining = utils.round2(total - filledTotal);
-                    const emptyParticipants = expForm.participants.filter(
-                      x => !expForm.customShares[x] || expForm.customShares[x] === ''
-                    );
-                    const canAutoFill = emptyParticipants.length > 0 && remaining > 0;
-                    const unit = expForm.splitMode === 'custom' ? 'NT$' : '%';
-                    return (
-                      <div className="flex flex-col gap-2.5 mt-2.5">
-                        {expForm.participants.map(p => (
-                          <div key={p} className="flex items-center gap-2.5">
-                            <label htmlFor={`expense-share-${encodeURIComponent(p)}`} className="w-20 text-sm shrink-0">{p}</label>
-                            <div className="flex-1">
-                              <input
-                                id={`expense-share-${encodeURIComponent(p)}`}
-                                type="number"
-                                inputMode="decimal"
-                                value={expForm.customShares[p] || ''}
-                                onChange={e =>
-                                  setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }))
-                                }
-                                placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
-                                step="0.01"
-                                min="0"
-                              />
-                            </div>
-                            <div className="text-xs text-ink-3 shrink-0 w-8 text-right">{unit}</div>
-                          </div>
-                        ))}
-                        <div className="flex items-center justify-between mt-1 pt-2 border-t border-line">
-                          <span className={`text-xs tracking-wider ${Math.abs(remaining) < 0.01 ? 'text-green-600' : remaining < 0 ? 'text-red-500' : 'text-ink-3'}`}>
-                            剩餘：{remaining < 0 ? '-' : ''}{unit}{utils.fmt(Math.abs(remaining))}
-                          </span>
-                          {canAutoFill && (
-                            <button
-                              type="button"
-                              className="min-h-10 text-xs text-ink border border-line px-3 py-1.5 rounded-full hover:bg-paper-2 transition-all"
-                              onClick={() => {
-                                const newShares = { ...expForm.customShares };
-                                if (expForm.splitMode === 'custom') {
-                                  utils.equalShares(remaining, emptyParticipants).forEach(share => {
-                                    newShares[share.name] = share.amount.toFixed(2);
-                                  });
-                                } else {
-                                  const remainingBasisPoints = Math.round(remaining * 100);
-                                  const base = Math.floor(remainingBasisPoints / emptyParticipants.length);
-                                  let remainder = remainingBasisPoints - base * emptyParticipants.length;
-                                  emptyParticipants.forEach(name => {
-                                    const basisPoints = base + (remainder-- > 0 ? 1 : 0);
-                                    newShares[name] = (basisPoints / 100).toFixed(2);
-                                  });
-                                }
-                                setExpForm(f => ({ ...f, customShares: newShares }));
-                              }}
-                            >
-                              平均分配剩餘
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-                <details className="expense-more" open={isEditingExpense}>
-                  <summary>日期與更多設定</summary>
-                  <div className="field mt-4 mb-1">
-                    <label className="field-label" htmlFor="expense-date">日期</label>
-                    <input id="expense-date" type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
-                  </div>
-                </details>
-              </>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="field">
-                    <label className="field-label">付款人</label>
-                    <select value={tfForm.from} onChange={e => setTfForm({ ...tfForm, from: e.target.value })}>
-                      {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label className="field-label">收款人</label>
-                    <select value={tfForm.to} onChange={e => setTfForm({ ...tfForm, to: e.target.value })}>
-                      {currentGroup?.members.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="transfer-amount">金額 (NT$)</label>
-                  <input id="transfer-amount" type="number" inputMode="decimal" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
-                </div>
-                <div className="field">
-                  <label className="field-label">日期</label>
-                  <input type="date" value={tfForm.date} onChange={e => setTfForm({ ...tfForm, date: e.target.value })} />
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="transfer-note">備註（選填）</label>
-                  <input id="transfer-note" type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
-                </div>
-              </>
-            )}
-
-            {formError && <div className="form-error" role="alert">{formError}</div>}
-          </Modal>
+        {modals.addRecord && currentGroup && (
+          <RecordEditor group={currentGroup} myName={myName}
+            initial={{ recordType, expense: expForm, transfer: tfForm, expenseId: isEditingExpense ? selectedExpense?.id : undefined, transferId: isEditingTransfer ? selectedTransfer?.id : undefined }}
+            isSaving={isSaving} error={formError} clearError={() => setFormError('')}
+            onClose={() => toggleModal('addRecord', false)} onExpense={addExpense} onTransfer={addTransfer} />
         )}
 
         {modals.groupSettings && (
           <Modal title="群組設定" onClose={() => toggleModal('groupSettings', false)}>
+            <p className="text-xs text-ink-3 leading-relaxed mb-4">{currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
+            <p className="text-xs text-ink-3 mb-4 break-all">此裝置識別碼：{deviceUid || '連線後取得'}<br />裝置身分不包含在備份內。請勿清除網站資料，以免失去群主綁定。</p>
             <div className="field">
               <label className="field-label">群組名稱</label>
-              <input type="text" value={settingsGroupName} onChange={e => setSettingsGroupName(e.target.value)} maxLength={20} />
+              <input type="text" value={settingsGroupName} onChange={e => setSettingsGroupName(e.target.value)} maxLength={20} disabled={!!currentGroup?.security && !isOwner} />
             </div>
             <div className="mt-2">
+              <button type="button" className="btn w-full mb-2" onClick={() => { toggleModal('groupSettings', false); setDataSettings(true); }}>資料備份、匯出與 App 更新</button>
               <button className="btn btn-danger btn-sm w-full" onClick={leaveGroup}>離開群組</button>
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('groupSettings', false)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={saveGroupSettings} disabled={isSaving}>{isSaving ? '同步中…' : '儲存'}</button>
+              <button className="btn btn-primary btn-sm" onClick={saveGroupSettings} disabled={isSaving || (!!currentGroup?.security && !isOwner)}>{isSaving ? '同步中…' : '儲存'}</button>
             </div>
+            {currentGroup && <HistoryLog group={currentGroup} />}
           </Modal>
         )}
 
@@ -1376,6 +1189,7 @@ export default function App() {
           <Modal title="費用詳情" onClose={() => toggleModal('expenseDetail', false)}>
             <div className="mb-4.5">
               <div className="text-xl font-medium mb-1">{selectedExpense.desc}</div>
+              <div className="text-xs text-ink-3 mb-2">{categoryLabel(selectedExpense.category)}</div>
               <div className="text-2xl font-medium tracking-tight mb-3">NT$ {utils.fmt(selectedExpense.amount)}</div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
@@ -1412,6 +1226,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            {currentGroup && <HistoryLog group={currentGroup} target={selectedExpense.id} />}
             <div className="flex flex-col gap-2 mt-2">
               <button className="btn btn-primary w-full" onClick={() => openEditExpense(selectedExpense)}>
                 編輯此筆費用
@@ -1450,6 +1265,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            {currentGroup && <HistoryLog group={currentGroup} target={selectedTransfer.id} />}
             <div className="flex flex-col gap-2 mt-2">
               <button className="btn btn-primary w-full" onClick={() => openEditTransfer(selectedTransfer)}>
                 編輯此筆轉帳
@@ -1461,6 +1277,10 @@ export default function App() {
           </Modal>
         )}
       </>
+      {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
+      {updates.available && <div className="fixed bottom-24 sm:bottom-6 left-4 right-4 mx-auto max-w-[480px] bg-paper border border-line rounded-2xl shadow-lg p-3 flex items-center justify-between gap-3 z-50" role="status">
+        <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
+      </div>}
 
       {/* Toast */}
       <div

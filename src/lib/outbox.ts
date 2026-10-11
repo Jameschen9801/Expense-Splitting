@@ -1,27 +1,59 @@
-import type { Expense, Group, Transfer } from '../types';
+import type { Expense, Group, MutationMeta, Transfer } from '../types';
+import { auditEntry, fingerprint, RecordConflictError, updatedRecord } from './audit';
 
-export type GroupChange =
+export type GroupChange = (
   | { type: 'expense.put'; expense: Expense }
   | { type: 'expense.remove'; id: string }
   | { type: 'transfer.put'; transfer: Transfer }
   | { type: 'transfer.remove'; id: string }
   | { type: 'member.add'; name: string }
   | { type: 'member.remove'; name: string }
-  | { type: 'group.rename'; name: string };
+  | { type: 'group.rename'; name: string }) & { meta?: MutationMeta };
 
 export type PendingChange = { id: string; groupCode: string; change: GroupChange };
 
 // Applying a queued operation more than once must never duplicate a record.
 export function applyChange(group: Group, change: GroupChange): Group {
+  if (change.meta && Object.hasOwn(group.history || {}, change.meta.id)) return group;
+  const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id
+    : 'id' in change ? change.id : 'name' in change ? change.name : group.code;
+  const before = change.type.startsWith('expense.') ? group.expenses.find(record => record.id === target)
+    : change.type.startsWith('transfer.') ? group.transfers.find(record => record.id === target)
+    : change.type === 'group.rename' ? group.name : change.type === 'member.remove' ? change.name : undefined;
+  // A protected record is published before its separate audit append. Do not
+  // reapply that in-flight mutation and invent another optimistic revision.
+  if (change.meta && before && typeof before === 'object' && before.lastMutationId === change.meta.id) return group;
+  let next: Group;
   switch (change.type) {
-    case 'expense.put': return { ...group, expenses: [...group.expenses.filter(e => e.id !== change.expense.id), change.expense] };
-    case 'expense.remove': return { ...group, expenses: group.expenses.filter(e => e.id !== change.id) };
-    case 'transfer.put': return { ...group, transfers: [...group.transfers.filter(t => t.id !== change.transfer.id), change.transfer] };
-    case 'transfer.remove': return { ...group, transfers: group.transfers.filter(t => t.id !== change.id) };
-    case 'member.add': return { ...group, members: group.members.includes(change.name) ? group.members : [...group.members, change.name] };
-    case 'member.remove': return { ...group, members: group.members.filter(name => name !== change.name) };
-    case 'group.rename': return { ...group, name: change.name };
+    case 'expense.put': next = { ...group, expenses: [...group.expenses.filter(e => e.id !== change.expense.id), updatedRecord(change.expense, before as Expense | undefined, change.meta)] }; break;
+    case 'expense.remove': next = { ...group, expenses: group.expenses.filter(e => e.id !== change.id) }; break;
+    case 'transfer.put': next = { ...group, transfers: [...group.transfers.filter(t => t.id !== change.transfer.id), updatedRecord(change.transfer, before as Transfer | undefined, change.meta)] }; break;
+    case 'transfer.remove': next = { ...group, transfers: group.transfers.filter(t => t.id !== change.id) }; break;
+    case 'member.add': next = { ...group, members: group.members.includes(change.name) ? group.members : [...group.members, change.name] }; break;
+    case 'member.remove': next = { ...group, members: group.members.filter(name => name !== change.name) }; break;
+    case 'group.rename': next = { ...group, name: change.name }; break;
   }
+  if (change.meta) {
+    const after = change.type === 'expense.put' ? change.expense : change.type === 'transfer.put' ? change.transfer
+      : change.type === 'group.rename' || change.type === 'member.add' ? change.name : undefined;
+    const entry = auditEntry(change.type, target, before, after, change.meta);
+    next.history = Object.fromEntries(Object.values({ ...group.history, [entry.id]: entry })
+      .sort((a, b) => b.at - a.at).slice(0, 300).map(entry => [entry.id, entry]));
+  }
+  return next;
+}
+
+export function applyCloudChange(group: Group, change: GroupChange): Group {
+  if (change.meta && Object.hasOwn(group.history || {}, change.meta.id)) return group;
+  const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
+  if (target && change.meta && 'expected' in change.meta) {
+    const current = change.type.startsWith('expense.') ? group.expenses.find(record => record.id === target) : group.transfers.find(record => record.id === target);
+    if (current?.lastMutationId === change.meta.id) return group;
+    const restored = change.type === 'expense.put' ? change.expense : change.type === 'transfer.put' ? change.transfer : undefined;
+    if (change.meta.expected === null && restored && fingerprint(current) === fingerprint(restored)) return group;
+    if (fingerprint(current) !== change.meta.expected) throw new RecordConflictError(group, target);
+  }
+  return applyChange(group, change);
 }
 
 export function overlayPending(group: Group, pending: PendingChange[]): Group {
@@ -48,5 +80,15 @@ export class Outbox {
 
   acknowledge(id: string) {
     this.store.setItem(this.key, JSON.stringify(this.list().filter(item => item.id !== id)));
+  }
+  replace(id: string, change: GroupChange) {
+    this.store.setItem(this.key, JSON.stringify(this.list().map(item => item.id === id ? { ...item, change } : item)));
+  }
+  discardEntity(code: string, targetId: string) {
+    this.store.setItem(this.key, JSON.stringify(this.list().filter(item => {
+      const change = item.change;
+      const id = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
+      return item.groupCode !== code || id !== targetId;
+    })));
   }
 }

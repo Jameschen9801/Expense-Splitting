@@ -1,0 +1,64 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "groups": {
+      "$code": {
+        ".read": "$code.matches(/^\\d{6}$/) && (!data.child('security').exists() || auth != null)",
+        ".write": "$code.matches(/^\\d{6}$/) && newData.exists() && ((data.exists() && !data.child('security').exists() && !newData.child('security').exists()) || (auth != null && newData.child('security').exists() && ((!data.exists() && newData.child('security/ownerUid').val() == auth.uid) || auth.uid == data.child('security/ownerUid').val())))",
+        ".validate": "newData.hasChildren(['code','name','members','createdAt']) && newData.child('code').val() == $code && newData.child('name').isString() && newData.child('members').hasChildren()",
+        "security": {
+          ".validate": "newData.hasChildren(['version','ownerUid','users','names']) && newData.child('version').val() == 1 && newData.child('ownerUid').isString() && newData.child('users').child(newData.child('ownerUid').val()).child('role').val() == 'owner' && (!data.exists() || newData.child('ownerUid').val() == data.child('ownerUid').val())",
+          "version": {
+            ".validate": "newData.val() == 1"
+          },
+          "ownerUid": {
+            ".validate": "newData.isString()"
+          },
+          "users": {
+            "$uid": {
+              ".write": "auth != null && $uid == auth.uid && data.parent().parent().child('version').val() == 1 && newData.exists() && ((!data.exists() && newData.child('role').val() == 'member') || (newData.child('name').val() == data.child('name').val() && newData.child('nameKey').val() == data.child('nameKey').val() && newData.child('role').val() == data.child('role').val()))",
+              ".validate": "newData.hasChildren(['name','nameKey','role']) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 12 && newData.child('name').val() != '__proto__' && newData.child('name').val() != 'constructor' && newData.child('name').val() != 'prototype' && newData.child('nameKey').val() == newData.child('name').val() && newData.parent().parent().child('names').child(newData.child('name').val()).val() == $uid && (($uid == newData.parent().parent().child('ownerUid').val() && newData.child('role').val() == 'owner') || ($uid != newData.parent().parent().child('ownerUid').val() && newData.child('role').val() == 'member'))",
+              "$other": {
+                ".validate": "$other == 'name' || $other == 'nameKey' || $other == 'role'"
+              }
+            }
+          },
+          "names": {
+            "$name": {
+              ".write": "auth != null && data.parent().parent().child('version').val() == 1 && newData.val() == auth.uid && (!data.exists() || data.val() == auth.uid)",
+              ".validate": "newData.isString() && newData.parent().parent().child('users').child(newData.val()).child('name').val() == $name"
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "members": {
+          "$name": {
+            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.val() == true && $name == root.child('groups').child($code).child('security/users').child(auth.uid).child('name').val() && (!data.exists() || data.val() == true)",
+            ".validate": "!newData.parent().parent().child('security').exists() || newData.val() == true"
+          }
+        },
+        "expenses": {
+          "$id": {
+            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()",
+            ".validate": "!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('desc').isString() && newData.child('payer').isString() && newData.child('participants').hasChildren() && (newData.child('splitMode').val() == 'equal' || newData.child('splitMode').val() == 'custom' || newData.child('splitMode').val() == 'percent') && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))"
+          }
+        },
+        "transfers": {
+          "$id": {
+            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()",
+            ".validate": "!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','from','to']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('from').isString() && newData.child('to').isString() && newData.child('from').val() != newData.child('to').val() && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))"
+          }
+        },
+        "history": {
+          "$id": {
+            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && !data.exists() && newData.exists()",
+            ".validate": "!newData.parent().parent().child('security').exists() || (newData.child('id').val() == $id && newData.child('at').isNumber() && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('actorUid').val() == auth.uid && newData.child('actor').val() == newData.parent().parent().child('security/users').child(auth.uid).child('name').val())))"
+          }
+        }
+      }
+    }
+  }
+}
