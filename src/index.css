@@ -116,6 +116,13 @@
   .modal-footer {
     padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
   }
+  .keyboard-input-bar {
+    @apply bg-paper px-3 pt-2;
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+  .keyboard-input-bar .icon-btn:disabled {
+    @apply opacity-30 cursor-default;
+  }
   .record-search {
     @apply w-full min-h-11 bg-paper border border-line rounded-xl px-3 py-2.5 text-base text-ink placeholder:text-ink-3;
   }
@@ -155,6 +162,13 @@ input[type="text"], input[type="number"], input[type="date"], select, textarea {
 }
 input:focus, select:focus, textarea:focus {
   @apply border-b-ink;
+}
+
+input.keyboard-accessory-input {
+  @apply min-h-11 rounded-xl border border-line bg-paper-2 px-3 py-2 text-base font-normal;
+}
+input.keyboard-accessory-input:focus {
+  @apply border-ink;
 }
 
 input::placeholder, textarea::placeholder {

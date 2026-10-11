@@ -21,6 +21,8 @@ import { sync } from './lib/sync';
 import type { GroupChange } from './lib/outbox';
 import { Drafts } from './lib/drafts';
 import { RecordsList, type RecordItem } from './components/RecordsList';
+import { Modal } from './components/Modal';
+import type { KeyboardField } from './components/KeyboardInputBar';
 import {
   addMemberToCloud,
   createGroupInCloud,
@@ -103,6 +105,26 @@ export default function App() {
   });
 
   const [settingsGroupName, setSettingsGroupName] = useState('');
+  const keyboardFields = useMemo<KeyboardField[]>(() => {
+    if (recordType === 'transfer') return [
+      { id: 'transfer-amount', label: '轉帳金額 (NT$)', value: tfForm.amount, type: 'number', inputMode: 'decimal', placeholder: '0.00',
+        onChange: value => { setTfForm(form => ({ ...form, amount: value })); setFormError(''); } },
+      { id: 'transfer-note', label: '轉帳備註', value: tfForm.note, maxLength: 30, placeholder: '例：已轉帳至銀行帳戶',
+        onChange: value => { setTfForm(form => ({ ...form, note: value })); setFormError(''); } },
+    ];
+    return [
+      { id: 'expense-amount', label: '金額 (NT$)', value: expForm.amount, type: 'number', inputMode: 'decimal', placeholder: '0',
+        onChange: value => { setExpForm(form => ({ ...form, amount: value })); setFormError(''); } },
+      { id: 'expense-description', label: '說明', value: expForm.desc, maxLength: 30, placeholder: '例：晚餐、計程車',
+        onChange: value => { setExpForm(form => ({ ...form, desc: value })); setFormError(''); } },
+      ...(expForm.splitMode === 'equal' ? [] : expForm.participants.map(name => ({
+        id: `expense-share-${encodeURIComponent(name)}`,
+        label: `${name} ${expForm.splitMode === 'custom' ? '分攤金額 (NT$)' : '分攤比例 (%)'}`,
+        value: expForm.customShares[name] || '', type: 'number' as const, inputMode: 'decimal' as const, placeholder: '0',
+        onChange: (value: string) => { setExpForm(form => ({ ...form, customShares: { ...form.customShares, [name]: value } })); setFormError(''); },
+      }))),
+    ];
+  }, [recordType, expForm, tfForm]);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   useSyncExternalStore(sync.subscribe, sync.getVersion);
@@ -1112,7 +1134,7 @@ export default function App() {
         )}
 
         {modals.addRecord && (
-          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} onClose={() => toggleModal('addRecord', false)} footer={
+          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} onClose={() => toggleModal('addRecord', false)} footer={
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('addRecord', false)} disabled={isSaving}>取消</button>
               {recordType === 'expense' && !isEditingExpense && (
@@ -1239,10 +1261,12 @@ export default function App() {
                       <div className="flex flex-col gap-2.5 mt-2.5">
                         {expForm.participants.map(p => (
                           <div key={p} className="flex items-center gap-2.5">
-                            <div className="w-20 text-sm shrink-0">{p}</div>
+                            <label htmlFor={`expense-share-${encodeURIComponent(p)}`} className="w-20 text-sm shrink-0">{p}</label>
                             <div className="flex-1">
                               <input
+                                id={`expense-share-${encodeURIComponent(p)}`}
                                 type="number"
+                                inputMode="decimal"
                                 value={expForm.customShares[p] || ''}
                                 onChange={e =>
                                   setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }))
@@ -1314,16 +1338,16 @@ export default function App() {
                   </div>
                 </div>
                 <div className="field">
-                  <label className="field-label">金額 (NT$)</label>
-                  <input type="number" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
+                  <label className="field-label" htmlFor="transfer-amount">金額 (NT$)</label>
+                  <input id="transfer-amount" type="number" inputMode="decimal" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
                 </div>
                 <div className="field">
                   <label className="field-label">日期</label>
                   <input type="date" value={tfForm.date} onChange={e => setTfForm({ ...tfForm, date: e.target.value })} />
                 </div>
                 <div className="field">
-                  <label className="field-label">備註（選填）</label>
-                  <input type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
+                  <label className="field-label" htmlFor="transfer-note">備註（選填）</label>
+                  <input id="transfer-note" type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
                 </div>
               </>
             )}
@@ -1455,135 +1479,6 @@ export default function App() {
             {toast.actionLabel}
           </button>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Modal({ title, children, onClose, footer }: { title: string, children: React.ReactNode, onClose: () => void, footer?: React.ReactNode }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  const titleId = `dialog-${title.replace(/\s/g, '-')}`;
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const scrollY = window.scrollY;
-    const body = document.body;
-    const root = document.documentElement;
-    const previousBodyStyles = {
-      position: body.style.position,
-      top: body.style.top,
-      left: body.style.left,
-      right: body.style.right,
-      width: body.style.width,
-      overflow: body.style.overflow,
-    };
-    const previousRootOverflow = root.style.overflow;
-
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollY}px`;
-    body.style.left = '0';
-    body.style.right = '0';
-    body.style.width = '100%';
-    body.style.overflow = 'hidden';
-    root.style.overflow = 'hidden';
-
-    const viewport = window.visualViewport;
-    let frame = 0;
-    const resize = (event?: Event) => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (backdropRef.current) {
-          backdropRef.current.style.height = `${viewport?.height || window.innerHeight}px`;
-          backdropRef.current.style.top = `${viewport?.offsetTop || 0}px`;
-        }
-        const focused = document.activeElement;
-        if (event?.type !== 'scroll' && focused instanceof HTMLElement && contentRef.current?.contains(focused)) {
-          const field = focused.getBoundingClientRect();
-          const area = contentRef.current.getBoundingClientRect();
-          if (field.top < area.top || field.bottom > area.bottom) focused.scrollIntoView({ block: 'nearest' });
-        }
-      });
-    };
-    resize();
-    viewport?.addEventListener('resize', resize);
-    viewport?.addEventListener('scroll', resize);
-    window.addEventListener('resize', resize);
-
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const firstFocusable = dialog?.querySelector<HTMLElement>('[data-autofocus]')
-      || dialog?.querySelector<HTMLElement>(focusableSelector);
-    (firstFocusable || dialog)?.focus({ preventScroll: true });
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialog) return;
-      const focusable = Array.from(dialog.querySelectorAll(focusableSelector)) as HTMLElement[];
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      viewport?.removeEventListener('resize', resize);
-      viewport?.removeEventListener('scroll', resize);
-      window.removeEventListener('resize', resize);
-      cancelAnimationFrame(frame);
-      body.style.position = previousBodyStyles.position;
-      body.style.top = previousBodyStyles.top;
-      body.style.left = previousBodyStyles.left;
-      body.style.right = previousBodyStyles.right;
-      body.style.width = previousBodyStyles.width;
-      body.style.overflow = previousBodyStyles.overflow;
-      root.style.overflow = previousRootOverflow;
-      window.scrollTo(0, scrollY);
-      previouslyFocused?.focus({ preventScroll: true });
-    };
-  }, []);
-
-  return (
-    <div
-      ref={backdropRef}
-      className="modal-backdrop fixed left-0 right-0 top-0 h-[100dvh] bg-ink/40 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-5"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className="modal-panel flex flex-col bg-paper border border-line rounded-t-3xl sm:rounded-2xl w-full max-w-[440px] max-h-[92%] sm:max-h-[90%] overflow-hidden shadow-lg"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="p-4.5 border-b border-line flex shrink-0 items-center justify-between">
-          <span id={titleId} className="font-serif text-[15px] tracking-[2px]">{title}</span>
-          <button className="icon-btn" onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button>
-        </div>
-        <div ref={contentRef} className="modal-content min-h-0 overflow-y-auto p-5">
-          {children}
-        </div>
-        {footer && <div className="modal-footer shrink-0 border-t border-line px-5 pt-3">{footer}</div>}
       </div>
     </div>
   );
