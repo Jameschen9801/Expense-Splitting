@@ -121,7 +121,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     ];
   }, [recordType, expForm, tfForm]);
   return (
-          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} onClose={() => close()} footer={
+          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>取消</button>
               {recordType === 'expense' && !isEditingExpense && (

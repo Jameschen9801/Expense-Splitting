@@ -2,17 +2,20 @@ import { useEffect, useRef, useState, useLayoutEffect, type ReactNode } from 're
 import { flushSync } from 'react-dom';
 import { X } from 'lucide-react';
 import { KeyboardInputBar, type KeyboardField } from './KeyboardInputBar';
+import { modalViewport } from '../lib/keyboard';
 
-export function Modal({ title, children, onClose, footer, keyboardFields = [] }: {
-  title: string; children: ReactNode; onClose: () => void; footer?: ReactNode; keyboardFields?: KeyboardField[];
+export function Modal({ title, children, onClose, footer, keyboardFields = [], keyboardError }: {
+  title: string; children: ReactNode; onClose: () => void; footer?: ReactNode; keyboardFields?: KeyboardField[]; keyboardError?: string;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const formScrollTop = useRef(0);
   const onCloseRef = useRef(onClose);
   const titleId = `dialog-${title.replace(/\s/g, '-')}`;
   const keyboardRef = useRef<HTMLInputElement>(null);
   const movingFocus = useRef(false);
+  const backdropPointerDown = useRef(false);
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 639px)').matches);
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const activeIndex = keyboardFields.findIndex(field => field.id === activeFieldId);
@@ -34,11 +37,13 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
 
   useLayoutEffect(() => {
     if (activeField) keyboardRef.current?.focus({ preventScroll: true });
+    else if (contentRef.current) contentRef.current.scrollTop = formScrollTop.current;
   }, [activeFieldId, mobile]);
 
   const activateField = (id: string) => {
     // Keep focus inside the user's tap, which iOS needs to open/switch keyboards.
     movingFocus.current = true;
+    if (!activeField) formScrollTop.current = contentRef.current?.scrollTop || 0;
     flushSync(() => setActiveFieldId(id));
     keyboardRef.current?.focus({ preventScroll: true });
     movingFocus.current = false;
@@ -83,9 +88,12 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
     const resize = (event?: Event) => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (backdropRef.current) {
-          backdropRef.current.style.height = `${viewport?.height || window.innerHeight}px`;
-          backdropRef.current.style.top = `${viewport?.offsetTop || 0}px`;
+        if (viewportRef.current) {
+          const layoutHeight = viewportRef.current.parentElement?.clientHeight || window.innerHeight;
+          const area = modalViewport(layoutHeight, viewport);
+          viewportRef.current.style.height = `${area.height}px`;
+          viewportRef.current.style.top = `${area.top}px`;
+          viewportRef.current.dataset.keyboardOpen = String(area.keyboardOpen);
         }
         const focused = document.activeElement;
         if (event?.type !== 'scroll' && focused instanceof HTMLElement && contentRef.current?.contains(focused)) {
@@ -117,7 +125,8 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
         return;
       }
       if (event.key !== 'Tab' || !dialog) return;
-      const focusable = Array.from(dialog.querySelectorAll(focusableSelector)) as HTMLElement[];
+      const focusable = (Array.from(dialog.querySelectorAll(focusableSelector)) as HTMLElement[])
+        .filter(element => !element.closest('[hidden], [inert]') && element.getClientRects().length > 0);
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -151,15 +160,23 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
 
   return (
     <div
-      ref={backdropRef}
-      className="modal-backdrop fixed left-0 right-0 top-0 h-[100dvh] bg-ink/40 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-5"
-      onClick={onClose}
+      className="modal-backdrop fixed inset-0"
+      data-input-active={!!activeField}
+      onPointerDown={event => { backdropPointerDown.current = !dialogRef.current?.contains(event.target as Node); }}
+      onClick={event => {
+        // The tapped form field becomes hidden when input mode opens. Its pointer-up
+        // may land on the scrim; only a gesture that started outside can close us.
+        if (backdropPointerDown.current && !dialogRef.current?.contains(event.target as Node)) onClose();
+        backdropPointerDown.current = false;
+      }}
     >
+      <div ref={viewportRef} className="modal-viewport">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-labelledby={activeField ? 'keyboard-field-label' : titleId}
+        data-input-active={!!activeField}
         tabIndex={-1}
         className="modal-panel flex flex-col bg-paper border border-line rounded-t-3xl sm:rounded-2xl w-full max-w-[440px] max-h-[92%] sm:max-h-[90%] overflow-hidden shadow-lg"
         onClick={e => e.stopPropagation()}
@@ -169,11 +186,11 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
           }
         }}
       >
-        <div className="modal-heading border-b border-line flex shrink-0 items-center justify-between gap-3">
+        <div hidden={!!activeField} className="modal-heading border-b border-line flex shrink-0 items-center justify-between gap-3">
           <span id={titleId} className="modal-title">{title}</span>
           <button className="icon-btn" onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button>
         </div>
-        <div ref={contentRef} className="modal-content min-h-0 overflow-y-auto p-5"
+        <div ref={contentRef} hidden={!!activeField} inert={!!activeField} className="modal-content min-h-0 overflow-y-auto p-5"
           onPointerDownCapture={event => {
             if (!mobile || event.button !== 0 || !(event.target instanceof HTMLInputElement)) return;
             const field = keyboardFields.find(field => field.id === (event.target as HTMLInputElement).id);
@@ -184,17 +201,19 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
           onFocusCapture={event => {
             if (!mobile) return;
             const field = event.target instanceof HTMLInputElement && keyboardFields.find(field => field.id === event.target.id);
+            if (field && !activeField) formScrollTop.current = contentRef.current?.scrollTop || 0;
             setActiveFieldId(field ? field.id : null);
           }}>
           {children}
         </div>
-        {activeField ? <div className="shrink-0 border-t border-line">
-          <KeyboardInputBar ref={keyboardRef} field={activeField} index={activeIndex} total={keyboardFields.length}
+        {activeField ? <div className="keyboard-input-surface shrink-0">
+          <KeyboardInputBar ref={keyboardRef} field={activeField} index={activeIndex} total={keyboardFields.length} error={keyboardError}
             onMove={direction => {
               const next = keyboardFields[activeIndex + direction];
               if (next) activateField(next.id);
             }} onDone={finishInput} />
         </div> : footer && <div className="modal-footer shrink-0 border-t border-line px-5 pt-3">{footer}</div>}
+      </div>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { forwardRef } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export type KeyboardField = {
   id: string;
@@ -13,25 +13,33 @@ export type KeyboardField = {
 };
 
 export const KeyboardInputBar = forwardRef<HTMLInputElement, {
-  field: KeyboardField; index: number; total: number;
+  field: KeyboardField; index: number; total: number; error?: string;
   onMove: (direction: -1 | 1) => void; onDone: () => void;
-}>(function KeyboardInputBar({ field, index, total, onMove, onDone }, ref) {
+}>(function KeyboardInputBar({ field, index, total, error, onMove, onDone }, ref) {
   return <div className="keyboard-input-bar" aria-label="鍵盤上方輸入列">
-    <div className="flex items-center justify-between gap-2 mb-1.5 text-xs text-ink-2">
-      <label htmlFor="keyboard-field">{field.label}</label>
-      <span>{index + 1}／{total}</span>
+    <div className="keyboard-input-heading">
+      <label id="keyboard-field-label" className="keyboard-field-label" htmlFor="keyboard-field">{field.label}</label>
+      <span id="keyboard-field-step" className="sr-only">第 {index + 1} 欄，共 {total} 欄</span>
+      <div className="keyboard-field-actions" role="group" aria-label="欄位切換">
+        <button type="button" className="icon-btn" aria-label="上一欄" disabled={index === 0}
+          onPointerDown={event => event.preventDefault()} onClick={() => onMove(-1)}>
+          <ChevronLeft size={20} aria-hidden="true" />
+        </button>
+        <button type="button" className="icon-btn" aria-label="下一欄" disabled={index === total - 1}
+          onPointerDown={event => event.preventDefault()} onClick={() => onMove(1)}>
+          <ChevronRight size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <button type="button" className="btn btn-primary btn-sm keyboard-done" onPointerDown={event => event.preventDefault()} onClick={onDone}>完成</button>
     </div>
-    <div className="flex items-center gap-1.5">
-      <button type="button" className="icon-btn shrink-0" aria-label="上一欄" disabled={index === 0}
-        onPointerDown={event => event.preventDefault()} onClick={() => onMove(-1)}>
-        <ChevronUp size={20} aria-hidden="true" />
-      </button>
+    <div className="keyboard-input-control">
       <input
         key={field.id}
         ref={ref}
         id="keyboard-field"
         aria-label={`鍵盤上方：${field.label}`}
-        className="keyboard-accessory-input min-w-0 flex-1"
+        aria-describedby={`keyboard-field-step${error ? ' keyboard-input-error' : ''}`}
+        className={`keyboard-accessory-input ${field.type === 'number' ? 'keyboard-number-input' : ''}`}
         type={field.type || 'text'}
         inputMode={field.inputMode || 'text'}
         step={field.type === 'number' ? '0.01' : undefined}
@@ -50,11 +58,7 @@ export const KeyboardInputBar = forwardRef<HTMLInputElement, {
           }
         }}
       />
-      <button type="button" className="icon-btn shrink-0" aria-label="下一欄" disabled={index === total - 1}
-        onPointerDown={event => event.preventDefault()} onClick={() => onMove(1)}>
-        <ChevronDown size={20} aria-hidden="true" />
-      </button>
-      <button type="button" className="btn btn-primary btn-sm shrink-0" onPointerDown={event => event.preventDefault()} onClick={onDone}>完成</button>
     </div>
+    {error && <p id="keyboard-input-error" className="form-error mt-3" role="alert">{error}</p>}
   </div>;
 });
