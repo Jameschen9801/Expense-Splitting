@@ -62,7 +62,7 @@ export function appShellPlugin(version: string): Plugin {
       this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: JSON.stringify({
         id: './', name: '分帳小工具', short_name: '分帳', lang: 'zh-Hant',
         start_url: './', scope: './', display: 'standalone',
-        background_color: '#f7f5ef', theme_color: '#f7f5ef',
+        background_color: '#f4f5f2', theme_color: '#f4f5f2',
         icons: [{ src: 'favicon.png', sizes: 'any', type: 'image/png', purpose: 'any' }],
       }) });
     },

@@ -169,8 +169,8 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [] }:
           }
         }}
       >
-        <div className="p-4.5 border-b border-line flex shrink-0 items-center justify-between">
-          <span id={titleId} className="font-serif text-[15px] tracking-[2px]">{title}</span>
+        <div className="modal-heading border-b border-line flex shrink-0 items-center justify-between gap-3">
+          <span id={titleId} className="modal-title">{title}</span>
           <button className="icon-btn" onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button>
         </div>
         <div ref={contentRef} className="modal-content min-h-0 overflow-y-auto p-5"

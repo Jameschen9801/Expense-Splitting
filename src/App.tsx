@@ -13,7 +13,14 @@ import {
   ArrowRight,
   Trash2,
   RotateCcw,
-  RefreshCw
+  RefreshCw,
+  List,
+  Wallet,
+  ChartPie,
+  Users,
+  ChevronRight,
+  Search,
+  SlidersHorizontal
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
@@ -43,6 +50,12 @@ import {
 } from './lib/firebase';
 
 type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
+const groupTabs = [
+  { id: 'records', label: '明細', icon: List },
+  { id: 'balance', label: '結算', icon: Wallet },
+  { id: 'stats', label: '統計', icon: ChartPie },
+  { id: 'members', label: '成員', icon: Users },
+] as const;
 
 const FAILED_EXPENSE_RECOVERY_START = Date.parse('2026-09-22T09:28:00Z');
 const FAILED_EXPENSE_RECOVERY_END = Date.parse('2026-09-22T10:15:00Z');
@@ -73,6 +86,7 @@ export default function App() {
   const [recordFilter, setRecordFilter] = useState<'all' | 'mine' | 'paid'>('all');
   const [recordMonth, setRecordMonth] = useState('');
   const [recordCategory, setRecordCategory] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [dataSettings, setDataSettings] = useState(false);
   const [deviceUid, setDeviceUid] = useState('');
   const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
@@ -258,6 +272,7 @@ export default function App() {
     setCurrentPage('group');
     setActiveTab('records');
     setRecordMonth(''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
+    setFiltersOpen(false);
     storage.setLastGroup(data.code);
   };
 
@@ -781,66 +796,65 @@ export default function App() {
     return groups;
   }, [currentGroup, myName, recordFilter, recordSearch, recordMonth, recordCategory]);
 
+  const clearRecordFilters = useCallback(() => {
+    setRecordSearch(''); setRecordFilter('all'); setRecordMonth(''); setRecordCategory('');
+  }, []);
+  const visibleRecordCount = Object.values(groupedRecords as Record<string, RecordItem[]>).reduce((sum, records) => sum + records.length, 0);
+  const advancedFilterCount = Number(!!recordMonth) + Number(!!recordCategory);
+
   return (
-    <div className="min-h-[100dvh] flex flex-col font-sans">
+    <div className={`min-h-[100dvh] flex flex-col font-sans ${toast ? 'has-toast' : ''}`}>
       {currentPage === 'home' ? (
           <div className="page-enter flex flex-col min-h-[100dvh]">
-            <nav className="topbar h-13 bg-paper border-b border-line px-5 flex items-center justify-between sticky top-0 z-50">
-              <div>
-                <div className="font-serif text-[17px] font-semibold tracking-[3px]">分帳小工具</div>
-                <div className="text-[10px] tracking-[4px] text-ink-3 uppercase">分帳應用</div>
-              </div>
+            <nav className="topbar" aria-label="分帳小工具">
+              <div className="brand-name font-serif">分帳小工具</div>
               <button type="button" className="icon-btn" aria-label="開啟資料與 App 設定" onClick={() => setDataSettings(true)}><MoreHorizontal size={18} /></button>
             </nav>
 
-            <div className="flex-1 flex flex-col items-center justify-center p-5 sm:p-6 gap-8 sm:gap-10">
-              <div className="text-center">
-                <div className="w-10 h-px bg-line mx-auto my-5"></div>
-                <p className="text-xs tracking-[2px] text-ink-3">與朋友一起記錄每一筆花費</p>
+            <main className="home-content">
+              <div className="home-heading"><h1>我的群組</h1><p>與朋友一起記錄每一筆花費</p></div>
+              <div className="home-actions">
+                <button className="btn btn-primary" onClick={() => toggleModal('createGroup', true)}>＋ 建立群組</button>
+                <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入群組</button>
               </div>
-
-              <div className="w-full max-w-[480px]">
-                <div className="text-[10px] tracking-[3px] uppercase text-ink-3 mb-3 pb-2 border-b border-line">我的群組</div>
-                <div className="flex flex-col gap-2">
+                <div className="group-list">
                   {myGroups.length === 0 ? (
-                    <div className="text-center py-10 text-ink-3 text-xs tracking-wider leading-relaxed">
-                      尚無群組<br /><span className="text-[10px]">建立或加入一個群組以開始</span>
+                    <div className="empty-state home-empty">
+                      <span className="empty-icon"><Users size={30} aria-hidden="true" /></span>
+                      <h2>尚無群組</h2><p>建立或加入一個群組，從聚餐、旅行到日常花費，都能一起算清楚。</p>
                     </div>
                   ) : (
-                    myGroups.map(g => (
+                    myGroups.map(g => {
+                      const cached = storage.getGroup(g.code);
+                      return (
                       <button
                         key={g.code}
                         onClick={() => openGroup(g.code)}
-                        className="bg-paper border border-line p-4 text-left flex items-center justify-between transition-all hover:border-ink hover:shadow-sm rounded-xl"
+                        className="group-card"
                       >
-                        <div>
-                          <div className="text-sm font-medium tracking-wide">{g.name}</div>
-                          <div className="text-[11px] text-ink-3 mt-0.5">
-                            {storage.getGroup(g.code)?.members.length || 0} 位成員 · {storage.getGroup(g.code)?.expenses.length || 0} 筆費用
+                        <span className="member-avatar" aria-hidden="true">{g.name.charAt(0)}</span>
+                        <div className="min-w-0">
+                          <div className="group-card-name">{g.name}</div>
+                          <div className="group-card-meta">
+                            {cached ? `${cached.members.length} 位成員 · ${cached.expenses.length} 筆費用` : '開啟群組以載入帳目'}
                           </div>
                         </div>
-                        <div className="text-[11px] tracking-[2px] text-ink-3 font-mono">{g.code}</div>
+                        <div className="group-card-end"><span className="group-card-code">{g.code}</span><ChevronRight size={16} aria-hidden="true" /></div>
                       </button>
-                    ))
+                    ); })
                   )}
                 </div>
-              </div>
-
-              <div className="flex gap-3 flex-wrap justify-center w-full max-w-[480px]">
-                <button className="btn btn-primary w-full md:w-auto" onClick={() => toggleModal('createGroup', true)}>＋ 建立群組</button>
-                <button className="btn w-full md:w-auto" onClick={() => toggleModal('joinGroup', true)}>加入群組</button>
-              </div>
-            </div>
+            </main>
           </div>
         ) : (
           <div className="page-enter flex flex-col min-h-[100dvh]">
-            <nav className="topbar h-13 bg-paper border-b border-line px-5 flex items-center justify-between sticky top-0 z-50">
+            <nav className="topbar group-topbar" aria-label="群組資訊">
               <button className="icon-btn text-xl" onClick={goHome} aria-label="返回我的群組"><ArrowLeft size={20} /></button>
-              <div className="text-center">
-                <div className="font-serif text-sm tracking-[2px]">{currentGroup?.name}</div>
-                <div className="text-[10px] tracking-[2px] text-ink-3">{currentGroup?.code}</div>
+              <div className="group-heading">
+                <h1 title={currentGroup?.name}>{currentGroup?.name}</h1>
+                <p>{currentGroup?.code}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="group-header-actions">
                 {syncStatus.pending > 0 || syncStatus.error || syncState === 'error' ? (
                   <button
                     type="button"
@@ -868,19 +882,21 @@ export default function App() {
               </div>
             </nav>
 
-            <div className="flex border-b border-line bg-paper sticky top-13 z-40 px-5">
-              {(['records', 'balance', 'stats', 'members'] as const).map(tab => (
+            <nav className="group-tabs" aria-label="群組功能">
+              {groupTabs.map(tab => (
                 <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-3 text-[11px] tracking-[2px] uppercase transition-all border-b-2 -mb-px ${activeTab === tab ? 'text-ink border-ink' : 'text-ink-3 border-transparent'}`}
+                  type="button"
+                  key={tab.id}
+                  onClick={() => { setActiveTab(tab.id); window.scrollTo({ top: 0, behavior: 'instant' }); }}
+                  className="group-tab"
+                  aria-pressed={activeTab === tab.id}
                 >
-                  {tab === 'records' ? '明細' : tab === 'balance' ? '結算' : tab === 'stats' ? '統計' : '成員'}
+                  <tab.icon size={20} aria-hidden="true" /><span>{tab.label}</span>
                 </button>
               ))}
-            </div>
+            </nav>
 
-            <div className="flex-1 p-5 max-w-[680px] mx-auto w-full flex flex-col gap-4">
+            <main className="group-content flex-1">
               {syncStatus.reason && <div className="rounded-2xl border border-line p-4 text-sm bg-paper">
                 <p role="alert">{syncStatus.reason}</p>
                 {syncStatus.conflict && <div className="mt-3">
@@ -900,12 +916,13 @@ export default function App() {
               </div>}
               {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} />}
               {activeTab === 'records' && (
-                <div className="panel pb-20 sm:pb-0">
-                  <div className="panel-header p-4 border-b border-line flex items-center justify-between">
-                    <span className="section-label">明細記錄</span>
+                <section>
+                  <div className="records-heading">
+                    <h2>明細記錄<span className="record-count">{visibleRecordCount} 筆</span></h2>
                     <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
                   </div>
-                  <div className="p-3 border-b border-line bg-paper-2/60">
+                  <div className="record-toolbar">
+                    <div className="record-search-wrap"><Search size={20} aria-hidden="true" />
                     <label className="sr-only" htmlFor="record-search">搜尋記帳明細</label>
                     <input
                       id="record-search"
@@ -914,8 +931,12 @@ export default function App() {
                       onChange={event => setRecordSearch(event.target.value)}
                       placeholder="搜尋說明或成員"
                       className="record-search"
+                      enterKeyHint="search"
                     />
-                    <div className="grid grid-cols-3 gap-1 mt-3" aria-label="明細篩選">
+                    </div>
+                    <button type="button" className="btn filter-toggle" aria-label="篩選明細" aria-expanded={filtersOpen} aria-controls="advanced-record-filters" onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={20} aria-hidden="true" />{advancedFilterCount > 0 && <span className="filter-count" aria-label={`${advancedFilterCount} 個篩選`}>{advancedFilterCount}</span>}</button>
+                  </div>
+                    <div className="record-scope" aria-label="明細篩選">
                       {([
                         ['all', '全部'],
                         ['mine', '與我相關'],
@@ -926,18 +947,21 @@ export default function App() {
                           key={value}
                           onClick={() => setRecordFilter(value)}
                           aria-pressed={recordFilter === value}
-                          className={`filter-button ${recordFilter === value ? 'bg-ink text-paper border-ink' : 'bg-paper text-ink-2 border-line'}`}
+                          className="filter-button"
                         >
                           {label}
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-2 mt-3">
-                      <div><label className="sr-only" htmlFor="record-month">明細月份</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部月份</option>{memberMonths.map(month => <option key={month} value={month}>{month}</option>)}</select></div>
-                      <div><label className="sr-only" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">全部分類／轉帳</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+                    <div className="advanced-filters" id="advanced-record-filters" hidden={!filtersOpen}>
+                      <div className="advanced-filter-grid">
+                        <div><label className="field-label" htmlFor="record-month">明細月份</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部月份</option>{memberMonths.map(month => <option key={month} value={month}>{month.replace('-', ' / ')}</option>)}</select></div>
+                        <div><label className="field-label" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">全部分類／轉帳</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+                      </div>
+                      {advancedFilterCount > 0 && <button type="button" className="btn btn-ghost btn-sm w-full mt-3" onClick={() => { setRecordMonth(''); setRecordCategory(''); }}>清除月份與分類</button>}
                     </div>
-                  </div>
-                  <RecordsList groups={groupedRecords} myName={myName} filtered={!!recordSearch || recordFilter !== 'all' || !!recordMonth || !!recordCategory} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
+                  <RecordsList groups={groupedRecords} myName={myName} filtered={!!recordSearch || recordFilter !== 'all' || !!recordMonth || !!recordCategory}
+                    resetKey={JSON.stringify([currentGroup?.code, myName, recordSearch, recordFilter, recordMonth, recordCategory])} onClear={clearRecordFilters} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
                   <button
                     type="button"
                     className="mobile-add-button sm:hidden"
@@ -947,7 +971,7 @@ export default function App() {
                     <Plus size={22} aria-hidden="true" />
                     新增
                   </button>
-                </div>
+                </section>
               )}
 
               {activeTab === 'balance' && (
@@ -961,20 +985,20 @@ export default function App() {
                         const isNeg = b < -0.005;
                         return (
                           <div key={m} className="flex items-center py-3 border-b border-line last:border-b-0 gap-3">
-                            <div className="w-7 h-7 border border-line rounded-full flex items-center justify-center text-[11px] font-medium text-ink-2 shrink-0">{m.charAt(0)}</div>
+                            <div className="member-avatar" aria-hidden="true">{m.charAt(0)}</div>
                             <div className="flex-1 text-sm">
                               {m}
-                              <div className="text-[10px] text-ink-3 tracking-wider">{isPos ? '待收回' : isNeg ? '待付款' : '已結清'}</div>
+                              <div className="text-xs text-ink-3 mt-1">{isPos ? '待收回' : isNeg ? '待付款' : '已結清'}</div>
                             </div>
-                            <div className={`text-sm font-medium tracking-tight ${isPos ? 'text-green-700' : isNeg ? 'text-red-700' : 'text-ink-3'}`}>
+                            <div className={`money text-base ${isPos ? 'text-green-700' : isNeg ? 'text-red-700' : 'text-ink-3'}`}>
                               {isPos ? '+' : isNeg ? '-' : ''}NT$ {utils.fmt(Math.abs(b))}
                             </div>
                           </div>
                         );
                       })}
                       <div className="flex justify-between items-center py-3 border-t border-line mt-1">
-                        <span className="text-[10px] tracking-[2px] uppercase text-ink-3">群組總花費</span>
-                        <span className="text-base font-medium">NT$ {utils.fmt(currentGroup?.expenses.reduce((s, e) => s + e.amount, 0) || 0)}</span>
+                        <span className="text-sm text-ink-2">群組總花費</span>
+                        <span className="money text-base">NT$ {utils.fmt(currentGroup?.expenses.reduce((s, e) => s + e.amount, 0) || 0)}</span>
                       </div>
                     </div>
                   </div>
@@ -988,14 +1012,14 @@ export default function App() {
                       ) : (
                         settlements.map((s, idx) => (
                           <div key={idx} className="flex flex-col py-3 border-b border-line last:border-b-0 gap-2">
-                            <div className="flex items-center gap-2 text-xs">
+                            <div className="flex items-center gap-2 text-sm">
                               <span className="font-medium">{s.from}</span>
                               <span className="text-ink-3 text-[11px]">應付給</span>
                               <span className="font-medium">{s.to}</span>
                               <span className="ml-auto font-medium">NT$ {utils.fmt(s.amount)}</span>
                             </div>
                             <button
-                              className="btn btn-sm btn-ghost w-full text-[11px] tracking-wider"
+                              className="btn btn-ghost w-full"
                               disabled={isSaving}
                               onClick={async () => {
                                 setIsSaving(true);
@@ -1067,21 +1091,21 @@ export default function App() {
                   <div className="p-4.5">
                     <div className="bg-paper-2 border border-line p-3 flex items-center justify-between mb-3 rounded-xl">
                       <div>
-                        <div className="text-[10px] tracking-[2px] text-ink-3 mb-1">邀請碼</div>
+                        <div className="text-xs text-ink-2 mb-1">邀請碼</div>
                         <div className="font-mono text-xl tracking-[6px] text-ink">{currentGroup?.code}</div>
                       </div>
-                      <button className="btn btn-sm" onClick={() => {
-                        navigator.clipboard.writeText(currentGroup?.code || '');
-                        showToast('邀請碼已複製');
+                      <button className="btn btn-sm" onClick={async () => {
+                        try { await navigator.clipboard.writeText(currentGroup?.code || ''); showToast('邀請碼已複製'); }
+                        catch { showToast('無法自動複製，請長按邀請碼複製'); }
                       }}><Copy size={14} className="mr-1" /> 複製</button>
                     </div>
-                    <div className="text-[11px] text-ink-3 mb-4 tracking-wider">將邀請碼分享給朋友，他們即可加入此群組</div>
+                    <div className="text-sm text-ink-3 mb-4 leading-relaxed">將邀請碼分享給朋友，他們即可加入此群組</div>
 
                     <div className="flex flex-col">
                       {currentGroup?.members.map(m => (
                         <div key={m} className="flex items-center py-3 border-b border-line last:border-b-0 gap-3">
-                          <div className="w-7 h-7 border border-line rounded-full flex items-center justify-center text-[11px] font-medium text-ink-2 shrink-0">{m.charAt(0)}</div>
-                          <div className="flex-1 text-sm">{m} {m === myName && <span className="text-[10px] text-ink-3 tracking-wider">（我）</span>}</div>
+                          <div className="member-avatar" aria-hidden="true">{m.charAt(0)}</div>
+                          <div className="flex-1 min-w-0 text-sm font-medium break-words">{m} {m === myName && <span className="text-xs text-ink-3 font-normal">（我）</span>}</div>
                           {isOwner && currentGroup.members.length > 1 && m !== myName && (
                             <button className="icon-btn" aria-label={'移除 ' + m} onClick={() => removeMember(m)}><X size={14} /></button>
                           )}
@@ -1090,7 +1114,7 @@ export default function App() {
                     </div>
 
                     <div className="mt-4">
-                      <div className="field-label">新增成員姓名</div>
+                      <label className="field-label" htmlFor="newMemberInput">新增成員姓名</label>
                       <div className="flex gap-2">
                         <input
                           type="text"
@@ -1100,7 +1124,7 @@ export default function App() {
                           className="flex-1"
                           maxLength={12}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
+                            if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                               addMember((e.target as HTMLInputElement).value);
                               (e.target as HTMLInputElement).value = '';
                             }
@@ -1116,7 +1140,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-            </div>
+            </main>
           </div>
         )}
 
@@ -1278,13 +1302,13 @@ export default function App() {
         )}
       </>
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
-      {updates.available && <div className="fixed bottom-24 sm:bottom-6 left-4 right-4 mx-auto max-w-[480px] bg-paper border border-line rounded-2xl shadow-lg p-3 flex items-center justify-between gap-3 z-50" role="status">
+      {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}
 
       {/* Toast */}
       <div
-        className={`fixed bottom-5 left-1/2 -translate-x-1/2 bg-ink text-paper px-4 py-3 rounded-2xl text-sm z-[999] transition-opacity duration-200 flex items-center gap-4 max-w-[calc(100%-2rem)] shadow-lg ${toast ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`app-toast ${toast ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         role="status"
         aria-live="polite"
       >
@@ -1292,7 +1316,7 @@ export default function App() {
         {toast?.onAction && (
           <button
             type="button"
-            className="inline-flex items-center gap-1 text-paper underline underline-offset-4 font-medium whitespace-nowrap min-h-8"
+            className="inline-flex items-center gap-1 text-paper underline underline-offset-4 font-medium whitespace-nowrap min-h-11"
             onClick={toast.onAction}
           >
             <RotateCcw size={14} aria-hidden="true" />

@@ -4,6 +4,7 @@ import { appUpdates, flushDraftBeforeNavigation } from '../lib/appUpdates';
 import { commitRestore, createBackup, downloadFile, groupCsv, planRestore, readBackup, type Backup, type RestorePlan } from '../lib/backup';
 import { utils } from '../lib/utils';
 import { Modal } from './Modal';
+import { AppearanceSettings } from './AppearanceSettings';
 
 export function DataSettings({ group, onClose }: { group: Group | null; onClose: () => void }) {
   const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
@@ -52,8 +53,9 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
     } catch (error) { setMessage(error instanceof Error ? error.message : '還原未完成，原資料保留'); }
   };
   return <Modal title="資料與 App" onClose={onClose}>
+    <AppearanceSettings />
     <section className="mb-6">
-      <div className="field-label">版本與離線</div>
+      <h3 className="settings-heading">版本與離線</h3>
       <p className="text-xs text-ink-3 break-all mb-3">版本 {updates.version.split('-')[0]} · {updates.offlineReady ? '離線啟動已準備' : '離線啟動尚未準備'}</p>
       <p className="text-xs text-ink-3 leading-relaxed mb-3">首次連網載入後可離線開啟。離線記帳與未完成草稿保留在此裝置；重新連線並開啟 App 後同步。</p>
       <div className="flex flex-wrap gap-2">
@@ -63,7 +65,7 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
       {updates.message && <p role="status" className="text-xs text-ink-2 mt-3">{updates.message}</p>}
     </section>
     <section className="border-t border-line pt-4">
-      <div className="field-label">資料備份</div>
+      <h3 className="settings-heading">資料備份</h3>
       <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、草稿、範本和待同步資料，不包含登入憑證。檔案含私人帳目，請妥善保管；新裝置的群主身分仍需管理者驗證。</p>
       <div className="flex flex-col gap-2">
         <button type="button" className="btn btn-primary w-full" onClick={exportBackup}>匯出完整 JSON 備份</button>
