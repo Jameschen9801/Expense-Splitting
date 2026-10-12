@@ -1,57 +1,77 @@
-import { useEffect, useRef, useState, useLayoutEffect, type ReactNode } from 'react';
-import { flushSync } from 'react-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { KeyboardInputBar, type KeyboardField } from './KeyboardInputBar';
-import { modalViewport } from '../lib/keyboard';
+import { inputScrollTop, isInputEnter, modalViewport } from '../lib/keyboard';
 
-export function Modal({ title, children, onClose, footer, keyboardFields = [], keyboardError }: {
-  title: string; children: ReactNode; onClose: () => void; footer?: ReactNode; keyboardFields?: KeyboardField[]; keyboardError?: string;
+export function Modal({ title, children, onClose, footer, keyboardFields = [], keyboardError, layout = 'sheet' }: {
+  title: string; children: ReactNode; onClose: () => void; footer?: ReactNode; keyboardFields?: KeyboardField[]; keyboardError?: string; layout?: 'sheet' | 'editor';
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const formScrollTop = useRef(0);
   const onCloseRef = useRef(onClose);
   const titleId = `dialog-${title.replace(/\s/g, '-')}`;
-  const keyboardRef = useRef<HTMLInputElement>(null);
   const movingFocus = useRef(false);
   const backdropPointerDown = useRef(false);
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 639px)').matches);
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const activeIndex = keyboardFields.findIndex(field => field.id === activeFieldId);
-  const activeField = mobile && activeIndex >= 0 ? keyboardFields[activeIndex] : null;
+  const activeField = mobile && layout === 'editor' && activeFieldId ? keyboardFields[activeIndex] || { id: activeFieldId, label: '輸入' } : null;
+  const nextField = activeIndex >= 0 ? keyboardFields[activeIndex + 1] : undefined;
+
+  useEffect(() => {
+    if (layout !== 'editor' || !mobile) return;
+    const body = document.body;
+    const alreadyMasked = body.classList.contains('warikan-record-editor');
+    body.classList.add('warikan-record-editor');
+    return () => { if (!alreadyMasked) body.classList.remove('warikan-record-editor'); };
+  }, [layout, mobile]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 639px)');
     const change = () => {
       setMobile(media.matches);
+      const focused = document.activeElement;
       if (!media.matches) setActiveFieldId(null);
+      else if (layout === 'editor' && focused instanceof HTMLInputElement && contentRef.current?.contains(focused)) setActiveFieldId(focused.id || null);
     };
     media.addEventListener('change', change);
     return () => media.removeEventListener('change', change);
   }, []);
 
   useEffect(() => {
-    if (activeFieldId && activeIndex < 0) setActiveFieldId(null);
+    if (activeFieldId && !dialogRef.current?.contains(document.getElementById(activeFieldId))) setActiveFieldId(null);
   }, [activeFieldId, activeIndex]);
 
-  useLayoutEffect(() => {
-    if (activeField) keyboardRef.current?.focus({ preventScroll: true });
-    else if (contentRef.current) contentRef.current.scrollTop = formScrollTop.current;
-  }, [activeFieldId, mobile]);
+  const revealField = (field: HTMLElement) => {
+    const content = contentRef.current;
+    if (!content?.contains(field)) return;
+    const area = content.getBoundingClientRect(), bounds = field.getBoundingClientRect();
+    content.scrollTop = inputScrollTop(content.scrollTop, bounds.top, bounds.bottom, area.top, area.bottom);
+  };
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement instanceof HTMLElement) revealField(document.activeElement);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [keyboardError]);
 
   const activateField = (id: string) => {
-    // Keep focus inside the user's tap, which iOS needs to open/switch keyboards.
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement) || !contentRef.current?.contains(input)) return;
+    // Focus the real field directly inside the user's tap, without replacing it.
     movingFocus.current = true;
-    if (!activeField) formScrollTop.current = contentRef.current?.scrollTop || 0;
-    flushSync(() => setActiveFieldId(id));
-    keyboardRef.current?.focus({ preventScroll: true });
+    input.focus({ preventScroll: true });
+    setActiveFieldId(id);
+    revealField(input);
     movingFocus.current = false;
   };
 
   const finishInput = () => {
     movingFocus.current = true;
-    keyboardRef.current?.blur();
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && contentRef.current?.contains(focused)) focused.blur();
     setActiveFieldId(null);
     dialogRef.current?.focus({ preventScroll: true });
     movingFocus.current = false;
@@ -97,9 +117,7 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
         }
         const focused = document.activeElement;
         if (event?.type !== 'scroll' && focused instanceof HTMLElement && contentRef.current?.contains(focused)) {
-          const field = focused.getBoundingClientRect();
-          const area = contentRef.current.getBoundingClientRect();
-          if (field.top < area.top || field.bottom > area.bottom) focused.scrollIntoView({ block: 'nearest' });
+          revealField(focused);
         }
       });
     };
@@ -161,11 +179,11 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
   return (
     <div
       className="modal-backdrop fixed inset-0"
+      data-layout={layout}
       data-input-active={!!activeField}
       onPointerDown={event => { backdropPointerDown.current = !dialogRef.current?.contains(event.target as Node); }}
       onClick={event => {
-        // The tapped form field becomes hidden when input mode opens. Its pointer-up
-        // may land on the scrim; only a gesture that started outside can close us.
+        // A selection or scroll gesture that started inside must not close us.
         if (backdropPointerDown.current && !dialogRef.current?.contains(event.target as Node)) onClose();
         backdropPointerDown.current = false;
       }}
@@ -175,7 +193,8 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby={activeField ? 'keyboard-field-label' : titleId}
+        aria-labelledby={titleId}
+        data-layout={layout}
         data-input-active={!!activeField}
         tabIndex={-1}
         className="modal-panel flex flex-col bg-paper border border-line rounded-t-3xl sm:rounded-2xl w-full max-w-[440px] max-h-[92%] sm:max-h-[90%] overflow-hidden shadow-lg"
@@ -186,32 +205,31 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
           }
         }}
       >
-        <div hidden={!!activeField} className="modal-heading border-b border-line flex shrink-0 items-center justify-between gap-3">
+        <div className="modal-heading border-b border-line flex shrink-0 items-center justify-between gap-3">
           <span id={titleId} className="modal-title">{title}</span>
           <button className="icon-btn" onClick={onClose} aria-label={`關閉${title}`}><X size={18} /></button>
         </div>
-        <div ref={contentRef} hidden={!!activeField} inert={!!activeField} className="modal-content min-h-0 overflow-y-auto p-5"
-          onPointerDownCapture={event => {
-            if (!mobile || event.button !== 0 || !(event.target instanceof HTMLInputElement)) return;
-            const field = keyboardFields.find(field => field.id === (event.target as HTMLInputElement).id);
-            if (!field) return;
-            event.preventDefault();
-            activateField(field.id);
-          }}
+        <div ref={contentRef} className="modal-content min-h-0 overflow-y-auto p-5"
           onFocusCapture={event => {
-            if (!mobile) return;
-            const field = event.target instanceof HTMLInputElement && keyboardFields.find(field => field.id === event.target.id);
-            if (field && !activeField) formScrollTop.current = contentRef.current?.scrollTop || 0;
-            setActiveFieldId(field ? field.id : null);
+            if (!mobile || layout !== 'editor') return;
+            const input = event.target;
+            const editable = input instanceof HTMLInputElement && input.id && (input.type === 'text' || input.type === 'number');
+            setActiveFieldId(editable ? input.id : null);
+            if (editable) requestAnimationFrame(() => { if (document.activeElement === input) revealField(input); });
+          }}
+          onKeyDownCapture={event => {
+            if (!mobile || layout !== 'editor' || !(event.target instanceof HTMLInputElement) || !isInputEnter(event.nativeEvent)) return;
+            const index = keyboardFields.findIndex(field => field.id === (event.target as HTMLInputElement).id);
+            if (index < 0) return;
+            event.preventDefault();
+            const next = keyboardFields[index + 1];
+            if (next) activateField(next.id); else finishInput();
           }}>
           {children}
         </div>
-        {activeField ? <div className="keyboard-input-surface shrink-0">
-          <KeyboardInputBar ref={keyboardRef} field={activeField} index={activeIndex} total={keyboardFields.length} error={keyboardError}
-            onMove={direction => {
-              const next = keyboardFields[activeIndex + direction];
-              if (next) activateField(next.id);
-            }} onDone={finishInput} />
+        {activeField ? <div className="keyboard-input-surface shrink-0 border-t border-line">
+          <KeyboardInputBar nextLabel={nextField?.label} error={keyboardError}
+            onNext={() => { if (nextField) activateField(nextField.id); }} onDone={finishInput} />
         </div> : footer && <div className="modal-footer shrink-0 border-t border-line px-5 pt-3">{footer}</div>}
       </div>
       </div>

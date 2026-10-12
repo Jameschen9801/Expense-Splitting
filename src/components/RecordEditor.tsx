@@ -102,26 +102,20 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   };
   const keyboardFields = useMemo<KeyboardField[]>(() => {
     if (recordType === 'transfer') return [
-      { id: 'transfer-amount', label: '轉帳金額 (NT$)', value: tfForm.amount, type: 'number', inputMode: 'decimal', placeholder: '0.00',
-        onChange: value => { setTfForm(form => ({ ...form, amount: value })); setFormError(''); } },
-      { id: 'transfer-note', label: '轉帳備註', value: tfForm.note, maxLength: 30, placeholder: '例：已轉帳至銀行帳戶',
-        onChange: value => { setTfForm(form => ({ ...form, note: value })); setFormError(''); } },
+      { id: 'transfer-amount', label: '轉帳金額 (NT$)' },
+      { id: 'transfer-note', label: '轉帳備註' },
     ];
     return [
-      { id: 'expense-amount', label: '金額 (NT$)', value: expForm.amount, type: 'number', inputMode: 'decimal', placeholder: '0',
-        onChange: value => { setExpForm(form => ({ ...form, amount: value })); setFormError(''); } },
-      { id: 'expense-description', label: '說明', value: expForm.desc, maxLength: 30, placeholder: '例：晚餐、計程車',
-        onChange: value => { setExpForm(form => ({ ...form, desc: value })); setFormError(''); } },
+      { id: 'expense-amount', label: '金額 (NT$)' },
+      { id: 'expense-description', label: '說明' },
       ...(expForm.splitMode === 'equal' ? [] : expForm.participants.map(name => ({
         id: `expense-share-${encodeURIComponent(name)}`,
         label: `${name} ${expForm.splitMode === 'custom' ? '分攤金額 (NT$)' : '分攤比例 (%)'}`,
-        value: expForm.customShares[name] || '', type: 'number' as const, inputMode: 'decimal' as const, placeholder: '0',
-        onChange: (value: string) => { setExpForm(form => ({ ...form, customShares: { ...form.customShares, [name]: value } })); setFormError(''); },
       }))),
     ];
-  }, [recordType, expForm, tfForm]);
+  }, [recordType, expForm.splitMode, expForm.participants]);
   return (
-          <Modal title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
+          <Modal layout="editor" title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>取消</button>
               {recordType === 'expense' && !isEditingExpense && (
@@ -169,6 +163,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                     data-autofocus
                     type="number"
                     inputMode="decimal"
+                    enterKeyHint="next"
                     value={expForm.amount}
                     onChange={e => { setExpForm({ ...expForm, amount: e.target.value }); setFormError(''); }}
                     placeholder="0"
@@ -179,7 +174,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-description">說明</label>
-                  <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint="next" />
+                  <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-payer">誰先付款</label>
@@ -262,9 +257,10 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                                 type="number"
                                 inputMode="decimal"
                                 value={expForm.customShares[p] || ''}
-                                onChange={e =>
-                                  setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }))
-                                }
+                                onChange={e => {
+                                  setExpForm(f => ({ ...f, customShares: { ...f.customShares, [p]: e.target.value } }));
+                                  setFormError('');
+                                }}
                                 placeholder={expForm.splitMode === 'custom' ? '0.00' : '0'}
                                 step="0.01"
                                 min="0"
@@ -348,7 +344,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="transfer-amount">金額 (NT$)</label>
-                  <input id="transfer-amount" type="number" inputMode="decimal" value={tfForm.amount} onChange={e => setTfForm({ ...tfForm, amount: e.target.value })} placeholder="0.00" step="0.01" min="0" />
+                  <input id="transfer-amount" type="number" inputMode="decimal" enterKeyHint="next" value={tfForm.amount} onChange={e => { setTfForm({ ...tfForm, amount: e.target.value }); setFormError(''); }} placeholder="0.00" step="0.01" min="0" />
                 </div>
                 <div className="field">
                   <label className="field-label">日期</label>
@@ -356,7 +352,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="transfer-note">備註（選填）</label>
-                  <input id="transfer-note" type="text" value={tfForm.note} onChange={e => setTfForm({ ...tfForm, note: e.target.value })} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
+                  <input id="transfer-note" type="text" enterKeyHint="done" value={tfForm.note} onChange={e => { setTfForm({ ...tfForm, note: e.target.value }); setFormError(''); }} placeholder="例：已轉帳至銀行帳戶" maxLength={30} />
                 </div>
               </>
             )}
