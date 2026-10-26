@@ -13,8 +13,8 @@ const memory = () => {
   return { getItem: (key: string) => values.get(key) || null, setItem: (key: string, value: string) => { values.set(key,value); }, removeItem: (key: string) => { values.delete(key); }, key: (index: number) => [...values.keys()][index] || null, get length() { return values.size; } };
 };
 
-test('十個分類順序、新帳餐飲預設與舊帳未分類相容', () => {
-  assert.deepEqual(categories.map(item => item.label), ['餐飲','購物','交通','居住','生活帳單','醫療健康','休閒娛樂','人情社交','保險稅費','其他']);
+test('十一個分類順序、新帳餐飲預設與舊帳未分類相容', () => {
+  assert.deepEqual(categories.map(item => item.label), ['餐飲','購物','交通','居住','生活帳單','醫療健康','休閒娛樂','人情社交','保險稅費','旅遊','其他']);
   assert.equal(defaultExpenseCategory, 'food');
   const legacy: Expense = { id:'e1',desc:'住宿',amount:100,payer:'A',participants:['A'],date:today,createdAt:1,splitMode:'equal' };
   assert.equal(categoryOf(legacy), 'other');
