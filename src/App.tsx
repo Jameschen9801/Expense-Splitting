@@ -33,8 +33,10 @@ import { RecordEditor } from './components/RecordEditor';
 import { Statistics } from './components/Statistics';
 import { HistoryLog } from './components/HistoryLog';
 import { DataSettings } from './components/DataSettings';
+import { BankImport } from './components/BankImport';
+import { takeBankRequest, type BankRequest } from './lib/bankShortcuts';
 import { fingerprint } from './lib/audit';
-import { categories, categoryLabel, categoryOf } from './lib/categories';
+import { categories, categoryLabel, categoryOf, defaultExpenseCategory } from './lib/categories';
 import { appUpdates } from './lib/appUpdates';
 import type { ExpenseForm, TransferForm } from './lib/drafts';
 import {
@@ -75,7 +77,18 @@ const editableShares = (expense: Expense) => {
   return expense.shares || [];
 };
 
-export default function App() {
+export default function App({ initialBankInput = {} }: { initialBankInput?: { request?: BankRequest; error?: string } } = {}) {
+  const [bankInputs, setBankInputs] = useState<(typeof initialBankInput & { key: string })[]>(initialBankInput.request || initialBankInput.error ? [{ ...initialBankInput, key: 'initial' }] : []);
+  useEffect(() => {
+    const receive = () => {
+      const input = takeBankRequest(location, history);
+      if (input.request || input.error) setBankInputs(queue => [...queue, { ...input, key: crypto.randomUUID() }]);
+    };
+    // Safari may reuse the current tab when a Shortcut opens the next fragment.
+    window.addEventListener('hashchange', receive);
+    receive();
+    return () => window.removeEventListener('hashchange', receive);
+  }, []);
   const [currentPage, setCurrentPage] = useState<'home' | 'group'>('home');
   const [myGroups, setMyGroups] = useState<MyGroup[]>([]);
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
@@ -123,7 +136,8 @@ export default function App() {
     payer: '',
     participants: [] as string[],
     splitMode: 'equal' as 'equal' | 'custom' | 'percent',
-    customShares: {} as Record<string, string>
+    customShares: {} as Record<string, string>,
+    category: defaultExpenseCategory
   });
 
   const [tfForm, setTfForm] = useState({
@@ -341,7 +355,7 @@ export default function App() {
         setExpForm({
           desc: '', amount: '', date: utils.todayStr(),
           payer: currentGroup.members.includes(myName) ? myName : (currentGroup.members[0] || ''),
-          participants: [...currentGroup.members], splitMode: 'equal', customShares: {}
+          participants: [...currentGroup.members], splitMode: 'equal', customShares: {}, category: defaultExpenseCategory
         });
       }
       if (!isEditingTransfer) {
@@ -565,7 +579,7 @@ export default function App() {
     const expense: Expense = {
       id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + crypto.randomUUID(),
       desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
-      category: form.category || 'other',
+      category: form.category || (isEditingExpense ? 'other' : defaultExpenseCategory),
       ...(percentages ? { percentages } : {}),
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
     };
@@ -597,7 +611,7 @@ export default function App() {
         payer: updated.members.includes(myName) ? myName : (updated.members[0] || ''),
         participants: [...updated.members],
         splitMode: 'equal',
-        customShares: {},
+        customShares: {}, category: defaultExpenseCategory,
       });
       const from = updated.members.includes(myName) ? myName : (updated.members[0] || '');
       setTfForm({ from, to: updated.members.find(name => name !== from) || '', amount: '', date: utils.todayStr(), note: '' });
@@ -1302,6 +1316,7 @@ export default function App() {
         )}
       </>
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
+      {bankInputs[0] && !dataSettings && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}><BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} /></React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}

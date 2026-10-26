@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ExpenseCategory, Group } from '../types';
 import { Drafts, DraftWriter, type RecordDraft, type ExpenseForm, type TransferForm } from '../lib/drafts';
-import { categories } from '../lib/categories';
-import { readTemplates, saveTemplates, type ExpenseTemplate } from '../lib/templates';
+import { categories, defaultExpenseCategory } from '../lib/categories';
 import { utils } from '../lib/utils';
 import { Modal } from './Modal';
 import type { KeyboardField } from './KeyboardInputBar';
@@ -13,12 +12,10 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
 }) {
-  const [expForm, setExpForm] = useState(initial.expense);
+  const [expForm, setExpForm] = useState<ExpenseForm>({ ...initial.expense, category: initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) });
   const [tfForm, setTfForm] = useState(initial.transfer);
   const [recordType, setRecordType] = useState(initial.recordType);
   const [localError, setLocalError] = useState('');
-  const [templates, setTemplates] = useState(() => readTemplates(localStorage, group.code, myName));
-  const [templateName, setTemplateName] = useState('');
   const isEditingExpense = !!initial.expenseId;
   const isEditingTransfer = !!initial.transferId;
   const formError = localError || error;
@@ -29,7 +26,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   const writer = useRef<DraftWriter | null>(null);
   if (!writer.current) writer.current = new DraftWriter(() => setLocalError('草稿無法保存，請確認裝置儲存空間並保留此畫面'));
   const defaults = (): ExpenseForm => ({
-    desc: '', amount: '', date: utils.todayStr(), category: 'other',
+    desc: '', amount: '', date: utils.todayStr(), category: defaultExpenseCategory,
     payer: group.members.includes(myName) ? myName : group.members[0] || '',
     participants: [...group.members], splitMode: 'equal', customShares: {},
   });
@@ -38,7 +35,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     const draft = latest.current;
     const standard = defaults();
     const changed = draft.expense.payer !== standard.payer || draft.expense.splitMode !== 'equal'
-      || draft.expense.category && draft.expense.category !== 'other' || draft.expense.date !== utils.todayStr()
+      || draft.expense.category && draft.expense.category !== defaultExpenseCategory || draft.expense.date !== utils.todayStr()
       || draft.transfer.date !== utils.todayStr() || draft.transfer.from !== standard.payer
       || draft.transfer.to !== (group.members.find(name => name !== standard.payer) || '')
       || draft.expense.participants.join('|') !== group.members.join('|');
@@ -78,27 +75,6 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
       const from = defaults().payer;
       setTfForm({ from, to: group.members.find(name => name !== from) || '', amount: '', note: '', date: utils.todayStr() });
     }
-  };
-  const useTemplate = (template: ExpenseTemplate) => {
-    setFormError('');
-    setExpForm({ ...template.form, date: utils.todayStr(),
-      payer: group.members.includes(template.form.payer) ? template.form.payer : defaults().payer,
-      participants: template.form.participants.filter(name => group.members.includes(name)),
-    });
-  };
-  const saveTemplate = () => {
-    const name = templateName.trim();
-    if (!name || !expForm.desc.trim()) { setLocalError('請填寫範本名稱與費用說明'); return; }
-    if (templates.length >= 20 && !templates.some(template => template.name === name)) { setLocalError('最多保存 20 個範本，請先移除不常用的範本'); return; }
-    const { date, ...form } = expForm;
-    const items = [{ id: crypto.randomUUID(), name, form, updatedAt: Date.now() }, ...templates.filter(template => template.name !== name)];
-    try { saveTemplates(localStorage, group.code, myName, items); setTemplates(items); setTemplateName(''); setFormError(''); }
-    catch { setLocalError('範本無法保存，請確認儲存空間'); }
-  };
-  const removeTemplate = (id: string) => {
-    const items = templates.filter(template => template.id !== id);
-    try { saveTemplates(localStorage, group.code, myName, items); setTemplates(items); }
-    catch { setLocalError('範本無法更新，請確認儲存空間'); }
   };
   const keyboardFields = useMemo<KeyboardField[]>(() => {
     if (recordType === 'transfer') return [
@@ -147,13 +123,6 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
               </div>
             )}
 
-            {recordType === 'expense' && !isEditingExpense && <div className="mb-4">
-              <div className="field-label">常用範本</div>
-              <div className="flex flex-wrap gap-2">
-                {(['午餐', '晚餐', '交通'] as const).map(name => <button type="button" className="btn btn-ghost btn-sm" key={name} onClick={() => setExpForm({ ...defaults(), desc: name, category: name === '交通' ? 'transport' : 'food' })}>{name}</button>)}
-                {templates.map(template => <button type="button" className="btn btn-ghost btn-sm" key={template.id} onClick={() => useTemplate(template)}>{template.name}</button>)}
-              </div>
-            </div>}
             {recordType === 'expense' ? (
               <>
                 <div className="field">
@@ -305,24 +274,15 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-category">分類</label>
-                  <select id="expense-category" value={expForm.category || 'other'} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
+                  <select id="expense-category" value={expForm.category || defaultExpenseCategory} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
                     {categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}
                   </select>
                 </div>
                 <details className="expense-more" open={isEditingExpense}>
-                  <summary>日期與更多設定</summary>
+                  <summary>日期設定</summary>
                   <div className="field mt-4 mb-1">
                     <label className="field-label" htmlFor="expense-date">日期</label>
                     <input id="expense-date" type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
-                  </div>
-                  <div className="field mt-4">
-                    <label className="field-label" htmlFor="template-name">存成常用範本</label>
-                    <div className="flex gap-2">
-                      <input id="template-name" value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="範本名稱" maxLength={20} />
-                      <button type="button" className="btn btn-sm shrink-0" onClick={saveTemplate}>保存</button>
-                    </div>
-                    <p className="text-xs text-ink-3 mt-2">保留金額、付款人與分攤設定；下次套用使用當天日期。僅存於此裝置，可隨備份帶走。</p>
-                    {templates.map(template => <div key={template.id} className="flex items-center justify-between text-sm mt-2"><span>{template.name}</span><button type="button" className="btn btn-ghost btn-sm" onClick={() => removeTemplate(template.id)}>移除</button></div>)}
                   </div>
                 </details>
               </>

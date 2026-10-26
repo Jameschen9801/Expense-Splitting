@@ -389,6 +389,9 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .currency { font-size: 0.7em; font-weight: 500; letter-spacing: 0; margin-right: 3px; }
 .mobile-add-button { background: var(--ui-accent); color: var(--ui-on-accent); min-height: 52px; padding: 12px 22px; font-size: 15px; bottom: calc(82px + env(safe-area-inset-bottom)); right: 18px; z-index: var(--layer-add); box-shadow: 0 6px 20px rgb(37 53 43 / 16%); }
 .settings-heading { font-size: 16px; font-weight: 600; color: var(--ui-text); margin-bottom: 14px; }
+.bank-rule-form { display: grid; gap: 18px; }
+.bank-choice { display: inline-flex; gap: 9px; align-items: center; min-height: 44px; padding: 9px 12px; border: 1px solid var(--ui-control); border-radius: 16px; font-size: 14px; line-height: 1.6; }
+.bank-choice input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--ui-accent); margin-top: 2px; }
 .settings-section { padding-bottom: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--ui-line); }
 .appearance-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .appearance-option { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 76px; border: 1px solid var(--ui-control); border-radius: 16px; font-size: 13px; color: var(--ui-secondary); }

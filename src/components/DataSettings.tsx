@@ -5,6 +5,7 @@ import { commitRestore, createBackup, downloadFile, groupCsv, planRestore, readB
 import { utils } from '../lib/utils';
 import { Modal } from './Modal';
 import { AppearanceSettings } from './AppearanceSettings';
+import { BankShortcutSettings } from './BankShortcutSettings';
 
 export function DataSettings({ group, onClose }: { group: Group | null; onClose: () => void }) {
   const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
@@ -64,9 +65,10 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
       </div>
       {updates.message && <p role="status" className="text-xs text-ink-2 mt-3">{updates.message}</p>}
     </section>
+    <BankShortcutSettings group={group} />
     <section className="border-t border-line pt-4">
       <h3 className="settings-heading">資料備份</h3>
-      <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、草稿、範本和待同步資料，不包含登入憑證。檔案含私人帳目，請妥善保管；新裝置的群主身分仍需管理者驗證。</p>
+      <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、草稿與待同步資料，保留舊版備份相容性；不包含登入憑證與銀行捷徑識別碼。檔案含私人帳目，請妥善保管；新裝置的群主身分仍需管理者驗證。</p>
       <div className="flex flex-col gap-2">
         <button type="button" className="btn btn-primary w-full" onClick={exportBackup}>匯出完整 JSON 備份</button>
         {group && <button type="button" className="btn w-full" onClick={() => exportFile(groupCsv(group), '分帳明細-' + group.code + '-' + utils.todayStr() + '.csv', 'text/csv;charset=utf-8')}>匯出此群組全部明細 CSV</button>}
@@ -76,7 +78,7 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
     </section>
     {preview && <section className="rounded-2xl border border-line bg-paper-2 p-4 mt-4">
       <div className="text-sm font-medium mb-2">還原預覽</div>
-      <p className="text-sm leading-relaxed">新增 {preview.plan.groups} 個群組、{preview.plan.records} 筆紀錄、{preview.plan.drafts} 份草稿、{preview.plan.templates} 個範本；{preview.plan.pending} 筆待同步。</p>
+      <p className="text-sm leading-relaxed">新增 {preview.plan.groups} 個群組、{preview.plan.records} 筆紀錄、{preview.plan.drafts} 份草稿；{preview.plan.pending} 筆待同步。{preview.plan.templates > 0 && `另保留 ${preview.plan.templates} 份舊版設定。`}</p>
       <p className="text-xs text-ink-3 leading-relaxed mt-2">保留目前資料，略過 {preview.plan.skipped} 項重複或可能覆蓋現況的資料。雲端若已有不同版本，會要求你處理衝突；不會自動重建已刪除的雲端群組。</p>
       <div className="flex flex-wrap gap-2 mt-3">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>取消還原</button>
