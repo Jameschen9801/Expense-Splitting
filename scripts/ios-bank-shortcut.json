@@ -9,7 +9,7 @@
     "ActionIndex": 1,
     "Category": "Parameter",
     "ParameterKey": "WFTextActionText",
-    "Text": "在將開啟的 Safari 加入群組，從「資料與 App → iOS 銀行捷徑記帳」儲存規則，再貼上「捷徑連結前綴」。請勿分享這個連結。",
+    "Text": "在將開啟的 Safari 建立個人帳本或加入共用帳本，從「資料與 App → iOS 銀行捷徑記帳」儲存規則，再貼上「捷徑連結前綴」。請勿分享這個連結。",
     "DefaultValue": "https://jameschen9801.github.io/Expense-Splitting/#bank-entry?channel=NOT_CONFIGURED&text="
   }],
   "WFWorkflowActions": [

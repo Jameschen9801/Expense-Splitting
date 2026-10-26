@@ -20,7 +20,9 @@ import {
   Users,
   ChevronRight,
   Search,
-  SlidersHorizontal
+  SlidersHorizontal,
+  NotebookPen,
+  LockKeyhole
 } from 'lucide-react';
 import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
@@ -38,6 +40,7 @@ import { takeBankRequest, type BankRequest } from './lib/bankShortcuts';
 import { fingerprint } from './lib/audit';
 import { categories, categoryLabel, categoryOf, defaultExpenseCategory } from './lib/categories';
 import { appUpdates } from './lib/appUpdates';
+import { isPersonalLedger, expenseFormForLedger } from './lib/ledgers';
 import type { ExpenseForm, TransferForm } from './lib/drafts';
 import {
   joinGroupInCloud,
@@ -126,6 +129,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
   // Form states
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupMyName, setNewGroupMyName] = useState('');
+  const [newGroupKind, setNewGroupKind] = useState<'personal' | 'shared'>('personal');
   const [joinCode, setJoinCode] = useState('');
   const [joinMyName, setJoinMyName] = useState('');
 
@@ -156,7 +160,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
   const groupCodeRef = useRef(currentGroup?.code);
   groupCodeRef.current = currentGroup?.code;
   const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
-  const memberMonths = useMemo(() => [...new Set([...(currentGroup?.expenses || []), ...(currentGroup?.transfers || [])].map(record => record.date?.slice(0, 7)).filter(Boolean))].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers]);
+  const personal = isPersonalLedger(currentGroup);
+  const memberMonths = useMemo(() => [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...(currentGroup?.expenses || []), ...(currentGroup?.transfers || [])].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers, personal]);
+  const personalTotal = useMemo(() => (currentGroup?.expenses || []).filter(record => !recordMonth || record.date?.startsWith(recordMonth + '-')).reduce((sum, record) => sum + utils.toCents(record.amount), 0), [currentGroup?.expenses, recordMonth]);
   useEffect(() => { ensureDeviceIdentity().then(setDeviceUid).catch(() => {}); }, []);
 
   const clearRecordDraft = () => {
@@ -215,6 +221,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
         setSettingsGroupName(data.name);
         setCurrentPage('group');
         setActiveTab('records');
+        setRecordMonth(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : '');
       }
     }
   }, []);
@@ -285,7 +292,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
     setSettingsGroupName(data.name);
     setCurrentPage('group');
     setActiveTab('records');
-    setRecordMonth(''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
+    setRecordMonth(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : ''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
     setFiltersOpen(false);
     storage.setLastGroup(data.code);
   };
@@ -402,11 +409,12 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
   };
 
   const createGroup = async () => {
-    if (!newGroupName.trim() || !newGroupMyName.trim()) {
-      setFormError('請填寫群組名稱與你的名字');
+    const name = newGroupKind === 'personal' ? '我' : newGroupMyName.trim();
+    if (!newGroupName.trim() || !name) {
+      setFormError('請填寫帳本名稱與你的名字');
       return;
     }
-    if (!validMemberName(newGroupMyName.trim())) { setFormError('名字最多 12 字，請勿使用 . # $ / [ ] 或保留字'); return; }
+    if (!validMemberName(name)) { setFormError('名字最多 12 字，請勿使用 . # $ / [ ] 或保留字'); return; }
     setIsSaving(true);
     setFormError('');
     try {
@@ -414,26 +422,27 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
       for (let attempt = 0; attempt < 5 && !data; attempt++) {
         const code = String(Math.floor(100000 + Math.random() * 900000));
         const candidate: Group = {
+          kind: newGroupKind,
           name: newGroupName.trim(),
           code,
-          members: [newGroupMyName.trim()],
+          members: [name],
           expenses: [],
           transfers: [],
           createdAt: Date.now()
         };
         if (await createGroupInCloud(candidate)) data = candidate;
       }
-      if (!data) throw new Error('無法建立唯一邀請碼');
+      if (!data) throw new Error('暫時無法建立帳本，請稍後再試');
 
       storage.saveGroup(data.code, data);
-      const updated = [...myGroups, { code: data.code, name: data.name, myName: newGroupMyName.trim() }];
+      const updated = [...myGroups, { code: data.code, name: data.name, myName: name, kind: data.kind }];
       storage.saveMyGroups(updated);
       setMyGroups(updated);
       toggleModal('createGroup', false);
       setNewGroupName('');
       setNewGroupMyName('');
-      enterGroup(data, newGroupMyName.trim());
-      showToast('群組已建立');
+      enterGroup(data, name);
+      showToast(newGroupKind === 'personal' ? '個人帳本已建立' : '共用帳本已建立');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : '建立暫時未完成，請稍後再試');
       setSyncState('error');
@@ -464,6 +473,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
         setSyncState('');
         return;
       }
+      if (isPersonalLedger(cloudData)) throw new Error('個人帳本無法透過邀請碼加入');
       const existingLocalMembership = myGroups.some(group => group.code === code && group.myName === name);
       const unclaimedMember = !!cloudData.security && !cloudData.security.names[memberNameKey(name)];
       const sameDevice = cloudData.security?.names[memberNameKey(name)] === currentDeviceUid();
@@ -477,7 +487,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
 
       const updated = myGroups.some(group => group.code === code)
         ? myGroups.map(group => group.code === code ? { ...group, name: data.name, myName: name } : group)
-        : [...myGroups, { code, name: data.name, myName: name }];
+        : [...myGroups, { code, name: data.name, myName: name, kind: data.kind }];
       storage.saveMyGroups(updated);
       setMyGroups(updated);
 
@@ -543,6 +553,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
 
   const addExpense = async (form: ExpenseForm, keepOpen = false): Promise<boolean> => {
     if (!currentGroup) return false;
+    form = expenseFormForLedger(currentGroup, form);
     const { desc, amount, payer, participants, splitMode, date, customShares } = form;
     const amt = parseFloat(amount);
     setFormError('');
@@ -624,6 +635,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
 
   const addTransfer = async (form: TransferForm): Promise<boolean> => {
     if (!currentGroup) return false;
+    if (personal) { setFormError('個人帳本不需要還款轉帳'); return false; }
     const { from, to, amount, date, note } = form;
     const amt = parseFloat(amount);
     setFormError('');
@@ -705,6 +717,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
   };
 
   const addMember = async (name: string) => {
+    if (personal) { showToast('個人帳本無法加入其他成員'); return false; }
     const trimmedName = name.trim();
     if (!currentGroup || !trimmedName) return false;
     if (currentGroup.security && !validMemberName(trimmedName)) { showToast('名字最多 12 字，請勿使用 . # $ / [ ] 或保留字'); return false; }
@@ -720,6 +733,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
 
   const removeMember = async (name: string) => {
     if (!currentGroup) return;
+    if (personal) return;
     if (name === myName) { showToast('無法移除自己'); return; }
     
     // 檢查是否為群主（群主永遠是 members 的第 0 個索引）
@@ -753,7 +767,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
     const success = await persistGroupMutation(
       updated,
       { type: 'group.rename', name },
-      '群組名稱已更新',
+      '帳本名稱已更新',
     );
     setIsSaving(false);
     if (!success) return;
@@ -826,16 +840,16 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
             </nav>
 
             <main className="home-content">
-              <div className="home-heading"><h1>我的群組</h1><p>與朋友一起記錄每一筆花費</p></div>
+              <div className="home-heading"><h1>我的帳本</h1><p>日常自己記，也能和朋友一起分帳</p></div>
               <div className="home-actions">
-                <button className="btn btn-primary" onClick={() => toggleModal('createGroup', true)}>＋ 建立群組</button>
-                <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入群組</button>
+                <button className="btn btn-primary" onClick={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }}>＋ 新增帳本</button>
+                <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入共用帳本</button>
               </div>
                 <div className="group-list">
                   {myGroups.length === 0 ? (
                     <div className="empty-state home-empty">
-                      <span className="empty-icon"><Users size={30} aria-hidden="true" /></span>
-                      <h2>尚無群組</h2><p>建立或加入一個群組，從聚餐、旅行到日常花費，都能一起算清楚。</p>
+                      <span className="empty-icon"><NotebookPen size={30} aria-hidden="true" /></span>
+                      <h2>建立第一個帳本</h2><p>用個人帳本記錄日常花費，或建立共用帳本與朋友分帳。</p>
                     </div>
                   ) : (
                     myGroups.map(g => {
@@ -850,10 +864,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
                         <div className="min-w-0">
                           <div className="group-card-name">{g.name}</div>
                           <div className="group-card-meta">
-                            {cached ? `${cached.members.length} 位成員 · ${cached.expenses.length} 筆費用` : '開啟群組以載入帳目'}
+                            {isPersonalLedger(cached || g) ? '個人帳本' : '共用帳本'} · {cached ? `${cached.expenses.length} 筆費用` : '開啟以載入帳目'}
                           </div>
                         </div>
-                        <div className="group-card-end"><span className="group-card-code">{g.code}</span><ChevronRight size={16} aria-hidden="true" /></div>
+                        <div className="group-card-end">{isPersonalLedger(cached || g) ? <LockKeyhole size={16} aria-label="個人帳本" /> : <span className="group-card-code">{g.code}</span>}<ChevronRight size={16} aria-hidden="true" /></div>
                       </button>
                     ); })
                   )}
@@ -863,10 +877,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
         ) : (
           <div className="page-enter flex flex-col min-h-[100dvh]">
             <nav className="topbar group-topbar" aria-label="群組資訊">
-              <button className="icon-btn text-xl" onClick={goHome} aria-label="返回我的群組"><ArrowLeft size={20} /></button>
+              <button className="icon-btn text-xl" onClick={goHome} aria-label="返回我的帳本"><ArrowLeft size={20} /></button>
               <div className="group-heading">
                 <h1 title={currentGroup?.name}>{currentGroup?.name}</h1>
-                <p>{currentGroup?.code}</p>
+                <p>{personal ? '個人帳本 · 僅自己' : currentGroup?.code}</p>
               </div>
               <div className="group-header-actions">
                 {syncStatus.pending > 0 || syncStatus.error || syncState === 'error' ? (
@@ -890,14 +904,14 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
                     {!syncStatus.connected ? '離線' : syncState === 'syncing' ? '同步中' : '已同步'}
                   </div>
                 )}
-                <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)} aria-label="開啟群組設定">
+                <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)} aria-label={personal ? '開啟帳本設定' : '開啟群組設定'}>
                   <MoreHorizontal size={18} />
                 </button>
               </div>
             </nav>
 
-            <nav className="group-tabs" aria-label="群組功能">
-              {groupTabs.map(tab => (
+            <nav className="group-tabs" data-personal={personal} aria-label="帳本功能">
+              {groupTabs.filter(tab => !personal || tab.id === 'records' || tab.id === 'stats').map(tab => (
                 <button
                   type="button"
                   key={tab.id}
@@ -931,6 +945,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
               {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} />}
               {activeTab === 'records' && (
                 <section>
+                  {personal && <div className="personal-overview"><div className="stat-label">{recordMonth === utils.todayStr().slice(0,7) ? '本月支出' : recordMonth ? recordMonth.replace('-',' / ') + ' 支出' : '累計支出'}</div><div className="money stat-total"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(personalTotal))}</div></div>}
                   <div className="records-heading">
                     <h2>明細記錄<span className="record-count">{visibleRecordCount} 筆</span></h2>
                     <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
@@ -943,14 +958,14 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
                       type="search"
                       value={recordSearch}
                       onChange={event => setRecordSearch(event.target.value)}
-                      placeholder="搜尋說明或成員"
+                      placeholder={personal ? '搜尋說明或分類' : '搜尋說明或成員'}
                       className="record-search"
                       enterKeyHint="search"
                     />
                     </div>
                     <button type="button" className="btn filter-toggle" aria-label="篩選明細" aria-expanded={filtersOpen} aria-controls="advanced-record-filters" onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={20} aria-hidden="true" />{advancedFilterCount > 0 && <span className="filter-count" aria-label={`${advancedFilterCount} 個篩選`}>{advancedFilterCount}</span>}</button>
                   </div>
-                    <div className="record-scope" aria-label="明細篩選">
+                    {!personal && <div className="record-scope" aria-label="明細篩選">
                       {([
                         ['all', '全部'],
                         ['mine', '與我相關'],
@@ -966,21 +981,21 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
                           {label}
                         </button>
                       ))}
-                    </div>
+                    </div>}
                     <div className="advanced-filters" id="advanced-record-filters" hidden={!filtersOpen}>
                       <div className="advanced-filter-grid">
                         <div><label className="field-label" htmlFor="record-month">明細月份</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部月份</option>{memberMonths.map(month => <option key={month} value={month}>{month.replace('-', ' / ')}</option>)}</select></div>
-                        <div><label className="field-label" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">全部分類／轉帳</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+                        <div><label className="field-label" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">{personal ? '全部分類' : '全部分類／轉帳'}</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
                       </div>
                       {advancedFilterCount > 0 && <button type="button" className="btn btn-ghost btn-sm w-full mt-3" onClick={() => { setRecordMonth(''); setRecordCategory(''); }}>清除月份與分類</button>}
                     </div>
-                  <RecordsList groups={groupedRecords} myName={myName} filtered={!!recordSearch || recordFilter !== 'all' || !!recordMonth || !!recordCategory}
+                  <RecordsList groups={groupedRecords} myName={myName} personal={personal} filtered={!!recordSearch || recordFilter !== 'all' || !!recordCategory || !!recordMonth && (!personal || !!currentGroup?.expenses.length)}
                     resetKey={JSON.stringify([currentGroup?.code, myName, recordSearch, recordFilter, recordMonth, recordCategory])} onClear={clearRecordFilters} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
                   <button
                     type="button"
                     className="mobile-add-button sm:hidden"
                     onClick={() => toggleModal('addRecord', true)}
-                    aria-label="新增費用或轉帳"
+                    aria-label={personal ? '新增支出' : '新增費用或轉帳'}
                   >
                     <Plus size={22} aria-hidden="true" />
                     新增
@@ -1161,15 +1176,18 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
       {/* Modals */}
       <>
         {modals.createGroup && (
-          <Modal title="建立群組" onClose={() => toggleModal('createGroup', false)}>
-            <div className="field">
-              <label className="field-label" htmlFor="create-group-name">群組名稱</label>
-              <input id="create-group-name" data-autofocus type="text" value={newGroupName} onChange={e => { setNewGroupName(e.target.value); setFormError(''); }} placeholder="例：京都旅行" maxLength={20} autoComplete="off" />
+          <Modal title="新增帳本" onClose={() => { if (!isSaving) toggleModal('createGroup', false); }}>
+            <div className="ledger-kind-options" role="group" aria-label="帳本類型">
+              {([{kind:'personal',label:'個人帳本',detail:'自己的日常花費',icon:NotebookPen},{kind:'shared',label:'共用帳本',detail:'和朋友一起分帳',icon:Users}] as const).map(option => <button key={option.kind} type="button" className="ledger-kind-option" aria-pressed={newGroupKind === option.kind} disabled={isSaving} onClick={() => { setNewGroupKind(option.kind); setFormError(''); if (newGroupName === '日常記帳' && option.kind === 'shared') setNewGroupName(''); if (!newGroupName && option.kind === 'personal') setNewGroupName('日常記帳'); }}><option.icon size={22} aria-hidden="true" /><span>{option.label}</span><small>{option.detail}</small></button>)}
             </div>
             <div className="field">
+              <label className="field-label" htmlFor="create-group-name">帳本名稱</label>
+              <input id="create-group-name" type="text" value={newGroupName} onChange={e => { setNewGroupName(e.target.value); setFormError(''); }} placeholder={newGroupKind === 'personal' ? '例：日常記帳' : '例：京都旅行'} maxLength={20} autoComplete="off" disabled={isSaving} />
+            </div>
+            {newGroupKind === 'shared' ? <div className="field">
               <label className="field-label" htmlFor="create-member-name">你的名字</label>
               <input id="create-member-name" type="text" value={newGroupMyName} onChange={e => { setNewGroupMyName(e.target.value); setFormError(''); }} placeholder="你在群組中的顯示名稱" maxLength={12} autoComplete="name" />
-            </div>
+            </div> : <p className="text-xs text-ink-3 leading-relaxed mb-4">個人帳本只供自己使用，綁定建立時的 App。請勿清除網站資料，並定期匯出備份。</p>}
             {formError && <div className="form-error" role="alert">{formError}</div>}
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('createGroup', false)} disabled={isSaving}>取消</button>
@@ -1179,7 +1197,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
         )}
 
         {modals.joinGroup && (
-          <Modal title="加入群組" onClose={() => toggleModal('joinGroup', false)}>
+          <Modal title="加入共用帳本" onClose={() => toggleModal('joinGroup', false)}>
             <div className="field">
               <label className="field-label" htmlFor="join-code">邀請碼（6 位數字）</label>
               <input id="join-code" data-autofocus type="text" inputMode="numeric" pattern="[0-9]*" value={joinCode} onChange={e => { setJoinCode(e.target.value.replace(/\D/g, '')); setFormError(''); }} placeholder="123456" maxLength={6} className="text-xl tracking-[6px] font-mono" autoComplete="one-time-code" />
@@ -1204,16 +1222,16 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
         )}
 
         {modals.groupSettings && (
-          <Modal title="群組設定" onClose={() => toggleModal('groupSettings', false)}>
-            <p className="text-xs text-ink-3 leading-relaxed mb-4">{currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
-            <p className="text-xs text-ink-3 mb-4 break-all">此裝置識別碼：{deviceUid || '連線後取得'}<br />裝置身分不包含在備份內。請勿清除網站資料，以免失去群主綁定。</p>
+          <Modal title={personal ? '帳本設定' : '群組設定'} onClose={() => toggleModal('groupSettings', false)}>
+            <p className="text-xs text-ink-3 leading-relaxed mb-4">{personal ? '這是只有你能存取的個人帳本，可記錄日常支出並查看分類統計。請保留此 App 的網站資料並定期備份；換裝置或瀏覽器時，雲端存取身分需由管理者協助驗證。' : currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
+            {!personal && <p className="text-xs text-ink-3 mb-4 break-all">此裝置識別碼：{deviceUid || '連線後取得'}<br />裝置身分不包含在備份內。請勿清除網站資料，以免失去群主綁定。</p>}
             <div className="field">
-              <label className="field-label">群組名稱</label>
+              <label className="field-label">帳本名稱</label>
               <input type="text" value={settingsGroupName} onChange={e => setSettingsGroupName(e.target.value)} maxLength={20} disabled={!!currentGroup?.security && !isOwner} />
             </div>
             <div className="mt-2">
               <button type="button" className="btn w-full mb-2" onClick={() => { toggleModal('groupSettings', false); setDataSettings(true); }}>資料備份、匯出與 App 更新</button>
-              <button className="btn btn-danger btn-sm w-full" onClick={leaveGroup}>離開群組</button>
+              {!personal && <button className="btn btn-danger btn-sm w-full" onClick={leaveGroup}>離開群組</button>}
             </div>
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('groupSettings', false)}>取消</button>
@@ -1234,20 +1252,20 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
                   <div className="field-label">日期</div>
                   <div className="text-sm">{selectedExpense.date ? utils.fmtDate(selectedExpense.date) : '未設定'}</div>
                 </div>
-                <div>
+                {!personal && <div>
                   <div className="field-label">付款人</div>
                   <div className="text-sm">{selectedExpense.payer}</div>
-                </div>
-                <div>
+                </div>}
+                {!personal && <div>
                   <div className="field-label">分攤方式</div>
                   <div className="text-sm">{utils.buildSplitDesc(selectedExpense)}</div>
-                </div>
+                </div>}
                 <div>
                   <div className="field-label">建立時間</div>
                   <div className="text-xs text-ink-3">{new Date(selectedExpense.createdAt).toLocaleString('zh-TW')}</div>
                 </div>
               </div>
-              <div className="field-label mb-2">各人分攤金額</div>
+              {!personal && <><div className="field-label mb-2">各人分攤金額</div>
               <div className="flex flex-col">
                 {selectedExpense.splitMode === 'equal' ? (
                   utils.equalShares(selectedExpense.amount, selectedExpense.participants).map(share => (
@@ -1263,6 +1281,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
                   ))
                 )}
               </div>
+            </>}
             </div>
             {currentGroup && <HistoryLog group={currentGroup} target={selectedExpense.id} />}
             <div className="flex flex-col gap-2 mt-2">

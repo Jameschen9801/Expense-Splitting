@@ -1,5 +1,6 @@
 import type { Expense, Group, MutationMeta, Transfer } from '../types';
 import { auditEntry, fingerprint, RecordConflictError, updatedRecord } from './audit';
+import { assertLedgerChange } from './ledgers';
 
 export type GroupChange = (
   | { type: 'expense.put'; expense: Expense }
@@ -14,6 +15,7 @@ export type PendingChange = { id: string; groupCode: string; change: GroupChange
 
 // Applying a queued operation more than once must never duplicate a record.
 export function applyChange(group: Group, change: GroupChange): Group {
+  assertLedgerChange(group, change);
   if (change.meta && Object.hasOwn(group.history || {}, change.meta.id)) return group;
   const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id
     : 'id' in change ? change.id : 'name' in change ? change.name : group.code;

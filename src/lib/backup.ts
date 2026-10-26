@@ -2,6 +2,7 @@ import type { Expense, Group, MyGroup, Transfer } from '../types';
 import { categories, categoryLabel } from './categories';
 import type { GroupChange, PendingChange } from './outbox';
 import { utils } from './utils';
+import { assertLedgerChange, isPersonalLedger, ledgerKind } from './ledgers';
 
 type Store = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeItem'>;
 export type Backup = { app: 'Expense-Splitting'; version: 1; createdAt: string; entries: Record<string, string> };
@@ -50,6 +51,7 @@ function validRecord(record: any): record is Expense | Transfer {
 }
 function validGroup(group: any): group is Group {
   if (!object(group) || !code(group.code) || !text(group.name) || !names(group.members)
+    || group.kind != null && !['personal','shared'].includes(group.kind)
     || !Array.isArray(group.expenses) || !Array.isArray(group.transfers)
     || [...group.expenses, ...group.transfers].length > 50000
     || !group.expenses.every((record: any) => validRecord(record) && 'desc' in record)
@@ -67,6 +69,10 @@ function validGroup(group: any): group is Group {
       || Object.entries(security.users).some(([uid, user]: [string, any]) => !object(user) || !text(user.name, 12) || user.nameKey !== user.name
         || security.names[user.name] !== uid || user.role !== (uid === security.ownerUid ? 'owner' : 'member'))) return false;
   }
+  if (isPersonalLedger(group) && (!group.security || group.members.length !== 1 || group.transfers.length
+    || Object.keys(group.security.users).length !== 1 || Object.keys(group.security.names).length !== 1
+    || group.security.users[group.security.ownerUid].name !== group.members[0]
+    || group.expenses.some((record: Expense) => record.payer !== group.members[0] || record.participants.length !== 1 || record.participants[0] !== group.members[0] || record.splitMode !== 'equal'))) return false;
   return group.expenses.every((record: Expense) => group.members.includes(record.payer) && record.participants.every(name => group.members.includes(name)))
     && group.transfers.every((record: Transfer) => group.members.includes(record.from) && group.members.includes(record.to));
 }
@@ -95,7 +101,7 @@ function validateEntry(key: string, raw: string) {
   if (key === 'warikan_last_group') { if (!code(raw)) throw new Error('群組代碼格式錯誤'); return; }
   const data = parse(raw);
   let valid = false;
-  if (key === 'warikan_my_groups') valid = Array.isArray(data) && data.length <= 1000 && data.every(item => object(item) && code(item.code) && text(item.name) && text(item.myName, 100));
+  if (key === 'warikan_my_groups') valid = Array.isArray(data) && data.length <= 1000 && data.every(item => object(item) && code(item.code) && text(item.name) && text(item.myName, 100) && (item.kind == null || ['personal','shared'].includes(item.kind)));
   else if (key === 'warikan_outbox_v1') valid = Array.isArray(data) && data.length <= 10000 && data.every(validPending) && new Set(data.map(item => item.id)).size === data.length;
   else if (key.startsWith('warikan_group_')) valid = validGroup(data) && key === 'warikan_group_' + data.code;
   else if (key.startsWith('warikan_draft_')) valid = object(data) && ['expense', 'transfer'].includes(data.recordType) && validForm(data.expense) && validForm(data.transfer, true)
@@ -135,6 +141,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     if (!key.startsWith('warikan_group_')) continue;
     const imported: Group = parse(raw);
     const current: Group | null = parse(store.getItem(key) || 'null');
+    if (current && (ledgerKind(current) !== ledgerKind(imported) || isPersonalLedger(current) && current.security?.ownerUid !== imported.security?.ownerUid)) throw new Error('備份中的帳本類型或個人帳本身分與目前帳本不同，無法合併');
     originals.set(imported.code, current);
     const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id));
     const missingTransfers = imported.transfers.filter(record => !current?.transfers.some(item => item.id === record.id));
@@ -158,7 +165,9 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const currentRecord = [...current?.expenses || [], ...current?.transfers || []].find(record => record.id === id);
     // Never replay old edits/deletions or management changes over existing local work.
     if (!id || currentRecord || pending.some(queued => queued.groupCode === item.groupCode && entityId(queued.change) === id)) { result.skipped++; continue; }
-    if (!result.entries['warikan_group_' + item.groupCode] && !store.getItem('warikan_group_' + item.groupCode)) { result.skipped++; continue; }
+    const targetGroup = result.entries['warikan_group_' + item.groupCode] || store.getItem('warikan_group_' + item.groupCode);
+    if (!targetGroup) { result.skipped++; continue; }
+    assertLedgerChange(parse(targetGroup), item.change);
     pending.push(item); result.pending++; restoredEntities.add(item.groupCode + ':' + id);
   }
   for (const { group, record } of addedRecords) {

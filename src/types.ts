@@ -1,4 +1,5 @@
 export interface Group {
+  kind?: 'personal' | 'shared';
   code: string;
   name: string;
   members: string[];
@@ -55,6 +56,7 @@ export interface Transfer extends RecordMetadata {
 }
 
 export interface MyGroup {
+  kind?: Group['kind'];
   code: string;
   name: string;
   myName: string;

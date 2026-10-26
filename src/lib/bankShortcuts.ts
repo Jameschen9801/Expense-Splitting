@@ -1,6 +1,7 @@
 import type { Expense, ExpenseCategory, Group } from '../types';
 import { categories, defaultExpenseCategory } from './categories';
 import { utils } from './utils';
+import { assertLedgerChange } from './ledgers';
 
 export const bankRulesKey = 'warikan_bank_rules_v1';
 export type BankRule = {
@@ -123,8 +124,10 @@ export async function bankExpenseId(rule: BankRule, request: BankRequest) {
 }
 export function bankExpense(rule: BankRule, entry: BankEntry, id: string, group: Group): Expense {
   if (!group.members.includes(rule.payer) || !rule.participants.length || rule.participants.some(name => !group.members.includes(name))) throw new Error('群組成員已變動，請重新設定捷徑規則');
-  return { id, amount: entry.amount, desc: entry.desc, date: entry.date, category: rule.category,
+  const expense: Expense = { id, amount: entry.amount, desc: entry.desc, date: entry.date, category: rule.category,
     payer: rule.payer, participants: [...rule.participants], splitMode: 'equal', shares: [], createdAt: Date.now() };
+  assertLedgerChange(group, { type: 'expense.put', expense });
+  return expense;
 }
 export function rememberBankReceipt(store: Store, ruleId: string, id: string) {
   const rules = readBankRules(store);

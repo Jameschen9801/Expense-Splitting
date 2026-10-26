@@ -389,6 +389,13 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .currency { font-size: 0.7em; font-weight: 500; letter-spacing: 0; margin-right: 3px; }
 .mobile-add-button { background: var(--ui-accent); color: var(--ui-on-accent); min-height: 52px; padding: 12px 22px; font-size: 15px; bottom: calc(82px + env(safe-area-inset-bottom)); right: 18px; z-index: var(--layer-add); box-shadow: 0 6px 20px rgb(37 53 43 / 16%); }
 .settings-heading { font-size: 16px; font-weight: 600; color: var(--ui-text); margin-bottom: 14px; }
+.ledger-kind-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+.ledger-kind-option { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 116px; padding: 16px; border: 1px solid var(--ui-control); border-radius: 18px; color: var(--ui-secondary); background: var(--ui-surface); text-align: left; }
+.ledger-kind-option[aria-pressed="true"] { border-color: var(--ui-accent); background: var(--ui-accent-soft); color: var(--ui-text); }
+.ledger-kind-option span { font-size: 15px; font-weight: 600; }
+.ledger-kind-option small { font-size: 12px; line-height: 1.5; }
+.group-tabs[data-personal="true"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.personal-overview { padding: 22px; margin-bottom: 26px; border: 1px solid var(--ui-line); border-radius: 24px; background: var(--ui-surface); }
 .bank-rule-form { display: grid; gap: 18px; }
 .bank-choice { display: inline-flex; gap: 9px; align-items: center; min-height: 44px; padding: 9px 12px; border: 1px solid var(--ui-control); border-radius: 16px; font-size: 14px; line-height: 1.6; }
 .bank-choice input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--ui-accent); margin-top: 2px; }

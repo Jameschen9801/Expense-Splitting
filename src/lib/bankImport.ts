@@ -52,5 +52,5 @@ export async function saveBankEntry(prepared: PreparedBankEntry, confirmed = fal
   let warning = '';
   try { storage.saveGroup(merged.code, merged); rememberBankReceipt(localStorage, current.rule.id, current.id); }
   catch { warning = '紀錄已保存在待同步佇列，但顯示快取或通知防重複設定暫時無法更新。請勿清除網站資料。'; }
-  return { group: merged, myName: current.myName, message: sync.getStatus(merged.code).connected ? '已儲存，將自動同步至群組' : '已離線保存，重新連線後自動同步', warning };
+  return { group: merged, myName: current.myName, message: sync.getStatus(merged.code).connected ? '已儲存，將自動同步至帳本' : '已離線保存，重新連線後自動同步', warning };
 }

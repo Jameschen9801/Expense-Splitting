@@ -3,8 +3,10 @@ import type { ExpenseCategory, Group } from '../types';
 import { categories, categoryLabel, defaultExpenseCategory } from '../lib/categories';
 import { bankRulesKey, bankShortcutPrefix, newBankRule, parseBankText, readBankRules, saveBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
 import { storage, utils } from '../lib/utils';
+import { isPersonalLedger } from '../lib/ledgers';
 
 export function BankShortcutSettings({ group }: { group: Group | null }) {
+  const personal = isPersonalLedger(group);
   const myName = group && storage.getMyGroups().find(item => item.code === group.code)?.myName;
   const [rules, setRules] = useState<BankRule[]>([]);
   const [bank, setBank] = useState('');
@@ -70,19 +72,19 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     <p className="text-sm text-ink-2 leading-relaxed">設定銀行關鍵字與卡號末四碼，讓捷徑轉入消費文字。預設先確認，也可測試後啟用符合條件自動入帳。</p>
     <div className="rounded-2xl border border-line bg-paper-2 p-3 text-xs text-ink-2 leading-relaxed mt-3">
       <p>這是「捷徑開啟網站後記帳」，不是關閉 App 也持續監聽通知。開啟網站可能需要解鎖手機。</p>
-      <p className="mt-2">主畫面 App 與 Safari 可能使用不同儲存與裝置身分。請在捷徑會開啟的同一個 Safari 加入群組、設定規則。不要清除原 App 資料。</p>
+      <p className="mt-2">{personal ? '個人帳本綁定建立時的 App 身分。若捷徑開啟到不同的 Safari 身分，請改在該 Safari 建立個人帳本與規則；不要清除原 App 資料。' : '主畫面 App 與 Safari 可能使用不同儲存與裝置身分。請在捷徑會開啟的同一個 Safari 加入群組、設定規則。不要清除原 App 資料。'}</p>
       <p className="mt-2">只處理新臺幣成功消費；不直接處理退款、驗證碼、外幣與不明金額。同張卡請只選一個自動化來源。</p>
     </div>
     {group && !formOpen && <button type="button" className="btn btn-primary w-full mt-4" onClick={() => openForm()}>新增銀行規則</button>}
     {group && formOpen ? <div className="bank-rule-form mt-4">
-      <p className="text-sm font-medium">記帳群組：{group.name}</p>
+      <p className="text-sm font-medium">記帳帳本：{group.name}</p>
       <div><label className="field-label" htmlFor="bank-keyword">銀行關鍵字</label><input id="bank-keyword" value={bank} maxLength={40} placeholder="通知中會出現的銀行名稱" onChange={event => setBank(event.target.value)} autoComplete="off" /></div>
       <div><label className="field-label" htmlFor="bank-last4">卡號末四碼</label><input id="bank-last4" value={last4} maxLength={4} inputMode="numeric" pattern="[0-9]{4}" placeholder="只填末四碼，不填完整卡號" onChange={event => setLast4(event.target.value.normalize('NFKC').replace(/\D/g,''))} autoComplete="off" /></div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className={personal ? '' : 'grid grid-cols-2 gap-3'}>
         <div><label className="field-label" htmlFor="bank-category">入帳分類</label><select id="bank-category" value={category} onChange={event => setCategory(event.target.value as ExpenseCategory)}>{categories.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></div>
-        <div><label className="field-label" htmlFor="bank-payer">誰先付款</label><select id="bank-payer" value={payer} onChange={event => { setPayer(event.target.value); setParticipants([event.target.value]); }}>{group.members.map(name => <option key={name}>{name}</option>)}</select></div>
+        {!personal && <div><label className="field-label" htmlFor="bank-payer">誰先付款</label><select id="bank-payer" value={payer} onChange={event => { setPayer(event.target.value); setParticipants([event.target.value]); }}>{group.members.map(name => <option key={name}>{name}</option>)}</select></div>}
       </div>
-      <fieldset><legend className="field-label">分攤對象</legend><p className="text-xs text-ink-3 mb-2">預設僅付款人分攤；勾選多人時平均分攤。</p><div className="flex flex-wrap gap-2">{group.members.map(name => <label key={name} className="bank-choice"><input type="checkbox" checked={participants.includes(name)} onChange={event => setParticipants(value => event.target.checked ? [...value,name] : value.filter(item => item !== name))} />{name}</label>)}</div></fieldset>
+      {!personal && <fieldset><legend className="field-label">分攤對象</legend><p className="text-xs text-ink-3 mb-2">預設僅付款人分攤；勾選多人時平均分攤。</p><div className="flex flex-wrap gap-2">{group.members.map(name => <label key={name} className="bank-choice"><input type="checkbox" checked={participants.includes(name)} onChange={event => setParticipants(value => event.target.checked ? [...value,name] : value.filter(item => item !== name))} />{name}</label>)}</div></fieldset>}
       <div><label className="field-label" htmlFor="bank-mode">入帳方式</label><select id="bank-mode" value={mode} onChange={event => { setMode(event.target.value as 'review'|'auto'); setConsent(false); }}><option value="review">先確認再新增</option><option value="auto">符合規則後自動新增</option></select></div>
       <div><label className="field-label" htmlFor="bank-limit">自動入帳單筆上限 (NT$)</label><input id="bank-limit" type="number" min="0.01" max="1000000000" step="0.01" inputMode="decimal" value={limit} onChange={event => setLimit(event.target.value)} /><p className="text-xs text-ink-3 mt-2">超過上限、缺少當日日期或疑似重複時，改為確認後新增。</p></div>
       <div><label className="field-label" htmlFor="bank-sample">測試通知文字（不會記帳）</label><textarea id="bank-sample" rows={3} maxLength={6000} value={sample} onChange={event => setSample(event.target.value)} placeholder="貼上遮蔽完整卡號後的通知；不要貼驗證碼" /><button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => { try { setTest({ entry: parseBankText(sample, { bank, last4 }), signature }); setMessage('辨識成功，測試不會新增帳目'); } catch (error) { setTest(null); setMessage((error as Error).message); } }}>測試辨識</button></div>
@@ -98,7 +100,7 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     <a className="btn w-full mt-4" href={import.meta.env.BASE_URL + 'shortcuts/銀行通知記帳.shortcut'} target="_blank" rel="noreferrer">下載銀行通知捷徑</a>
     <p className="text-xs text-ink-3 mt-2">需連網下載。安裝時貼上你的捷徑連結前綴；下載檔本身不含任何帳目或私人設定。</p>
     <details className="expense-more mt-5"><summary>設定 iOS 捷徑</summary><ol className="text-sm leading-relaxed space-y-3 pl-5 list-decimal py-3">
-      <li>先儲存銀行規則、複製連結，再用 Safari 下載並加入「銀行通知記帳」捷徑，依安裝問題貼上連結前綴。</li>
+      <li>在捷徑會開啟的同一個 Safari 建立個人帳本，或加入共用帳本。儲存銀行規則、複製連結，再下載並加入「銀行通知記帳」捷徑，依安裝問題貼上連結前綴。</li>
       <li>在 iOS 27「捷徑 → 自動化」新增「通知」，選銀行 App、篩選消費通知。把通知的標題、副標題、訊息合併成文字，需包含銀行名稱、卡號末四碼與新臺幣金額。</li>
       <li>加入「執行捷徑」，選「銀行通知記帳」，將合併後的文字傳給它。捷徑會編碼文字並開啟網站；請依系統提供的選項設定執行方式，鎖屏時可能需要解鎖。</li>
       <li>先以「先確認再新增」試跑，核對群組、付款人、分攤、日期和金額。啟用自動新增前需完成測試與同意設定。</li>

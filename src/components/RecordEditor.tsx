@@ -5,6 +5,7 @@ import { categories, defaultExpenseCategory } from '../lib/categories';
 import { utils } from '../lib/utils';
 import { Modal } from './Modal';
 import type { KeyboardField } from './KeyboardInputBar';
+import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
 export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer }: {
@@ -12,9 +13,10 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
 }) {
-  const [expForm, setExpForm] = useState<ExpenseForm>({ ...initial.expense, category: initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) });
+  const personal = isPersonalLedger(group);
+  const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
   const [tfForm, setTfForm] = useState(initial.transfer);
-  const [recordType, setRecordType] = useState(initial.recordType);
+  const [recordType, setRecordType] = useState(personal ? 'expense' : initial.recordType);
   const [localError, setLocalError] = useState('');
   const isEditingExpense = !!initial.expenseId;
   const isEditingTransfer = !!initial.transferId;
@@ -106,7 +108,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
               </button>
             </div>
           }>
-            {(!isEditingExpense && !isEditingTransfer) && (
+            {(!personal && !isEditingExpense && !isEditingTransfer) && (
               <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">
                 <button 
                   className={`flex-1 py-1.5 text-[13px] tracking-wider rounded-full transition-all ${recordType === 'expense' ? 'bg-ink text-paper shadow-sm font-medium' : 'text-ink-3 hover:bg-paper-2'}`}
@@ -145,7 +147,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   <label className="field-label" htmlFor="expense-description">說明</label>
                   <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
                 </div>
-                <div className="field">
+                {!personal && <><div className="field">
                   <label className="field-label" htmlFor="expense-payer">誰先付款</label>
                   <select id="expense-payer" value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
                     {group.members.map(m => <option key={m} value={m}>{m}</option>)}
@@ -272,6 +274,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                     );
                   })()}
                 </div>
+                </>}
                 <div className="field">
                   <label className="field-label" htmlFor="expense-category">分類</label>
                   <select id="expense-category" value={expForm.category || defaultExpenseCategory} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>

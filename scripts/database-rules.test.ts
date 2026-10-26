@@ -111,3 +111,62 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
   await assertFails(member().child('history/m1').remove());
   await assertFails(member().child('history/m1').set({ ...entry, at: 4 }));
 });
+
+const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
+const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
+const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('個人帳本只能由建立者讀取，知道帳本代碼仍不能讀取明細或名稱',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertSucceeds(privateRef().get());
+  await assertFails(privateRef('stranger').get());
+  await assertFails(privateRef('member').child('name').get());
+  await assertFails(privateRef('stranger').child('expenses').get());
+  await assertFails(env.unauthenticatedContext().database().ref('groups/654321').get());
+});
+test('個人帳本拒絕自行加入，也不能把自己加入身分或成員子路徑',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertFails(privateRef('guest').child('security').update({'users/guest':{name:'D',nameKey:'D',role:'member'},'names/D':'guest'}));
+  await assertFails(privateRef('guest').child('security/users/guest').set({name:'D',nameKey:'D',role:'member'}));
+  await assertFails(privateRef('guest').child('members/D').set(true));
+  await assertFails(privateRef('guest').set(cloud({...personal,members:['A','D']})));
+});
+test('個人帳本種類不可改為共用或刪除，既有共用帳本也不會被轉為私人',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertFails(privateRef().child('kind').set('shared'));
+  await assertFails(privateRef().child('kind').remove());
+  await assertFails(privateRef().set(cloud({...personal,kind:'shared'})));
+  const {kind,...missingKind}=personal; await assertFails(privateRef().set(cloud(missingKind)));
+  await assertFails(owner().child('kind').set('personal'));
+  await assertSucceeds(owner().child('name').set('共用帳本維持正常'));
+});
+test('個人帳本可正常新增、編輯、刪除支出與變更帳本名稱',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  const next=applyChange(personal,{type:'expense.put',expense:personalExpense,meta:{id:'pm1',actor:'A',actorUid:'owner',at:3,expected:null}});
+  await assertSucceeds(privateRef().child('expenses/pe1').set(cloud(next).expenses.pe1));
+  await assertSucceeds(privateRef().child('history/pm1').set(next.history!.pm1));
+  await assertSucceeds(privateRef().child('expenses/pe1/amount').set(150));
+  await assertSucceeds(privateRef().child('expenses/pe1/_deleted').set(true));
+  await assertSucceeds(privateRef().child('name').set('每日花費'));
+});
+test('個人帳本即使建立者直接寫入，也不能增加成員、分攤對象或轉帳',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertFails(privateRef().child('members/D').set(true));
+  await assertFails(privateRef().child('security').update({'users/guest':{name:'D',nameKey:'D',role:'member'},'names/D':'guest'}));
+  await assertFails(privateRef().child('expenses/pe1').set({...personalExpense,payer:'D'}));
+  await assertFails(privateRef().child('expenses/pe1').set({...personalExpense,participants:{0:'A',2:'A'}}));
+  await assertFails(privateRef().child('transfers/t1').set({id:'t1',from:'A',to:'D',amount:1,date:'2026-10-27',createdAt:2}));
+});
+test('個人帳本建立時就必須只有建立者，不能混入其他成員或冒用他人身分',async()=>{
+  await assertFails(privateRef('guest').set(cloud(personal)));
+  await assertFails(privateRef().set(cloud({...personal,members:['A','D']})));
+  await assertFails(privateRef().set(cloud({...personal,security:{...personal.security!,users:{...personal.security!.users,guest:{name:'D',nameKey:'D',role:'member'}},names:{...personal.security!.names,D:'guest'}}})));
+  await assertSucceeds(privateRef().set(cloud(personal)));
+});
+test('明確標記為共用的新帳本仍可使用邀請碼加入與共同記帳',async()=>{
+  await assertSucceeds(privateRef().set(cloud({...personal,kind:'shared'})));
+  await assertSucceeds(privateRef('guest').child('security').update({'users/guest':{name:'D',nameKey:'D',role:'member'},'names/D':'guest'}));
+  await assertSucceeds(privateRef('guest').child('members/D').set(true));
+  const shared={...personal,kind:'shared' as const,members:['A','D']};
+  const next=applyChange(shared,{type:'expense.put',expense:{...personalExpense,participants:['A','D']},meta:{id:'sm1',actor:'D',actorUid:'guest',at:3,expected:null}});
+  await assertSucceeds(privateRef('guest').child('expenses/pe1').set(cloud(next).expenses.pe1));
+});

@@ -8,7 +8,8 @@ import { CategoryIcon } from './CategoryIcon';
 
 export type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
 
-export const RecordsList = memo(function RecordsList({ groups, myName, filtered, resetKey, onClear, onExpense, onTransfer }: {
+export const RecordsList = memo(function RecordsList({ groups, myName, personal = false, filtered, resetKey, onClear, onExpense, onTransfer }: {
+  personal?: boolean;
   groups: Record<string, RecordItem[]>; myName: string; filtered: boolean; resetKey: string; onClear: () => void;
   onExpense: (expense: Expense) => void; onTransfer: (transfer: Transfer) => void;
 }) {
@@ -29,7 +30,7 @@ export const RecordsList = memo(function RecordsList({ groups, myName, filtered,
     {total === 0 ? <div className="empty-state">
       <span className="empty-icon">{filtered ? <SearchX size={28} aria-hidden="true" /> : <ReceiptText size={28} aria-hidden="true" />}</span>
       <h3>{filtered ? '找不到符合條件的記錄' : '尚無任何記錄'}</h3>
-      <p>{filtered ? '換個關鍵字，或清除篩選再看看。' : '按下新增，記錄這個群組的第一筆花費。'}</p>
+      <p>{filtered ? '換個關鍵字，或清除篩選再看看。' : '按下新增，記錄這個帳本的第一筆花費。'}</p>
       {filtered && <button type="button" className="btn btn-ghost mt-2" onClick={onClear}>清除搜尋與篩選</button>}
     </div> : visible.map(({ date, items }) => <section className="record-day" key={date} aria-label={date === '未設定日期' ? date : utils.fmtDate(date)}>
       <div className="record-day-heading"><time dateTime={date === '未設定日期' ? undefined : date}>{recordDateLabel(date, utils.todayStr())}</time><span>{groups[date].length} 筆</span></div>
@@ -40,15 +41,15 @@ export const RecordsList = memo(function RecordsList({ groups, myName, filtered,
             ? (item.splitMode === 'equal' ? utils.equalShares(item.amount, item.participants) : item.shares || []).find(share => share.name === myName)?.amount || 0
             : 0;
           const included = item.participants.includes(myName);
-          const shownAmount = utils.fmt(included ? myCost : item.amount);
+          const shownAmount = utils.fmt(personal ? item.amount : included ? myCost : item.amount);
           return <button type="button" key={item.id} onClick={() => onExpense(item)} className="record-row"
-            aria-label={`${item.desc}，${categoryLabel(item.category)}，${item.payer}先付 NT$${utils.fmt(item.amount)}，${included ? '你的分攤' : '費用總額'} NT$${shownAmount}`}>
+            aria-label={personal ? `${item.desc}，${categoryLabel(item.category)}，支出 NT$${shownAmount}` : `${item.desc}，${categoryLabel(item.category)}，${item.payer}先付 NT$${utils.fmt(item.amount)}，${included ? '你的分攤' : '費用總額'} NT$${shownAmount}`}>
             <span className="record-kind"><CategoryIcon category={item.category} /></span>
             <div className="min-w-0">
               <div className="record-name">{item.desc}</div>
-              <div className="record-meta">{item.payer}先付 NT${utils.fmt(item.amount)}</div>
+              <div className="record-meta">{personal ? categoryLabel(item.category) : item.payer + '先付 NT' + utils.fmt(item.amount)}</div>
             </div>
-            <div className="record-amount"><div className="record-amount-label">{included ? '你的分攤' : '費用總額'}</div>
+            <div className="record-amount"><div className="record-amount-label">{personal ? '支出' : included ? '你的分攤' : '費用總額'}</div>
               <div className={`money ${shownAmount.length > 11 ? 'amount-long' : ''}`}><span className="currency">NT$</span>{shownAmount}</div>
             </div>
           </button>;

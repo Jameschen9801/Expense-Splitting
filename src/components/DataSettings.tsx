@@ -71,7 +71,7 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
       <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、草稿與待同步資料，保留舊版備份相容性；不包含登入憑證與銀行捷徑識別碼。檔案含私人帳目，請妥善保管；新裝置的群主身分仍需管理者驗證。</p>
       <div className="flex flex-col gap-2">
         <button type="button" className="btn btn-primary w-full" onClick={exportBackup}>匯出完整 JSON 備份</button>
-        {group && <button type="button" className="btn w-full" onClick={() => exportFile(groupCsv(group), '分帳明細-' + group.code + '-' + utils.todayStr() + '.csv', 'text/csv;charset=utf-8')}>匯出此群組全部明細 CSV</button>}
+        {group && <button type="button" className="btn w-full" onClick={() => exportFile(groupCsv(group), '分帳明細-' + group.code + '-' + utils.todayStr() + '.csv', 'text/csv;charset=utf-8')}>匯出此帳本全部明細 CSV</button>}
         <button type="button" className="btn w-full" onClick={() => input.current?.click()} disabled={busy}>{busy ? '檢查備份中…' : '選擇 JSON 備份還原'}</button>
         <input ref={input} type="file" accept=".json,application/json" className="sr-only" aria-label="選擇分帳 JSON 備份" onChange={event => readFile(event.target.files?.[0])} />
       </div>

@@ -5,6 +5,7 @@ import { prepareBankEntry, saveBankEntry, type PreparedBankEntry } from '../lib/
 import type { BankRequest } from '../lib/bankShortcuts';
 import type { Group } from '../types';
 import { utils } from '../lib/utils';
+import { isPersonalLedger } from '../lib/ledgers';
 
 export function BankImport({ input, onClose, onGroup }: { input: { request?: BankRequest; error?: string }; onClose: () => void; onGroup: (group: Group, name: string) => void }) {
   const [prepared, setPrepared] = useState<PreparedBankEntry | null>(null);
@@ -40,7 +41,7 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
       <p>{prepared.group.name} · {prepared.rule.bank} · 末四碼 {prepared.rule.last4}</p>
       <p className="money text-2xl">NT$ {utils.fmt(prepared.entry.amount)}</p>
       <p>{prepared.entry.desc}</p><p>{prepared.entry.date} · {categoryLabel(prepared.rule.category)}</p>
-      <p>{prepared.rule.payer} 先付款；分攤：{prepared.rule.participants.join('、')}</p>
+      {!isPersonalLedger(prepared.group) && <p>{prepared.rule.payer} 先付款；分攤：{prepared.rule.participants.join('、')}</p>}
       {!prepared.entry.dateInMessage && <p className="text-xs text-ink-3">通知未含日期，使用本次開啟捷徑的日期。</p>}
     </div>}
     {prepared?.reviewReason && !saved && <p className="form-error mt-4">{prepared.reviewReason}</p>}

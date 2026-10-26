@@ -3,6 +3,7 @@ import { Expense, Group, Transfer, type AuditEntry } from '../types';
 import { withoutUndefined } from './firebaseData';
 import { applyCloudChange, type GroupChange } from './outbox';
 import { RecordConflictError, updatedRecord } from './audit';
+import { isPersonalLedger } from './ledgers';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -213,19 +214,26 @@ export const createGroupInCloud = async (groupData: Group): Promise<boolean> => 
   const nameKey = memberNameKey(name);
   groupData.security = { version: 1, ownerUid: deviceUid,
     users: { [deviceUid]: { name, nameKey, role: 'owner' } }, names: { [nameKey]: deviceUid } };
-  const result = await runTransaction(groupRef, current => current ? undefined : cloudGroup(groupData));
-  return result.committed;
+  try {
+    const result = await runTransaction(groupRef, current => current ? undefined : cloudGroup(groupData));
+    return result.committed;
+  } catch (error) {
+    // An occupied personal code is unreadable to this device; try another code.
+    if (/permission[_ -]?denied/i.test(String(error))) return false;
+    throw error;
+  }
 };
 
 export const addMemberToCloud = (groupCode: string, name: string) =>
-  updateGroup(groupCode, group => ({
-    ...group,
-    members: group.members.includes(name) ? group.members : [...group.members, name],
-  }));
+  updateGroup(groupCode, group => {
+    if (isPersonalLedger(group)) throw new Error('個人帳本無法加入其他成員');
+    return { ...group, members: group.members.includes(name) ? group.members : [...group.members, name] };
+  });
 
 export const joinGroupInCloud = async (groupCode: string, name: string) => {
   const group = await fetchGroupOnce(groupCode);
   if (!group) throw new Error('群組不存在');
+  if (isPersonalLedger(group)) throw new Error('個人帳本無法透過邀請碼加入');
   if (!group.security) {
     return addMemberToCloud(groupCode, name);
   }
