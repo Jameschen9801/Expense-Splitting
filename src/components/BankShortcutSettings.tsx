@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ExpenseCategory, Group } from '../types';
 import { categories, categoryLabel, defaultExpenseCategory } from '../lib/categories';
-import { bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, cardSuffixLabel, newBankRule, parseBankText, readBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
+import { bankRulesKey, bankShortcutName, bankShortcutPrefix, bankShortcutSetupUrl, cardSuffixLabel, newBankRule, parseBankText, readBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
 import { storage, utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
 import { accountSync } from '../lib/accountSync';
@@ -85,18 +85,27 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     try { await navigator.clipboard.writeText(link); setMessage('已複製捷徑連結前綴，請勿公開分享'); }
     catch { setMessage('請長按下方連結前綴複製'); }
   };
+  const openAutomationGuide = () => {
+    const heading = document.getElementById('bank-automation-heading');
+    const content = heading?.closest<HTMLElement>('.modal-content');
+    if (heading && content) {
+      content.scrollTo({ top: content.scrollTop + heading.getBoundingClientRect().top - content.getBoundingClientRect().top - 20 });
+      heading.focus({ preventScroll: true });
+    }
+  };
   const bindShortcut = async () => {
     try {
       if (accountSync.getSnapshot().email) await accountSync.refresh();
       if (!group || !readBankRules(localStorage).some(rule => rule.enabled && rule.groupCode === group.code)) throw new Error('請先儲存並啟用這個帳本的銀行規則');
       const url = bankShortcutSetupUrl(localStorage, location.origin + import.meta.env.BASE_URL);
-      setMessage('即將把設定傳給「銀行通知記帳」。請在捷徑完成儲存；這個動作不會新增帳目。');
+      setMessage('即將把銀行設定傳給「銀行通知記帳」。儲存後，請繼續第 3 步設定通知自動化，收到銀行通知時才會觸發。');
       location.assign(url);
     } catch (error) { setMessage(error instanceof Error ? error.message : '設定尚未傳出，請稍後重試'); }
   };
   return <section className="settings-section bank-shortcut-settings">
     <h3 className="settings-heading">iOS 銀行捷徑記帳</h3>
     <p className="text-sm text-ink-2 leading-relaxed">{personal ? '填好銀行與卡號末 4 碼，捷徑收到有效消費後先放入待確認，補好說明與分類後再確認入帳。' : '在 App 填好銀行、卡號末 4 碼與記帳帳本，再加入捷徑，不用到捷徑裡重填。'}</p>
+    <button type="button" className="btn w-full mt-4" onClick={openAutomationGuide}>設定通知自動化</button>
     <div className="mt-4"><AccountSyncSettings compact /></div>
     <BankDeliveryStatus />
     <p className="text-xs text-ink-3 leading-relaxed mt-3">目前仍須開啟 Safari 才會保存通知，鎖定手機時可能需要解鎖。加入捷徑後，也須在 iOS 設定通知自動化；網站無法代替手機啟用它。</p>
@@ -134,19 +143,30 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     <a className="btn btn-primary w-full mt-4" href="https://www.icloud.com/shortcuts/1e2ff51948f94e508a80098f7367b2f7" target="_blank" rel="noopener noreferrer">加入銀行通知捷徑</a>
     <button type="button" className="btn w-full mt-3" disabled={!group || !rules.some(rule => rule.enabled && rule.groupCode === group.code)} onClick={bindShortcut}>已加入，完成綁定</button>
     <p className="text-xs text-ink-3 mt-2 leading-relaxed">捷徑會保存此 App 的記帳連結。之後新增卡片、修改分類或入帳方式，直接在 App 儲存即可。同一個捷徑會依銀行與卡號末碼選擇帳本。</p>
+    <p className="text-sm font-medium mt-3">完成綁定後，還要設定下方第 3 步，才能由銀行通知觸發。</p>
     <details className="expense-more mt-4"><summary>無法開啟安裝頁面？</summary>
       <p className="text-sm leading-relaxed py-3">請用 Safari 開啟安裝頁。也可下載 ZIP 備用檔，在「檔案 → 下載項目」點 ZIP 解壓，再點「銀行通知記帳.shortcut」加入捷徑。</p>
       <a className="btn w-full mb-3" href={import.meta.env.BASE_URL + 'shortcuts/bank-notification-shortcut.zip'} download="銀行通知記帳.zip">下載 ZIP 備用檔</a>
       <p className="text-xs text-ink-3 leading-relaxed pb-3">如果看到 AEA1 或大量亂碼，表示瀏覽器正在預覽捷徑原始檔。請返回此頁，改按上方安裝按鈕或使用 ZIP 備用檔。</p>
     </details>
-    <details className="expense-more mt-5"><summary>3. 接上 iOS 銀行通知自動化</summary><ol className="text-sm leading-relaxed space-y-3 pl-5 list-decimal py-3">
-      <li>先在 App 儲存銀行規則，加入新版「銀行通知記帳」，再回到 App 按「已加入，完成綁定」。捷徑顯示設定已儲存後，即可使用。</li>
-      <li>在 iOS 27 開啟捷徑的「編輯 → 自動化」，加入「通知」，選銀行 App、篩選消費通知。把通知的標題、副標題、訊息合併成文字，需包含銀行名稱、對應的卡號末碼與新臺幣金額。</li>
-      <li>Richart 與 Richart Life 可能同時發送相同刷卡通知，請只選其中一個來源。App 中的銀行關鍵字可填「Richart」或「台新」，卡號填通知上的末 4 碼。</li>
-      <li>加入「執行捷徑」，選「銀行通知記帳」，輸入指定為合併後的通知文字，不能留空。確認自動化已啟用；需要鎖定時執行，可在捷徑「編輯 → 資訊 → 隱私」檢查「允許鎖定時執行」。開啟 Safari 的動作仍可能需要解鎖。</li>
-      <li>先手動執行這個自動化，回到 Safari 查看「最近一次捷徑接收」。若時間沒更新，表示資料尚未送進網站；已收到但未保存時，依顯示原因修正。手動測試通過後，仍須用下一次實際通知確認觸發是否正常。</li>
-      <li>{personal ? '個人帳本收到有效消費後先保存在待確認區；可稍後一次處理，補好說明與分類再確認加入帳本。可先用「測試辨識」核對通知格式，測試不會記帳。' : '先以「先確認再新增」試跑，核對帳本、日期和金額。啟用自動新增前需完成測試與同意設定。'}</li>
-    </ol><p className="text-xs text-ink-3 leading-relaxed pb-3">開啟帳本同步後，銀行規則保存在自己的私人同步空間；未開啟時僅存在此瀏覽器。原始通知不保存或上傳。完全相同通知會去重；若確為另一筆相同交易，請手動新增。</p><a className="text-sm underline" href="https://support.apple.com/en-ng/guide/shortcuts/apdfbdbd7123/ios" target="_blank" rel="noreferrer">Apple iOS 27 通知自動化說明</a></details>
+    <section className="rounded-2xl border border-line bg-paper-2 p-4 mt-5" aria-labelledby="bank-automation-heading">
+      <p className="text-xs text-ink-3 mb-2">首次需在 iPhone 完成</p>
+      <h4 id="bank-automation-heading" tabIndex={-1} className="text-base font-medium">3. 設定通知自動化</h4>
+      <p className="text-sm text-ink-2 leading-relaxed mt-3">自動化清單是空的，就還沒有接上通知觸發。這次使用 Richart 作為來源，先完成上方銀行規則與捷徑綁定，再用下方按鈕開啟設定。</p>
+      <p className="text-sm font-medium mt-3">通知來源：Richart</p>
+      <a className="btn btn-primary w-full mt-4" href={'shortcuts://open-shortcut?name=' + encodeURIComponent(bankShortcutName)}>開啟銀行捷徑設定</a>
+      <p className="text-xs text-ink-3 leading-relaxed mt-2">按鈕會開啟已加入的「銀行通知記帳」。通知來源與自動化啟用，需由你在 iPhone 選擇並儲存。</p>
+      <ol className="text-sm leading-relaxed space-y-3 pl-5 list-decimal mt-4">
+        <li>在「銀行通知記帳」點「編輯 → 自動化」，新增「通知」觸發條件。</li>
+        <li>銀行 App 設為「Richart」，接收它的消費通知。Richart Life 不用另外建立自動化。</li>
+        <li>讓通知文字傳入「銀行通知記帳」，內容需含銀行名稱、卡號末 4 碼及新臺幣金額。若需設定「執行捷徑」動作，選「銀行通知記帳」，並將輸入設為通知文字。</li>
+        <li>儲存並啟用自動化。需要鎖定時執行，可在捷徑「編輯 → 資訊 → 隱私」檢查「允許鎖定時執行」；開啟 Safari 仍可能需要解鎖。</li>
+      </ol>
+      <p className="text-sm leading-relaxed mt-4">設定後，請用下一次實際通知確認觸發。回到 Safari 查看上方「最近一次捷徑接收」，有新的接收時間才表示通知已送進網站。</p>
+      <p className="text-xs text-ink-3 leading-relaxed mt-2">相同 Richart 消費通知重送會略過；即使多了 Richart Life 標題或換行也不再新增。App 無法讀取或代為建立手機上的自動化，因此不會只因按過按鈕就顯示設定完成。</p>
+      <a className="inline-block text-sm underline mt-3" href="https://support.apple.com/en-ng/guide/shortcuts/apdfbdbd7123/ios" target="_blank" rel="noreferrer">Apple 自動化設定說明</a>
+    </section>
+    <details className="expense-more mt-4"><summary>通知入帳與資料保存方式</summary><p className="text-sm leading-relaxed py-3">{personal ? '個人帳本收到有效消費後先保存在待確認區；可稍後一次處理，補好說明與分類再確認加入帳本。可先用「測試辨識」核對通知格式，測試不會記帳。' : '先以「先確認再新增」試跑，核對帳本、日期和金額。啟用自動新增前需完成測試與同意設定。'}</p><p className="text-xs text-ink-3 leading-relaxed pb-3">開啟帳本同步後，銀行規則保存在自己的私人同步空間；未開啟時僅存在此瀏覽器。原始通知不保存或上傳。完全相同通知會去重；若確為另一筆相同交易，請手動新增。</p></details>
     {group && rules.some(rule => rule.groupCode === group.code) && <details className="expense-more mt-4"><summary>舊版捷徑手動設定</summary><p className="text-xs text-ink-3 py-3">僅供尚未更新的舊捷徑使用。新版請使用上方「完成綁定」。</p><div className="flex flex-wrap gap-2">{rules.filter(rule => rule.groupCode === group.code).map(rule => <button key={rule.id} type="button" className="btn btn-sm" onClick={() => copyLink(rule)}>{rule.bank} · {rule.last4} 連結</button>)}</div>{activeLink && <div className="mt-3"><label className="field-label" htmlFor="bank-shortcut-link">捷徑連結前綴（請勿分享）</label><textarea id="bank-shortcut-link" readOnly value={activeLink} rows={3} className="text-xs" /></div>}</details>}
     {message && <p role="status" className="text-sm mt-4 whitespace-pre-line">{message}</p>}
   </section>;

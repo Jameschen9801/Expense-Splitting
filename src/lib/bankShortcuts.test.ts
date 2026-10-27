@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { bankBridgeKey, bankExpense, bankExpenseId, bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, bankSetupMarker, newBankRule, parseBankRequest, parseBankText, readBankRules, rememberBankReceipt, resolveBankRule, saveBankRules, takeBankRequest } from './bankShortcuts';
+import { createHmac } from 'node:crypto';
+import { bankBridgeKey, bankExpense, bankExpenseId, bankExpenseIdentity, hasBankReceipt, bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, bankSetupMarker, newBankRule, parseBankRequest, parseBankText, readBankRules, rememberBankReceipt, resolveBankRule, saveBankRules, takeBankRequest } from './bankShortcuts';
 import { categories, categoryOf, defaultExpenseCategory } from './categories';
 import { createBackup } from './backup';
 import type { Expense, Group } from '../types';
@@ -230,6 +231,44 @@ test('相同通知使用私密 HMAC 去重，換卡規則不碰撞，也不暴�
   assert.notEqual(await bankExpenseId(rule,{ ...request, text:sample.replace('1,234.50','1,235.50') }),id);
   const store = memory(); saveBankRules(store,[rule]); rememberBankReceipt(store,rule.id,id); rememberBankReceipt(store,rule.id,id);
   assert.deepEqual(readBankRules(store)[0].seen,[id]);
+});
+
+test('Richart 與 Richart Life 標題及通知換行共用一筆收據，不混入不同消費', async () => {
+  const rule = newBankRule({ ...input, bank: 'Richart', last4: '0123' });
+  const notice = '【信用卡消費通知】您的Richart卡(末四碼0123)於10/27-23:07刷卡消費約新臺幣74元，實際消費資訊以帳單為準，如有疑問請洽客服';
+  const request = { channel: rule.channel, text: notice };
+  const id = await bankExpenseId(rule, request);
+  for (const text of ['Richart\n' + notice, 'Richart Life\n' + notice, notice.replace('0123)', '\n0123)\n').replace('74元', '74\n元'), notice.replace('【信用卡消費通知】', '')]) {
+    assert.equal(await bankExpenseId(rule, { ...request, text }), id);
+  }
+  for (const text of [notice.replace('23:07', '23:08'), notice.replace('74元', '75元'), notice.replace('10/27', '10/28')]) {
+    assert.notEqual(await bankExpenseId(rule, { ...request, text }), id);
+  }
+  // Unknown extra content is kept in the fingerprint rather than discarded.
+  assert.notEqual(await bankExpenseId(rule, { ...request, text: '其他通知\n' + notice }), id);
+  const nonRichart = newBankRule(input);
+  assert.equal(await bankExpenseId(nonRichart, { channel: nonRichart.channel, text: sample }), 'ebank_' + createHmac('sha256', Buffer.from(nonRichart.secret, 'hex')).update(sample.normalize('NFKC').replace(/\s+/g, ' ')).digest('hex'));
+});
+
+test('新版 Richart 防重複仍辨識舊正式帳目、待確認和忽略紀錄，不更動原資料', async () => {
+  const rule = newBankRule({ ...input, bank: '台新', last4: '0123' });
+  const notice = '【信用卡消費通知】您的Richart卡(末四碼0123)於10/27-23:07刷卡消費約新臺幣74元，實際消費資訊以帳單為準，如有疑問請洽客服';
+  const oldHash = (text: string) => 'ebank_' + createHmac('sha256', Buffer.from(rule.secret, 'hex')).update(text.normalize('NFKC').trim().replace(/\s+/g, ' ')).digest('hex');
+  const receipt = await bankExpenseIdentity(rule, { channel: rule.channel, text: 'Richart\n' + notice });
+  const empty: Group = { code: input.groupCode, name: '測試帳本', createdAt: 1, members: ['A'], expenses: [], transfers: [] };
+  for (const source of ['', 'Richart\n', 'Richart Life\n']) {
+    const oldId = oldHash(source + notice);
+    assert.notEqual(oldId, receipt.id);
+    const expense = { ...bankExpense(rule, parseBankText(notice, rule, today), oldId, empty), desc: '原本已填好的說明' };
+    const group = { ...empty, expenses: [expense] };
+    const before = JSON.stringify(group);
+    assert.equal(hasBankReceipt(group, rule, receipt.equivalentIds), true);
+    assert.equal(JSON.stringify(group), before);
+    assert.equal(hasBankReceipt({ ...empty, bankReceiptIds: [oldId] }, rule, receipt.equivalentIds), true);
+    assert.equal(hasBankReceipt({ ...empty, bankInbox: [{ ...expense, bank: rule.bank, last4: rule.last4 }] }, rule, receipt.equivalentIds), true);
+    assert.equal(hasBankReceipt(empty, { ...rule, seen: [oldId] }, receipt.equivalentIds), true);
+  }
+  assert.equal(hasBankReceipt(empty, rule, receipt.equivalentIds), false);
 });
 
 test('銀行支出保留選定的分類、付款與分攤，不保存推播原文', () => {

@@ -183,11 +183,42 @@ export function parseBankText(text: string, rule: Pick<BankRule,'bank'|'last4'>,
   return { amount: utils.fromCents(utils.toCents(amounts[0])), desc, date, dateInMessage: !!(fullDate || shortDate) };
 }
 
-export async function bankExpenseId(rule: BankRule, request: BankRequest) {
+function bankReceiptTexts(text: string) {
+  const normalized = norm(text);
+  const original = normalized.replace(/\s+/g, ' ');
+  const start = normalized.search(/您的\s*Richart\s*卡/i);
+  const prefix = start < 0 ? '' : normalized.slice(0, start).replace(/\s+/g, '').toLowerCase();
+  if (start < 0 || !/^(?:richart(?:life)?)?(?:【信用卡消費通知】)?$/.test(prefix)) return { canonical: original, previous: [original] };
+  const body = normalized.slice(start);
+  const compact = body.replace(/\s+/g, '').replace(/richart/i, 'Richart');
+  // These apps repeat the same Richart message. Keep the complete transaction
+  // body (including time), ignoring only known source labels and whitespace.
+  // Legacy hashes preserve deduplication for records saved before this update.
+  const previous = new Set([original]);
+  for (const value of new Set([body.replace(/\s+/g, ' '), compact])) {
+    for (const source of ['', 'Richart ', 'Richart Life ']) {
+      for (const title of ['', '【信用卡消費通知】', '【信用卡消費通知】 ']) previous.add(source + title + value);
+    }
+  }
+  return { canonical: 'richart-credit-card:' + compact, previous: [...previous] };
+}
+
+export async function bankExpenseIdentity(rule: BankRule, request: BankRequest) {
+  const texts = bankReceiptTexts(request.text);
   const secret = Uint8Array.from(rule.secret.match(/../g)!, value => parseInt(value,16));
   const hmac = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const digest = await crypto.subtle.sign('HMAC', hmac, new TextEncoder().encode(norm(request.text).replace(/\s+/g,' ')));
-  return 'ebank_' + [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2,'0')).join('');
+  const ids = await Promise.all([...new Set([texts.canonical, ...texts.previous])].map(async value => {
+    const digest = await crypto.subtle.sign('HMAC', hmac, new TextEncoder().encode(value));
+    return 'ebank_' + [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2,'0')).join('');
+  }));
+  return { id: ids[0], equivalentIds: ids };
+}
+export async function bankExpenseId(rule: BankRule, request: BankRequest) {
+  return (await bankExpenseIdentity(rule, request)).id;
+}
+export function hasBankReceipt(group: Group, rule: BankRule, ids: readonly string[]) {
+  const known = new Set([...rule.seen, ...group.expenses.map(item => item.id), ...(group.bankReceiptIds || []), ...(group.bankInbox || []).map(item => item.id)]);
+  return ids.some(id => known.has(id) || !!group.history?.['m' + id]);
 }
 export function bankExpense(rule: BankRule, entry: BankEntry, id: string, group: Group): Expense {
   if (!group.members.includes(rule.payer) || !rule.participants.length || rule.participants.some(name => !group.members.includes(name))) throw new Error('群組成員已變動，請重新設定捷徑規則');

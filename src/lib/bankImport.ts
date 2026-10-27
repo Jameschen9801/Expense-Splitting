@@ -1,4 +1,4 @@
-import { bankExpenseId, resolveBankRule, rememberBankReceipt, type BankRequest, type BankRule, type BankEntry } from './bankShortcuts';
+import { bankExpenseIdentity, hasBankReceipt, resolveBankRule, rememberBankReceipt, type BankRequest, type BankRule, type BankEntry } from './bankShortcuts';
 import { ensureDeviceIdentity, fetchGroupOnce } from './firebase';
 import { sync } from './sync';
 import { storage } from './utils';
@@ -31,10 +31,11 @@ export async function prepareBankEntry(request: BankRequest): Promise<PreparedBa
     if (accountSync.getSnapshot().email) await accountSync.refresh();
   }
   const {rule,entry} = resolveBankRule(localStorage, request);
-  const [id, uid] = await Promise.all([bankExpenseId(rule, request), ensureDeviceIdentity()]);
+  const [receipt, uid] = await Promise.all([bankExpenseIdentity(rule, request), ensureDeviceIdentity()]);
+  const id = receipt.id;
   const group = await availableGroup(rule.groupCode);
   const myName = localMembership(group, uid);
-  const duplicate = rule.seen.includes(id) || group.expenses.some(item => item.id === id) || group.bankReceiptIds?.includes(id) || (group.bankInbox || []).some(item => item.id === id) || !!group.history?.['m' + id];
+  const duplicate = hasBankReceipt(group, rule, receipt.equivalentIds);
   return { request, rule, entry, id, group, myName, duplicate, ...bankCapture(rule, entry, id, group, duplicate) };
 }
 export async function saveBankEntry(prepared: PreparedBankEntry, confirmed = false) {
