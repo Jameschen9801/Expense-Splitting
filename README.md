@@ -25,7 +25,7 @@
 
 1. 在捷徑會開啟的同一個 Safari 建立個人帳本或加入共用帳本，進入「帳本／群組設定 → 資料備份、匯出與 App 更新 → iOS 銀行捷徑記帳」。主畫面 App 與 Safari 可能使用不同裝置身分，不要清除原 App 資料。
 2. 新增銀行關鍵字、卡號末四碼、付款人、分攤對象與分類。先使用「先確認再新增」核對結果；通知測試不會新增帳目。
-3. 儲存規則並複製連結前綴，下載本站的「銀行通知記帳」捷徑。安裝時貼上前綴，勿公開分享。捷徑檔本身不含私人設定或帳目。
+3. 儲存規則並複製連結前綴，按「安裝銀行通知捷徑」，由 [Apple iCloud 安裝頁](https://www.icloud.com/shortcuts/d563a5ad46084d2a95f58ede246b91f5)加入「銀行通知記帳」。安裝時貼上前綴，勿公開分享。公開範本不含私人設定或帳目；私人連結前綴不會隨範本發布。
 4. 在 iOS 27「捷徑 → 自動化 → 通知」選銀行 App 及消費通知篩選條件，將通知標題、副標題、訊息合併成文字，再用「執行捷徑」傳給「銀行通知記帳」。文字須包含銀行名稱、卡號末四碼及新臺幣金額。參考 [Apple 的 iOS 27 通知觸發器說明](https://support.apple.com/en-ng/guide/shortcuts/apd932ff833f/10.0/ios/27)。
 
 捷徑會開啟網站後記帳，鎖屏時可能需要解鎖。網站不會在背景監聽其他 App，也不會付款或轉帳。只有測試通知成功且勾選同意後才能啟用自動新增；超過上限、缺少當日日期及疑似重複的通知會先確認。退款、驗證碼、帳單、外幣與無法明確辨識的金額不會自動新增。
@@ -38,6 +38,8 @@
 plutil -convert xml1 scripts/ios-bank-shortcut.json -o /tmp/expense-bank-notification-unsigned.shortcut
 shortcuts sign --mode anyone --input /tmp/expense-bank-notification-unsigned.shortcut --output 'public/shortcuts/銀行通知記帳.shortcut'
 ```
+
+iPhone 安裝入口使用 iCloud 分享頁，不直接導向原始二進位檔，避免主畫面 App 將 AEA1 簽署內容顯示成亂碼。無法開啟安裝頁時，可用「下載 ZIP 備用檔」，在「檔案」解壓後開啟 `.shortcut`。ZIP 僅包含簽署的通用捷徑，不含私人資料。更新捷徑時請同步重新產生 `public/shortcuts/bank-notification-shortcut.zip`，並檢查 iCloud 分享版本是否需更新。
 
 ## 🚀 快速開始
 

@@ -97,10 +97,15 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
       <div className="flex flex-wrap gap-2 mt-3"><button type="button" className="btn btn-sm" onClick={() => copyLink(rule)}>複製捷徑連結</button>{group && <button type="button" className="btn btn-sm" onClick={() => openForm(rule)}>編輯規則</button>}<button type="button" className="btn btn-sm" onClick={() => { try { update(items => { const next = items.map(item => item.id === rule.id ? { ...item, enabled: !item.enabled } : item); if (!rule.enabled && next.some(item => item.id !== rule.id && item.enabled && item.bank.toLocaleLowerCase() === rule.bank.toLocaleLowerCase() && item.last4 === rule.last4)) throw new Error('同張卡已有啟用規則，請先停用另一個規則'); return next; }); setMessage('規則狀態已更新'); } catch (error) { setMessage((error as Error).message); } }}>{rule.enabled ? '停用' : '啟用'}</button><button type="button" className="btn btn-danger btn-sm" onClick={() => { try { update(items => items.filter(item => item.id !== rule.id)); setActiveLink(''); if (editing === rule.id) setFormOpen(false); setMessage('規則已移除，舊捷徑連結已失效；既有帳目不變'); } catch (error) { setMessage((error as Error).message); } }}>移除規則</button></div>
     </div>)}</div>
     {activeLink && <div className="mt-4"><label className="field-label" htmlFor="bank-shortcut-link">捷徑連結前綴（請勿分享）</label><textarea id="bank-shortcut-link" readOnly value={activeLink} rows={3} className="text-xs" /></div>}
-    <a className="btn w-full mt-4" href={import.meta.env.BASE_URL + 'shortcuts/銀行通知記帳.shortcut'} target="_blank" rel="noreferrer">下載銀行通知捷徑</a>
-    <p className="text-xs text-ink-3 mt-2">需連網下載。安裝時貼上你的捷徑連結前綴；下載檔本身不含任何帳目或私人設定。</p>
+    <a className="btn btn-primary w-full mt-4" href="https://www.icloud.com/shortcuts/d563a5ad46084d2a95f58ede246b91f5" target="_blank" rel="noopener noreferrer">安裝銀行通知捷徑</a>
+    <p className="text-xs text-ink-3 mt-2 leading-relaxed">會開啟 Apple 的捷徑安裝頁。請先儲存銀行規則並複製連結前綴，安裝時再貼上；公開範本不含帳目或私人設定。</p>
+    <details className="expense-more mt-4"><summary>無法開啟安裝頁面？</summary>
+      <p className="text-sm leading-relaxed py-3">請用 Safari 開啟安裝頁。也可下載 ZIP 備用檔，在「檔案 → 下載項目」點 ZIP 解壓，再點「銀行通知記帳.shortcut」加入捷徑。</p>
+      <a className="btn w-full mb-3" href={import.meta.env.BASE_URL + 'shortcuts/bank-notification-shortcut.zip'} download="銀行通知記帳.zip">下載 ZIP 備用檔</a>
+      <p className="text-xs text-ink-3 leading-relaxed pb-3">如果看到 AEA1 或大量亂碼，表示瀏覽器正在預覽捷徑原始檔。請返回此頁，改按上方安裝按鈕或使用 ZIP 備用檔。</p>
+    </details>
     <details className="expense-more mt-5"><summary>設定 iOS 捷徑</summary><ol className="text-sm leading-relaxed space-y-3 pl-5 list-decimal py-3">
-      <li>在捷徑會開啟的同一個 Safari 建立個人帳本，或加入共用帳本。儲存銀行規則、複製連結，再下載並加入「銀行通知記帳」捷徑，依安裝問題貼上連結前綴。</li>
+      <li>在捷徑會開啟的同一個 Safari 建立個人帳本，或加入共用帳本。儲存銀行規則、複製連結，再按「安裝銀行通知捷徑」，於 Apple 頁面選「取得捷徑／加入捷徑」，依安裝問題貼上連結前綴。</li>
       <li>在 iOS 27「捷徑 → 自動化」新增「通知」，選銀行 App、篩選消費通知。把通知的標題、副標題、訊息合併成文字，需包含銀行名稱、卡號末四碼與新臺幣金額。</li>
       <li>加入「執行捷徑」，選「銀行通知記帳」，將合併後的文字傳給它。捷徑會編碼文字並開啟網站；請依系統提供的選項設定執行方式，鎖屏時可能需要解鎖。</li>
       <li>先以「先確認再新增」試跑，核對群組、付款人、分攤、日期和金額。啟用自動新增前需完成測試與同意設定。</li>
