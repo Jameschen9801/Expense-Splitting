@@ -7,6 +7,8 @@ export interface Group {
   transfers: Transfer[];
   createdAt: number;
   history?: Record<string, AuditEntry>;
+  bankInbox?: BankDraft[];
+  bankReceiptIds?: string[];
   security?: GroupSecurity;
 }
 
@@ -38,6 +40,11 @@ export interface Expense extends RecordMetadata {
   date: string;
   createdAt: number;
   category?: ExpenseCategory;
+}
+
+export interface BankDraft extends Expense {
+  bank: string;
+  last4: string;
 }
 
 export interface Share {

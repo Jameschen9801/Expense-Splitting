@@ -34,7 +34,7 @@ export async function prepareBankEntry(request: BankRequest): Promise<PreparedBa
   const [id, uid] = await Promise.all([bankExpenseId(rule, request), ensureDeviceIdentity()]);
   const group = await availableGroup(rule.groupCode);
   const myName = localMembership(group, uid);
-  const duplicate = rule.seen.includes(id) || group.expenses.some(item => item.id === id) || !!group.history?.['m' + id];
+  const duplicate = rule.seen.includes(id) || group.expenses.some(item => item.id === id) || group.bankReceiptIds?.includes(id) || (group.bankInbox || []).some(item => item.id === id) || !!group.history?.['m' + id];
   return { request, rule, entry, id, group, myName, duplicate, ...bankCapture(rule, entry, id, group, duplicate) };
 }
 export async function saveBankEntry(prepared: PreparedBankEntry, confirmed = false) {
@@ -45,11 +45,12 @@ export async function saveBankEntry(prepared: PreparedBankEntry, confirmed = fal
   if (!confirmed && !current.automatic) throw new Error(current.reviewReason || '此規則需要確認後新增');
   const expense = current.expense;
   const uid = await ensureDeviceIdentity();
-  sync.enqueue(current.group.code, { type: 'expense.put', expense, meta: { id: 'm' + current.id, actor: current.myName, actorUid: uid, at: Date.now(), expected: null } });
+  const change = current.captureFirst ? { type: 'bankDraft.put' as const, draft: { ...expense, bank: current.rule.bank, last4: current.rule.last4 } } : { type: 'expense.put' as const, expense };
+  sync.enqueue(current.group.code, { ...change, meta: { id: 'm' + current.id, actor: current.myName, actorUid: uid, at: Date.now(), expected: null } });
   const merged = sync.merge(current.group);
   let warning = '';
   try { storage.saveGroup(merged.code, merged); rememberBankReceipt(localStorage, current.rule.id, current.id); }
   catch { warning = '紀錄已保存在待同步佇列，但顯示快取或通知防重複設定暫時無法更新。請勿清除網站資料。'; }
   const message = sync.getStatus(merged.code).connected ? '已保存，正在同步至帳本' : '已離線保存，連線後自動同步';
-  return { group: merged, myName: current.myName, message: message + (current.captureFirst ? '；說明與分類可稍後補' : ''), warning };
+  return { group: merged, myName: current.myName, message: current.captureFirst ? '已放入待確認；補好說明與分類後再加入帳本' + (!sync.getStatus(merged.code).connected ? '，連線後自動同步' : '') : message, warning };
 }

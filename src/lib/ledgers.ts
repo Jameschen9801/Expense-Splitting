@@ -12,10 +12,12 @@ export function expenseFormForLedger(group: Group, form: ExpenseForm): ExpenseFo
 }
 
 export function assertLedgerChange(group: Group, change: GroupChange) {
+  if (change.type.startsWith('bankDraft.') && !isPersonalLedger(group)) throw new Error('手機通知待確認目前供個人帳本使用');
+  if (change.type === 'bankDraft.confirm' && change.id !== change.expense.id) throw new Error('待確認通知與入帳編號不一致');
   if (!isPersonalLedger(group)) return;
   if (change.type.startsWith('member.') || change.type.startsWith('transfer.')) throw new Error('個人帳本不提供成員分攤或還款轉帳');
-  if (change.type === 'expense.put') {
-    const expense = change.expense, name = group.members[0];
+  if (change.type === 'expense.put' || change.type === 'bankDraft.put' || change.type === 'bankDraft.confirm') {
+    const expense = change.type === 'bankDraft.put' ? change.draft : change.expense, name = group.members[0];
     if (expense.payer !== name || expense.participants.length !== 1 || expense.participants[0] !== name || expense.splitMode !== 'equal') throw new Error('個人帳本只能記錄自己的支出');
   }
 }

@@ -64,4 +64,5 @@ export function auditEntry(action: string, target: string, before: Expense | Tra
 export const actionLabel = (action: string) => ({
   'expense.put': '新增／修改費用', 'expense.remove': '刪除費用', 'transfer.put': '新增／修改轉帳',
   'transfer.remove': '刪除轉帳', 'member.add': '新增成員', 'member.remove': '移除成員', 'group.rename': '修改群組名稱',
+  'bankDraft.put': '收到手機通知', 'bankDraft.confirm': '確認通知並入帳', 'bankDraft.remove': '忽略手機通知',
 } as Record<string, string>)[action] || action;

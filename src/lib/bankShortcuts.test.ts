@@ -55,6 +55,19 @@ test('跨年收到十二月消費仍記為上一年，通知不同分鐘保留�
   assert.notEqual(await bankExpenseId(rule, { channel: rule.channel, text: text.replace('23:59', '23:58') }), first);
 });
 
+test('晚間 Richart / Richart Life 通知含換行與帳單附註仍可辨識，規則錯誤顯示原因', () => {
+  const text = '【信用卡消費通知】您的Richart卡 (末四碼\n0123)於10/27-23:07刷卡消費約新臺幣74\n元，實際消費資訊以帳單為準，如有疑問\n請洽客服';
+  for (const bank of ['台新', 'Richart', 'Richart Life']) {
+    assert.deepEqual(parseBankText(text, { bank, last4: '0123' }, '2026-10-28'), { amount: 74, date: '2026-10-27', dateInMessage: true, desc: '銀行刷卡消費' });
+  }
+  const store = memory(), rule = newBankRule({ ...input, bank: 'Richart Life', last4: '0123' });
+  saveBankRules(store, [rule]); bankShortcutSetupUrl(store, 'https://example.com/');
+  const request = { channel: store.getItem(bankBridgeKey)!, text, scope: 'browser' as const };
+  assert.equal(resolveBankRule(store, request).entry.amount, 74);
+  assert.throws(() => resolveBankRule(store, { ...request, text: text.replace('0123', '9999') }), /卡號末碼不符合/);
+  assert.throws(() => resolveBankRule(store, { ...request, text: text + '退款' }), /成功消費通知/);
+});
+
 test('銀行和卡號都必須符合，其他數字不能代替卡號', () => {
   for (const text of [sample.replace('測試銀行','另一銀行'),sample.replace('1234','4321'), '測試銀行 卡號4321 消費NT$1234', '測試銀行 信用卡12345 消費NT$100', '測試銀行 消費NT$100 電話1234', '測試銀行 信用卡消費授權碼1234 消費NT$100', '測試銀行 卡號不明 消費金額1234元']) {
     assert.throws(() => parseBankText(text,input,today));

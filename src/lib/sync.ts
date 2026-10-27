@@ -1,6 +1,6 @@
 import type { Group } from '../types';
 import { storage } from './utils';
-import { Outbox, overlayPending, type GroupChange, type PendingChange } from './outbox';
+import { Outbox, overlayPending, changeEntityId, changeRecord, type GroupChange, type PendingChange } from './outbox';
 import { fingerprint, RecordConflictError } from './audit';
 import { applyChangeInCloud } from './firebase';
 
@@ -56,11 +56,11 @@ export function createSyncEngine(dependencies: {
       if (deleting.has(code) || removed.has(code)) return;
       const conflict = conflicts.get(code);
       if (!conflict) return;
-      const entityId = (change: GroupChange) => change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
+      const entityId = changeEntityId;
       const latest = outbox().list().filter(item => item.groupCode === code && entityId(item.change) === conflict.targetId).at(-1)?.change || conflict.change;
       const entries = outbox().list().filter(item => item.groupCode !== code || entityId(item.change) !== conflict.targetId);
       if (keep === 'mine') {
-        const record = latest.type.startsWith('expense.') ? conflict.cloud.expenses.find(record => record.id === conflict.targetId) : conflict.cloud.transfers.find(record => record.id === conflict.targetId);
+        const record = changeRecord(conflict.cloud, latest);
         // Persist the replacement before discarding old edits; a quota error keeps the original queue.
         entries.push({ id: crypto.randomUUID(), groupCode: code, change: { ...latest, meta: { ...(latest.meta || conflict.change.meta!), id: crypto.randomUUID(), at: Date.now(), expected: fingerprint(record) } } });
       }

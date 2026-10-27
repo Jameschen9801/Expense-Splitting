@@ -7,8 +7,9 @@ import type { Group } from '../types';
 import { utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
 import { AccountSyncSettings } from './AccountSyncSettings';
+import { reportBankDelivery } from '../lib/bankDelivery';
 
-export function BankImport({ input, onClose, onGroup, onSaved }: { input: { request?: BankRequest; error?: string }; onClose: () => void; onGroup: (group: Group, name: string, recordDate?: string) => void; onSaved: (message: string) => void }) {
+export function BankImport({ input, onClose, onGroup, onSaved, background = false }: { input: { request?: BankRequest; error?: string }; onClose: () => void; onGroup: (group: Group, name: string, recordDate?: string) => void; onSaved: (message: string) => void; background?: boolean }) {
   const [prepared, setPrepared] = useState<PreparedBankEntry | null>(null);
   const [error, setError] = useState(input.error || '');
   const [message, setMessage] = useState('');
@@ -21,9 +22,11 @@ export function BankImport({ input, onClose, onGroup, onSaved }: { input: { requ
     setBusy(true); setError('');
     saving.current ||= saveBankEntry(value, confirmed);
     return saving.current.then(result => {
-      onGroup(result.group, result.myName, result.group.expenses.find(item => item.id === value.id)?.date || value.entry.date); setSaved(true); setMessage(result.message + (result.warning ? '\n' + result.warning : ''));
+      const stillPending = result.group.bankInbox?.some(item => item.id === value.id);
+      reportBankDelivery(value.captureFirst ? (stillPending ? 'pending' : 'duplicate') : 'saved', value.captureFirst ? (stillPending ? '已保存在手機通知待確認，補好說明與分類後再加入帳本。同步進度請看帳本右上角。' : '這則通知已在其他畫面處理，沒有再次新增。') : '已保存記帳紀錄。同步進度請看帳本右上角。');
+      onGroup(result.group, result.myName, value.captureFirst ? undefined : result.group.expenses.find(item => item.id === value.id)?.date || value.entry.date); setSaved(true); setMessage(result.message + (result.warning ? '\n' + result.warning : ''));
       if (value.captureFirst && !result.warning) { onSaved(result.message); onClose(); }
-    }).catch(error => { saving.current = null; setError(error instanceof Error ? error.message : '記帳未完成，請保留此畫面'); }).finally(() => setBusy(false));
+    }).catch(error => { saving.current = null; const message = error instanceof Error ? error.message : '記帳未完成，請保留此畫面'; setError(message); reportBankDelivery('error', message); }).finally(() => setBusy(false));
   };
   useEffect(() => {
     if (!input.request) return;
@@ -34,14 +37,16 @@ export function BankImport({ input, onClose, onGroup, onSaved }: { input: { requ
       if (!alive) return;
       setPrepared(value);
       if (value.duplicate) {
+        reportBankDelivery('duplicate', '相同通知已處理，沒有再次新增。請查看待確認或帳本明細。');
         setSaved(true); setMessage('相同通知已處理，未重複新增'); setBusy(false);
-        if (value.captureFirst) { onGroup(value.group, value.myName, value.group.expenses.find(item => item.id === value.id)?.date || value.entry.date); onSaved('相同通知已處理，未重複新增'); onClose(); }
+        if (value.captureFirst) { onGroup(value.group, value.myName); onSaved(value.group.bankInbox?.some(item => item.id === value.id) ? '這則通知已在待確認，未重複新增' : '相同通知已處理，未重複新增'); onClose(); }
       }
       else if (value.automatic) void commit(value);
-      else setBusy(false);
-    }).catch(error => { if (alive) { setError(error instanceof Error ? error.message : '無法處理銀行通知'); setBusy(false); } });
+      else { reportBankDelivery('review', value.reviewReason || '這則通知需要在開啟的記帳畫面核對後新增。'); setBusy(false); }
+    }).catch(error => { if (alive) { const message = error instanceof Error ? error.message : '無法處理銀行通知'; setError(message); reportBankDelivery('error', message); setBusy(false); } });
     return () => { alive = false; };
   }, [attempt]);
+  if (background) return null;
   return <Modal title="銀行捷徑記帳" onClose={() => { if (!busy) onClose(); }}>
     {busy && <p role="status" className="text-sm py-4">正在辨識與保存通知，請稍候…</p>}
     {prepared && <div className="rounded-2xl border border-line bg-paper-2 p-4 text-sm leading-loose">

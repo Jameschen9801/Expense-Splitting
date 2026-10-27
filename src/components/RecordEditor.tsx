@@ -8,13 +8,14 @@ import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, draftOwner = myName }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
+  bankReview?: boolean; draftOwner?: string;
 }) {
   const personal = isPersonalLedger(group);
-  const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
+  const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
   const [tfForm, setTfForm] = useState(initial.transfer);
   const [recordType, setRecordType] = useState(personal ? 'expense' : initial.recordType);
   const [localError, setLocalError] = useState('');
@@ -41,7 +42,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
       || draft.transfer.date !== utils.todayStr() || draft.transfer.from !== standard.payer
       || draft.transfer.to !== (group.members.find(name => name !== standard.payer) || '')
       || draft.expense.participants.join('|') !== group.members.join('|');
-    new Drafts(localStorage).save(group.code, myName, draft, !!changed);
+    new Drafts(localStorage).save(group.code, draftOwner, draft, !!changed);
   };
   useEffect(() => {
     if (!finished.current) writer.current!.schedule(writeDraft);
@@ -93,7 +94,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     ];
   }, [recordType, expForm.splitMode, expForm.participants]);
   return (
-          <Modal layout="editor" title={isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
+          <Modal layout="editor" title={bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
             <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
               <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>取消</button>
               {recordType === 'expense' && !isEditingExpense && (
@@ -104,7 +105,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 onClick={() => submit(false)}
                 disabled={isSaving}
               >
-                {isSaving ? '儲存中…' : '儲存'}
+                {isSaving ? '儲存中…' : bankReview ? '確認加入帳本' : '儲存'}
               </button>
             </div>
           }>
@@ -131,7 +132,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   <label className="field-label" htmlFor="expense-amount">金額 (NT$)</label>
                   <input
                     id="expense-amount"
-                    data-autofocus
+                    data-autofocus={bankReview ? undefined : true}
                     type="number"
                     inputMode="decimal"
                     enterKeyHint="next"
@@ -145,7 +146,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-description">說明</label>
-                  <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
+                  <input id="expense-description" data-autofocus={bankReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
                 </div>
                 {!personal && <><div className="field">
                   <label className="field-label" htmlFor="expense-payer">誰先付款</label>
@@ -277,7 +278,8 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </>}
                 <div className="field">
                   <label className="field-label" htmlFor="expense-category">分類</label>
-                  <select id="expense-category" value={expForm.category || defaultExpenseCategory} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
+              <select id="expense-category" value={expForm.category || (bankReview ? '' : defaultExpenseCategory)} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
+                {bankReview && <option value="" disabled>請選擇分類</option>}
                     {categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}
                   </select>
                 </div>

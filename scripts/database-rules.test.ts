@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import type { Group } from '../src/types';
 import { applyChange } from '../src/lib/outbox';
+import { fingerprint } from '../src/lib/audit';
 import { cloudGroup } from '../src/lib/firebase';
 import { personalLedgerDeletionUpdate } from '../src/lib/ledgerDeletion';
 const cloud = (group: Group) => cloudGroup(group) as any;
@@ -131,6 +132,32 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('手機通知待確認只供本人讀寫，不能混入共用帳本或其他成員',async()=>{
+  const root=env.authenticatedContext('owner').database().ref('groups/654321');
+  const draft={...personalExpense,id:'bank1',category:'other' as const,bank:'測試銀行',last4:'0123'};
+  await assertSucceeds(root.set(cloud({...personal,bankInbox:[draft],bankReceiptIds:['bank1']})));
+  await assertSucceeds(root.child('bankInbox').get());
+  await assertFails(env.authenticatedContext('stranger').database().ref('groups/654321/bankInbox').get());
+  await assertFails(env.authenticatedContext('stranger').database().ref('groups/654321/bankInbox/bank1/amount').set(999));
+  await assertFails(root.child('bankInbox/bank1/participants/1').set('B'));
+  await assertFails(root.child('bankInbox/bank1/rawNotification').set('不應保存通知全文'));
+  await assertFails(root.child('bankInbox/bank1/amount').set(-1));
+  await assertFails(owner().child('bankInbox/bank1').set(draft));
+});
+test('確認手機通知在同一次寫入移出待確認並建立帳目，收據標記不可復活',async()=>{
+  const root=env.authenticatedContext('owner').database().ref('groups/654321');
+  const draft={...personalExpense,id:'bank1',category:'other' as const,bank:'測試銀行',last4:'0123'};
+  const before=applyChange(personal,{type:'bankDraft.put',draft,meta:{id:'capture1',actor:'A',actorUid:'owner',at:3,expected:null}});
+  const beforeRaw=cloud(before);
+  await assertSucceeds(root.set(beforeRaw));
+  const confirmed=applyChange(before,{type:'bankDraft.confirm',id:'bank1',expense:{...personalExpense,id:'bank1',category:'food'},meta:{id:'confirm1',actor:'A',actorUid:'owner',at:4,expected:fingerprint(before.bankInbox![0])}});
+  await assertSucceeds(root.set(cloudGroup(confirmed,beforeRaw)));
+  const snapshot=(await root.get()).val();
+  if(snapshot.bankInbox.bank1._deleted!==true || snapshot.expenses.bank1.amount!==120)throw new Error('確認入帳必須同時完成');
+  await assertFails(root.child('bankInbox/bank1/_deleted').remove());
+  await assertFails(root.child('bankInbox/bank1').set(draft));
+  await assertFails(root.set(cloud(personal)));
+});
 test('個人帳本刪除必須與防重建標記同時完成，只允許本人操作',async()=>{
   await assertSucceeds(privateRef().set(cloud(personal)));
   await assertSucceeds(privateRef().set(cloud({...personal,expenses:[personalExpense]})));

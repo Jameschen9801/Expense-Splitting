@@ -36,6 +36,7 @@ import { Statistics } from './components/Statistics';
 import { HistoryLog } from './components/HistoryLog';
 import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
+import { BankInbox, BankInboxCard } from './components/BankInbox';
 import { BankSetup } from './components/BankSetup';
 import { BankShortcutSettings } from './components/BankShortcutSettings';
 import { AccountSyncSettings } from './components/AccountSyncSettings';
@@ -60,6 +61,7 @@ import {
   personalLedgerWasDeleted,
   subscribeToConnection,
   subscribeToGroup,
+  subscribeToBankInbox,
 } from './lib/firebase';
 
 type ToastState = { message: string; actionLabel?: string; onAction?: () => void };
@@ -113,6 +115,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dataSettings, setDataSettings] = useState(false);
   const [bankSettings, setBankSettings] = useState(false);
+  const [bankInboxOpen, setBankInboxOpen] = useState(false);
+  const [homeInboxSelect, setHomeInboxSelect] = useState(false);
+  const [homeInboxData, setHomeInboxData] = useState<Record<string, Pick<Group,'bankInbox'|'bankReceiptIds'>>>({});
+  const [homeExpenseCounts, setHomeExpenseCounts] = useState<Record<string, number>>({});
   const [accountSettings, setAccountSettings] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
   const [isDeletingLedger, setIsDeletingLedger] = useState(false);
@@ -169,12 +175,33 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [settingsGroupName, setSettingsGroupName] = useState('');
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimerRef = useRef<number | null>(null);
-  useSyncExternalStore(sync.subscribe, sync.getVersion);
+  const syncVersion = useSyncExternalStore(sync.subscribe, sync.getVersion);
   const syncStatus = sync.getStatus(currentGroup?.code || '');
   const groupCodeRef = useRef(currentGroup?.code);
   groupCodeRef.current = currentGroup?.code;
   const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
   const personal = isPersonalLedger(currentGroup);
+  const inboxBooks = useMemo(() => myGroups.flatMap(book => {
+    const cached = storage.getGroup(book.code);
+    if (!cached || !isPersonalLedger(cached)) return [];
+    return [{ book, group: sync.merge({ ...cached, ...(currentPage === 'home' ? homeInboxData[book.code] : {}) }) }];
+  }), [myGroups, homeInboxData, syncVersion, currentPage]);
+  const homeBankDrafts = inboxBooks.flatMap(item => item.group.bankInbox || []);
+  const inboxCodes = myGroups.filter(book => isPersonalLedger(storage.getGroup(book.code) || book)).map(book => book.code).join(',');
+  useEffect(() => {
+    if (currentPage !== 'home') return;
+    let disposed = false;
+    const stops: (() => void)[] = [];
+    for (const code of inboxCodes.split(',').filter(Boolean)) {
+      subscribeToBankInbox(code, data => {
+        if (disposed) return;
+        const cached = storage.getGroup(code);
+        if (cached) { try { storage.saveGroup(code, { ...cached, ...data }); } catch { /* The live inbox remains visible below. */ } }
+        setHomeInboxData(previous => ({ ...previous, [code]: data }));
+      }, count => { if (!disposed) setHomeExpenseCounts(previous => ({ ...previous, [code]: count })); }).then(stop => { if (disposed) stop(); else stops.push(stop); }).catch(() => {});
+    }
+    return () => { disposed = true; stops.forEach(stop => stop()); };
+  }, [currentPage, inboxCodes]);
   const memberMonths = useMemo(() => [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...(currentGroup?.expenses || []), ...(currentGroup?.transfers || [])].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers, personal]);
   const personalTotal = useMemo(() => (currentGroup?.expenses || []).filter(record => !recordMonth || record.date?.startsWith(recordMonth + '-')).reduce((sum, record) => sum + utils.toCents(record.amount), 0), [currentGroup?.expenses, recordMonth]);
   useEffect(() => { ensureDeviceIdentity().then(setDeviceUid).catch(() => {}); }, []);
@@ -822,6 +849,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     if (groupCodeRef.current === code) {
       setCurrentGroup(null); setMyName(''); setCurrentPage('home');
       setDataSettings(false); setBankSettings(false);
+      setBankInboxOpen(false); setHomeInboxSelect(false);
       setModals({createGroup:false,joinGroup:false,addRecord:false,groupSettings:false,expenseDetail:false,transferDetail:false});
     }
     showToast(message);
@@ -895,6 +923,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   }, []);
   const visibleRecordCount = Object.values(groupedRecords as Record<string, RecordItem[]>).reduce((sum, records) => sum + records.length, 0);
   const advancedFilterCount = Number(!!recordMonth) + Number(!!recordCategory);
+  const bankInputInBackground = bankInboxOpen || homeInboxSelect || Object.values(modals).some(Boolean);
 
   return (
     <div className={`min-h-[100dvh] flex flex-col font-sans ${toast ? 'has-toast' : ''}`}>
@@ -911,6 +940,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <button className="btn btn-primary" onClick={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }}>＋ 新增帳本</button>
                 <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入共用帳本</button>
               </div>
+              {inboxBooks.length > 0 && <BankInboxCard drafts={homeBankDrafts} onOpen={() => {
+                if (inboxBooks.length === 1) { enterGroup(inboxBooks[0].group, inboxBooks[0].book.myName); setBankInboxOpen(true); }
+                else setHomeInboxSelect(true);
+              }} />}
                 <div className="group-list">
                   {myGroups.length === 0 ? (
                     <div className="empty-state home-empty">
@@ -930,7 +963,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                         <div className="min-w-0">
                           <div className="group-card-name">{g.name}</div>
                           <div className="group-card-meta">
-                            {isPersonalLedger(cached || g) ? '個人帳本' : '共用帳本'} · {cached ? `${cached.expenses.length} 筆費用` : '開啟以載入帳目'}
+                            {isPersonalLedger(cached || g) ? '個人帳本' : '共用帳本'} · {cached ? `${homeExpenseCounts[g.code] ?? cached.expenses.length} 筆費用` : '開啟以載入帳目'}
                           </div>
                         </div>
                         <div className="group-card-end">{isPersonalLedger(cached || g) ? <LockKeyhole size={16} aria-label="個人帳本" /> : <span className="group-card-code">{g.code}</span>}<ChevronRight size={16} aria-hidden="true" /></div>
@@ -997,8 +1030,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                   <p className="text-xs text-ink-3 leading-relaxed mb-3">另一位成員已更新這筆紀錄。你的變更保留在此裝置，請選擇保留哪個版本；選擇雲端版本會放棄此筆尚未同步的修改。</p>
                   {(() => {
                     const conflict = syncStatus.conflict;
-                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers].find(record => record.id === conflict.targetId);
-                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || []].find(record => record.id === conflict.targetId);
+                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers, ...conflict.cloud.bankInbox || []].find(record => record.id === conflict.targetId);
+                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || [], ...currentGroup?.bankInbox || []].find(record => record.id === conflict.targetId);
                     const describe = (record?: Expense | Transfer) => record ? ('desc' in record ? record.desc : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
                     return <div className="text-xs mb-3 space-y-2 break-words"><p>雲端：{describe(cloud)}</p><p>此裝置：{describe(mine)}</p></div>;
                   })()}
@@ -1012,6 +1045,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               {activeTab === 'records' && (
                 <section>
                   {personal && <div className="personal-overview"><div className="stat-label">{recordMonth === utils.todayStr().slice(0,7) ? '本月支出' : recordMonth ? recordMonth.replace('-',' / ') + ' 支出' : '累計支出'}</div><div className="money stat-total"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(personalTotal))}</div><button type="button" className="btn btn-sm mt-4 w-full" onClick={openBankSettings}><Wallet size={16} aria-hidden="true" />銀行自動記帳設定</button></div>}
+                  {personal && <BankInboxCard drafts={currentGroup?.bankInbox || []} onOpen={() => setBankInboxOpen(true)} />}
                   <div className="records-heading">
                     <h2>明細記錄<span className="record-count">{visibleRecordCount} 筆</span></h2>
                     <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
@@ -1406,8 +1440,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
+      {homeInboxSelect && <Modal title="選擇待確認帳本" onClose={() => setHomeInboxSelect(false)}><div className="space-y-3">{inboxBooks.map(item => <button type="button" className="btn w-full justify-between" key={item.book.code} onClick={() => { enterGroup(item.group, item.book.myName); setHomeInboxSelect(false); setBankInboxOpen(true); }}><span>{item.group.name}</span><span>{item.group.bankInbox?.length || 0} 筆待確認</span></button>)}</div></Modal>}
+      {bankInboxOpen && currentGroup && <BankInbox group={currentGroup} myName={myName} onClose={() => setBankInboxOpen(false)} onSaved={(message, date) => { if (date) setRecordMonth(date.slice(0,7)); showToast(message); }} />}
       {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
-      {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} onSaved={showToast} />}</React.Fragment>}
+      {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && (!bankInputs[0].setup || !bankInputInBackground) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} background={bankInputInBackground} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={(group, name, date) => { if (!bankInputInBackground) enterGroup(group, name, date); }} onSaved={showToast} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}

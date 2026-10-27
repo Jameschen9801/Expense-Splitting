@@ -397,6 +397,26 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .group-tabs[data-personal="true"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .personal-overview { padding: 22px; margin-bottom: 26px; border: 1px solid var(--ui-line); border-radius: 24px; background: var(--ui-surface); }
 .bank-rule-form { display: grid; gap: 18px; }
+.bank-inbox-card { margin: 18px 0 24px; padding: 20px; border: 1px solid var(--ui-control); border-radius: 24px; background: var(--ui-accent-soft); }
+.bank-inbox-label { display: flex; align-items: center; gap: 9px; color: var(--ui-secondary); font-size: 13px; font-weight: 600; }
+.bank-inbox-count { display: flex; align-items: baseline; gap: 14px; margin: 12px 0 6px; }
+.bank-inbox-count strong { font-size: 48px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.bank-inbox-count span { font-size: 16px; font-weight: 500; }
+.bank-inbox-card > p { color: var(--ui-secondary); font-size: 13px; }
+.bank-inbox-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 18px; }
+.bank-inbox-footer > span { color: var(--ui-subtle); font-size: 12px; line-height: 1.6; }
+.bank-inbox-footer .btn { flex-shrink: 0; }
+.bank-inbox-intro { display: flex; align-items: center; gap: 18px; margin-bottom: 22px; }
+.bank-inbox-intro > strong { font-size: 48px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.bank-inbox-intro h3 { font-size: 17px; font-weight: 600; }
+.bank-inbox-intro p { margin-top: 5px; font-size: 12px; color: var(--ui-subtle); }
+.bank-inbox-item { border: 1px solid var(--ui-line); border-radius: 20px; padding: 12px; }
+.bank-inbox-item-main { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 66px; text-align: left; }
+.bank-inbox-item-main > div { flex: 1; min-width: 0; }
+.bank-inbox-item-main strong { font-size: 13px; font-weight: 500; }
+.bank-inbox-item-main p { color: var(--ui-subtle); font-size: 12px; margin-top: 5px; overflow-wrap: anywhere; }
+.bank-inbox-item-main > span { font-size: 17px; white-space: nowrap; }
+@media (max-width: 380px) { .bank-inbox-footer { align-items: stretch; flex-direction: column; } }
 .bank-setup-target { padding: 14px 16px; border-radius: 18px; border: 1px solid var(--ui-line); background: var(--ui-muted); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
 .bank-setup-target span { display: block; font-size: 12px; color: var(--ui-secondary); margin-top: 3px; }
 .ledger-delete-entry { border-top: 1px solid var(--ui-line); padding-top: 20px; margin-top: 24px; }

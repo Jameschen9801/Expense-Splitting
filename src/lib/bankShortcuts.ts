@@ -2,6 +2,7 @@ import type { Expense, ExpenseCategory, Group } from '../types';
 import { categories, defaultExpenseCategory } from './categories';
 import { utils } from './utils';
 import { assertLedgerChange } from './ledgers';
+import { reportBankDelivery } from './bankDelivery';
 
 export const bankRulesKey = 'warikan_bank_rules_v1';
 export const bankBridgeKey = 'warikan_bank_bridge_v1';
@@ -90,18 +91,21 @@ export function takeBankRequest(location: Pick<Location, 'hash' | 'pathname' | '
   if (!location.hash.startsWith('#bank-entry?')) return {};
   const hash = location.hash;
   try { history.replaceState(history.state, '', location.pathname + location.search); }
-  catch { return { error: '無法清除網址中的通知資料，已停止自動記帳；請關閉此頁後重試' }; }
+  catch { const error = '無法清除網址中的通知資料，已停止自動記帳；請關閉此頁後重試'; reportBankDelivery('error', error); return { error }; }
   try {
     if (hash.length > 24000) throw new Error('捷徑訊息過長，未匯入');
     const params = new URLSearchParams(hash.slice('#bank-entry?'.length));
     const channel = params.get('channel'), text = params.get('text');
     if (channel !== 'NOT_CONFIGURED' && !key(channel)) throw new Error('捷徑資料不完整，請重新產生連結');
     if (channel === 'NOT_CONFIGURED' || !text?.trim()) {
+      reportBankDelivery('setup', channel === 'NOT_CONFIGURED' ? '捷徑尚未綁定。請在 App 儲存銀行規則後，按「已加入，完成綁定」。' : '這次沒有通知文字，未新增資料。請在自動化的「執行捷徑」動作，將銀行通知文字設為輸入。');
       return { setup: { needsLink: channel === 'NOT_CONFIGURED' } };
     }
-    return { request: parseBankRequest(hash)! };
+    const request = parseBankRequest(hash)!;
+    reportBankDelivery('received', '通知已送達此瀏覽器，正在核對銀行規則並保存。');
+    return { request };
   }
-  catch (error) { return { error: error instanceof Error ? error.message : '無法讀取捷徑資料' }; }
+  catch (error) { const message = error instanceof Error ? error.message : '無法讀取捷徑資料'; reportBankDelivery('error', message); return { error: message }; }
 }
 
 export function resolveBankRule(store: Store, request: BankRequest): { rule: BankRule; entry: BankEntry } {
@@ -113,7 +117,13 @@ export function resolveBankRule(store: Store, request: BankRequest): { rule: Ban
       catch { return []; }
     });
     if (matching.length > 1) throw new Error('通知符合多個銀行規則，尚未記帳。請在 App 調整銀行關鍵字，避免規則重疊');
-    if (!matching.length) throw new Error('沒有符合的成功消費通知，尚未記帳。請在 App 核對銀行關鍵字與卡號末碼，或使用測試辨識查看原因');
+    if (!matching.length) {
+      if (enabled.length === 1) {
+        try { parseBankText(request.text, enabled[0]); }
+        catch (error) { throw new Error(`尚未記帳：${(error as Error).message}。請核對銀行規則或使用測試辨識。`); }
+      }
+      throw new Error('沒有符合的成功消費通知，尚未記帳。請在 App 核對銀行關鍵字與卡號末碼，或使用測試辨識查看原因');
+    }
     return matching[0];
   }
   const rule = enabled.find(rule => rule.channel === request.channel);
@@ -131,7 +141,7 @@ export function parseBankText(text: string, rule: Pick<BankRule,'bank'|'last4'>,
   const message = norm(text);
   if (!message || message.length > 6000) throw new Error('請提供銀行消費通知文字');
   const keyword = norm(rule.bank).toLocaleLowerCase();
-  const aliases = /^(?:台新|臺新)(?:銀行)?$/.test(keyword) || keyword === 'richart' ? ['台新', '臺新', 'richart'] : [keyword];
+  const aliases = /^(?:台新|臺新)(?:銀行)?$/.test(keyword) || /^richart(?:\s*life)?$/.test(keyword) ? ['台新', '臺新', 'richart'] : [keyword];
   if (!aliases.some(value => message.toLocaleLowerCase().includes(value))) throw new Error('銀行關鍵字不符合，未記帳');
   if (!/^\d{4}$/.test(rule.last4)) throw new Error('請設定卡號末 4 碼');
   const card = new RegExp(`(?:(?:卡號|卡片|信用卡)(?:末四碼|末4碼|末碼)?|尾號|末四碼|末4碼|末碼|ending\\s*(?:in)?)[\\s:：()（）「」【】\\[\\]#＊*xX•●·-]{0,24}(?:為|是)?\\s*${rule.last4}(?!\\d)`, 'i');

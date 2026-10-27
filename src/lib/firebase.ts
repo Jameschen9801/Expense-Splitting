@@ -1,5 +1,5 @@
 import type { Database, Unsubscribe } from 'firebase/database';
-import { Expense, Group, Transfer, type AuditEntry } from '../types';
+import { Expense, Group, Transfer, type AuditEntry, type BankDraft } from '../types';
 import { withoutUndefined } from './firebaseData';
 import { applyCloudChange, type GroupChange } from './outbox';
 import { RecordConflictError, updatedRecord } from './audit';
@@ -75,6 +75,7 @@ export const normalizeGroup = (data: any): Group => {
     .sort(([, a]: [string, any], [, b]: [string, any]) => b.at - a.at).slice(0, 300)
     .map(([id, entry]: [string, any]) => [id, { ...entry, changes: Object.values(entry.changes || {}) }]));
   return { ...data, expenses: rows(data.expenses), transfers: rows(data.transfers),
+    ...(data.bankInbox ? { bankInbox: rows(data.bankInbox) as BankDraft[], bankReceiptIds: Object.keys(data.bankInbox) } : {}),
     ...(data.history ? { history } : {}),
     members: ownerName && members.includes(ownerName) ? [ownerName, ...members.filter(name => name !== ownerName)] : members };
 };
@@ -86,13 +87,33 @@ export const cloudGroup = (group: Group, previous?: any) => {
       ...((group.history?.[record.lastMutationId!] || old?.[record.id]?._lastAudit) ? { _lastAudit: group.history?.[record.lastMutationId!] || old?.[record.id]?._lastAudit } : {}),
     }])) };
   };
-  return withoutUndefined({ ...group, members: Object.fromEntries(group.members.map(name => [name, true])),
+  const { bankReceiptIds, ...visibleGroup } = group;
+  const bankInbox = records(group.bankInbox || [], previous?.bankInbox);
+  for (const [id, draft] of Object.entries(previous?.bankInbox || {}) as [string, any][]) {
+    if (!bankReceiptIds?.includes(id) || group.bankInbox?.some(item => item.id === id) || draft._deleted) continue;
+    const entry = Object.values(group.history || {}).find(item => item.target === id && ['bankDraft.confirm','bankDraft.remove'].includes(item.action));
+    bankInbox[id] = { ...draft, _deleted: true, ...(entry ? { _lastAudit: entry, lastMutationId: entry.id, updatedAt: entry.at, updatedBy: entry.actor, updatedByUid: entry.actorUid } : {}) };
+  }
+  return withoutUndefined({ ...visibleGroup, members: Object.fromEntries(group.members.map(name => [name, true])),
+    ...(group.bankInbox || previous?.bankInbox ? { bankInbox } : {}),
     expenses: records(group.expenses, previous?.expenses), transfers: records(group.transfers, previous?.transfers) });
 };
 
 export const subscribeToConnection = async (onChange: (connected: boolean) => void): Promise<Unsubscribe> => {
   const [database, { ref, onValue }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
   return onValue(ref(database, '.info/connected'), snapshot => onChange(snapshot.val() === true), () => onChange(false));
+};
+
+export const subscribeToBankInbox = async (code: string, onUpdate: (data: Pick<Group,'bankInbox'|'bankReceiptIds'>) => void, onExpenseCount?: (count: number) => void): Promise<Unsubscribe> => {
+  const [database, { ref, onValue }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
+  const stopInbox = onValue(ref(database, 'groups/' + code + '/bankInbox'), snapshot => {
+    const rows = snapshot.val() || {};
+    onUpdate({ bankInbox: Object.values(rows).filter((row: any) => row && !row._deleted).map((row: any) => publicRecord(row)) as BankDraft[], bankReceiptIds: Object.keys(rows) });
+  });
+  const stopExpenses = onExpenseCount ? onValue(ref(database, 'groups/' + code + '/expenses'), snapshot => {
+    onExpenseCount(Object.values(snapshot.val() || {}).filter((row: any) => row && !row._deleted).length);
+  }) : undefined;
+  return () => { stopInbox(); stopExpenses?.(); };
 };
 
 export const subscribeToGroup = (
@@ -228,6 +249,10 @@ export const applyChangeInCloud = async (groupCode: string, change: GroupChange)
     if (group.security) {
       const user = group.security.users[deviceUid];
       if (!user) throw new Error('permission_denied：此裝置尚未加入群組');
+      if (change.type.startsWith('bankDraft.')) {
+        if (!isPersonalLedger(group) || user.role !== 'owner') throw new Error('permission_denied：只有個人帳本本人可處理通知');
+        change = { ...change, meta: { ...change.meta, id: change.meta?.id || crypto.randomUUID(), actor: user.name, actorUid: deviceUid, at: change.meta?.at || Date.now() } };
+      }
       if ((change.type.startsWith('member.') || change.type === 'group.rename') && user.role !== 'owner') throw new Error('permission_denied：只有群主可修改管理設定');
       // A restored queue must use the current authenticated identity, never the backup's UID.
       if (change.meta) change = { ...change, meta: { ...change.meta, actor: user.name, actorUid: deviceUid } };
