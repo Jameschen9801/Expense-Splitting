@@ -38,16 +38,23 @@ test('銀行和卡號都必須符合，其他數字不能代替卡號', () => {
   }
 });
 
-test('末五碼可保留開頭的零，末四碼與末五碼不得部分比對',()=>{
+test('僅接受末四碼並保留開頭的零，舊五碼規則保留供修正但停用',()=>{
   const five={...input,last4:'01234'};
   const notice='測試銀行 信用卡末五碼01234 於2026/10/27 消費 NT$125';
-  assert.equal(parseBankText(notice,five).amount,125);
-  assert.equal(parseBankText(notice.replace('末五碼','末5碼'),five).amount,125);
-  assert.equal(newBankRule(five).last4,'01234');
+  assert.throws(()=>parseBankText(notice,five));
+  assert.throws(()=>newBankRule(five));
   assert.throws(()=>parseBankText(notice,input));
   assert.throws(()=>parseBankText(sample,five));
   assert.throws(()=>newBankRule({...input,last4:'001234'}));
-  const store=memory(),rule=newBankRule(five);saveBankRules(store,[rule]);assert.deepEqual(readBankRules(store),[rule]);
+  const four={...input,last4:'0123'};
+  assert.equal(newBankRule(four).last4,'0123');
+  assert.equal(parseBankText('測試銀行 信用卡末四碼0123 消費 NT$125',four).amount,125);
+  assert.throws(()=>parseBankText('測試銀行 信用卡末四碼01234 消費 NT$125',four));
+  const store=memory(),rule={...newBankRule(input),last4:'01234'};
+  store.setItem(bankRulesKey,JSON.stringify([rule]));
+  assert.deepEqual(readBankRules(store),[{...rule,enabled:false}]);
+  assert.throws(()=>saveBankRules(store,[rule]));
+  saveBankRules(store,[{...rule,enabled:false}]);
 });
 
 test('驗證碼、退款、失敗、外幣、預授權和非消費通知全部拒絕', () => {
@@ -142,7 +149,7 @@ test('同一綁定捷徑由 App 銀行規則選定帳本，修改分類與停用
   assert.equal(resolveBankRule(store,{...request,text:sample.replaceAll('測試銀行','第二銀行').replace('末四碼1234','末四碼5678')}).rule.groupCode,'654321');
   saveBankRules(store,[{...first,category:'travel'},second]);
   assert.equal(resolveBankRule(store,request).rule.category,'travel');
-  assert.throws(()=>resolveBankRule(store,{...request,channel:'0'.repeat(64)}),/找不到/);
+  assert.throws(()=>resolveBankRule(store,{...request,channel:'0'.repeat(64)}),/帳本同步/);
   assert.throws(()=>resolveBankRule(store,{...request,text:sample+'退款'}),/尚未記帳/);
   saveBankRules(store,[{...first,enabled:false},second]);
   assert.throws(()=>resolveBankRule(store,request),/尚未記帳/);

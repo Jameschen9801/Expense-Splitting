@@ -19,7 +19,7 @@ test('刪除請求只包含本人個人帳本與防重建標記，拒絕共用�
 
 test('刪除清理只移除該帳本、草稿、銀行規則與佇列，保留其他帳本和身分',()=>{
   const store=memory();
-  const rule=newBankRule({bank:'測試銀行',last4:'00123',groupCode:ledger.code,payer:'我',participants:['我'],category:'food',mode:'review',limit:10000});
+  const rule=newBankRule({bank:'測試銀行',last4:'0123',groupCode:ledger.code,payer:'我',participants:['我'],category:'food',mode:'review',limit:10000});
   const other=newBankRule({...rule,groupCode:'123456',last4:'4567'});
   saveBankRules(store,[rule,other]);
   const kept={'warikan_group_123456':'other-ledger','warikan_draft_v1_123456_A':'other-draft','warikan_last_group':'123456',[bankBridgeKey]:'binding','firebase:authUser:project':'identity','warikan_appearance_v1':'dark'};

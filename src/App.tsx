@@ -38,6 +38,8 @@ import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
 import { BankSetup } from './components/BankSetup';
 import { BankShortcutSettings } from './components/BankShortcutSettings';
+import { AccountSyncSettings } from './components/AccountSyncSettings';
+import { accountSync } from './lib/accountSync';
 import { DeleteLedgerDialog } from './components/DeleteLedgerDialog';
 import { takeBankRequest, type BankInput } from './lib/bankShortcuts';
 import { fingerprint } from './lib/audit';
@@ -111,6 +113,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dataSettings, setDataSettings] = useState(false);
   const [bankSettings, setBankSettings] = useState(false);
+  const [accountSettings, setAccountSettings] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
   const [isDeletingLedger, setIsDeletingLedger] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -175,6 +178,12 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const memberMonths = useMemo(() => [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...(currentGroup?.expenses || []), ...(currentGroup?.transfers || [])].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers, personal]);
   const personalTotal = useMemo(() => (currentGroup?.expenses || []).filter(record => !recordMonth || record.date?.startsWith(recordMonth + '-')).reduce((sum, record) => sum + utils.toCents(record.amount), 0), [currentGroup?.expenses, recordMonth]);
   useEffect(() => { ensureDeviceIdentity().then(setDeviceUid).catch(() => {}); }, []);
+  useEffect(() => {
+    const receive = () => { setMyGroups(storage.getMyGroups()); setDeviceUid(currentDeviceUid()); };
+    window.addEventListener('account-sync-updated', receive);
+    void accountSync.start();
+    return () => window.removeEventListener('account-sync-updated', receive);
+  }, []);
 
   const clearRecordDraft = () => {
     if (currentGroup) {
@@ -807,6 +816,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     let message = '個人帳本已刪除';
     try { cleanupDeletedLedger(localStorage, code); }
     catch { message = '雲端帳本已刪除；本機清理未完成，請重新載入 App'; }
+    void accountSync.forgetLedger(code).catch(() => {});
     setMyGroups(storage.getMyGroups().filter(group => group.code !== code));
     setDeleteTarget(target => target?.code === code ? null : target);
     if (groupCodeRef.current === code) {
@@ -896,7 +906,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
             </nav>
 
             <main className="home-content">
-              <div className="home-heading"><h1>我的帳本</h1><p>日常自己記，也能和朋友一起分帳</p></div>
+              <div className="home-heading"><h1>我的帳本</h1><p>日常自己記，也能和朋友一起分帳</p><button type="button" className="btn btn-sm mt-3" onClick={() => setAccountSettings(true)}>帳本同步</button></div>
               <div className="home-actions">
                 <button className="btn btn-primary" onClick={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }}>＋ 新增帳本</button>
                 <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入共用帳本</button>
@@ -1243,7 +1253,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
             {newGroupKind === 'shared' ? <div className="field">
               <label className="field-label" htmlFor="create-member-name">你的名字</label>
               <input id="create-member-name" type="text" value={newGroupMyName} onChange={e => { setNewGroupMyName(e.target.value); setFormError(''); }} placeholder="你在群組中的顯示名稱" maxLength={12} autoComplete="name" />
-            </div> : <p className="text-xs text-ink-3 leading-relaxed mb-4">個人帳本只供自己使用，綁定建立時的 App。請勿清除網站資料，並定期匯出備份。</p>}
+            </div> : <p className="text-xs text-ink-3 leading-relaxed mb-4">個人帳本只供自己使用。建立後可開啟「帳本同步」，讓 Safari 與桌面 App 連回同一本帳本。</p>}
             {formError && <div className="form-error" role="alert">{formError}</div>}
             <div className="flex justify-end gap-2 mt-4">
               <button className="btn btn-ghost btn-sm" onClick={() => toggleModal('createGroup', false)} disabled={isSaving}>取消</button>
@@ -1280,7 +1290,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
         {modals.groupSettings && (
           <Modal title={personal ? '帳本設定' : '群組設定'} onClose={() => toggleModal('groupSettings', false)}>
             <button type="button" className="btn btn-primary w-full mb-4" onClick={openBankSettings}>銀行與卡片設定</button>
-            <p className="text-xs text-ink-3 leading-relaxed mb-4">{personal ? '這是只有你能存取的個人帳本，可記錄日常支出並查看分類統計。請保留此 App 的網站資料並定期備份；換裝置或瀏覽器時，雲端存取身分需由管理者協助驗證。' : currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
+            <button type="button" className="btn w-full mb-4" onClick={() => { toggleModal('groupSettings', false); setAccountSettings(true); }}>帳本同步 · 連結 Safari 與桌面 App</button>
+            <p className="text-xs text-ink-3 leading-relaxed mb-4">{personal ? '這是只有你能存取的個人帳本，可記錄日常支出並查看分類統計。先開啟「帳本同步」，換到 Safari 或新裝置時登入同一帳號即可存取原本帳本。未連結前請保留此 App 資料。' : currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
             {!personal && <p className="text-xs text-ink-3 mb-4 break-all">此裝置識別碼：{deviceUid || '連線後取得'}<br />裝置身分不包含在備份內。請勿清除網站資料，以免失去群主綁定。</p>}
             <div className="field">
               <label className="field-label">帳本名稱</label>
@@ -1394,8 +1405,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       </>
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
+      {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
       {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
-      {bankInputs[0] && !dataSettings && !bankSettings && !deleteTarget && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} />}</React.Fragment>}
+      {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}

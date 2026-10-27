@@ -13,7 +13,9 @@ export const storage = {
     }
   },
   saveMyGroups: (groups: MyGroup[]) => {
+    const before = storage.getMyGroups();
     localStorage.setItem(MY_GROUPS_KEY, JSON.stringify(groups));
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ledger-memberships-changed', { detail: { before, after: groups } }));
   },
   getGroup: (code: string): Group | null => {
     try {

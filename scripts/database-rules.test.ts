@@ -20,6 +20,21 @@ before(async () => {
   env = await initializeTestEnvironment({ projectId: 'demo-expense-splitting', database: { host: '127.0.0.1', port: 9000, rules: await readFile(new URL('../database.rules.json', import.meta.url), 'utf8') } });
 });
 after(async () => { await env?.cleanup(); });
+test('同步資料僅同一帳號可讀寫，其他匿名身分及列出所有帳號均被拒絕', async () => {
+  const own = env.authenticatedContext('owner').database().ref('accountSync/owner');
+  const profile = { version: 1, books: { '123456': { code: '123456', name: '權限測試', myName: 'A' } }, bank: { rules: '[]', bridge: 'a'.repeat(64), revision: 1 } };
+  await assertSucceeds(own.set(profile));
+  await assertSucceeds(own.get());
+  await assertFails(env.authenticatedContext('stranger').database().ref('accountSync/owner').get());
+  await assertFails(env.authenticatedContext('stranger').database().ref('accountSync/owner').set(profile));
+  await assertFails(env.unauthenticatedContext().database().ref('accountSync/owner').get());
+  await assertFails(env.authenticatedContext('owner').database().ref('accountSync').get());
+  await assertFails(own.child('bank/bridge').set('b'.repeat(64)));
+  await assertFails(own.child('bank/revision').set(0));
+  await assertFails(own.child('bank/password').set('never-store-password'));
+  await assertFails(own.child('books/654321').set({ code: '654321', name: '無權帳本', myName: 'A' }));
+  await assertFails(own.child('books/123456/myName').set('B'));
+});
 beforeEach(async () => {
   await env.clearDatabase();
   await env.withSecurityRulesDisabled(context => context.database().ref('groups/123456').set(cloud(group)));

@@ -6,6 +6,7 @@ import { cardSuffixLabel, type BankRequest } from '../lib/bankShortcuts';
 import type { Group } from '../types';
 import { utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
+import { AccountSyncSettings } from './AccountSyncSettings';
 
 export function BankImport({ input, onClose, onGroup }: { input: { request?: BankRequest; error?: string }; onClose: () => void; onGroup: (group: Group, name: string) => void }) {
   const [prepared, setPrepared] = useState<PreparedBankEntry | null>(null);
@@ -13,6 +14,7 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(!!input.request);
   const [saved, setSaved] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const preparation = useRef<Promise<PreparedBankEntry> | null>(null);
   const saving = useRef<ReturnType<typeof saveBankEntry> | null>(null);
   const commit = (value: PreparedBankEntry, confirmed = false) => {
@@ -24,6 +26,7 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
   };
   useEffect(() => {
     if (!input.request) return;
+    setBusy(true); setError('');
     let alive = true;
     preparation.current ||= prepareBankEntry(input.request);
     preparation.current.then(value => {
@@ -34,7 +37,7 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
       else setBusy(false);
     }).catch(error => { if (alive) { setError(error instanceof Error ? error.message : '無法處理銀行通知'); setBusy(false); } });
     return () => { alive = false; };
-  }, []);
+  }, [attempt]);
   return <Modal title="銀行捷徑記帳" onClose={() => { if (!busy) onClose(); }}>
     {busy && <p role="status" className="text-sm py-4">正在辨識與保存通知，請稍候…</p>}
     {prepared && <div className="rounded-2xl border border-line bg-paper-2 p-4 text-sm leading-loose">
@@ -46,6 +49,8 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
     </div>}
     {prepared?.reviewReason && !saved && <p className="form-error mt-4">{prepared.reviewReason}</p>}
     {error && <p className="form-error mt-4" role="alert">{error}</p>}
+    {error && !prepared && <div className="mt-4"><AccountSyncSettings preferLogin onReady={() => { preparation.current = null; saving.current = null; setAttempt(value => value + 1); }} /></div>}
+    {error && input.request && !busy && <button type="button" className="btn w-full mt-3" onClick={() => { preparation.current = null; saving.current = null; setAttempt(value => value + 1); }}>重新讀取設定並辨識</button>}
     {message && <p role="status" className="text-sm whitespace-pre-line mt-4">{message}</p>}
     <p className="text-xs text-ink-3 leading-relaxed mt-4">通知只在本機解析，不保存原始通知。這是新增記帳紀錄，不會付款或轉帳。</p>
     <div className="flex gap-2 mt-5">

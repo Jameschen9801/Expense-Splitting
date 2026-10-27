@@ -3,6 +3,7 @@ import { ensureDeviceIdentity, fetchGroupOnce } from './firebase';
 import { sync } from './sync';
 import { storage, utils } from './utils';
 import type { Group } from '../types';
+import { accountSync } from './accountSync';
 
 export type PreparedBankEntry = { request: BankRequest; rule: BankRule; entry: BankEntry; id: string; group: Group; myName: string; duplicate: boolean; reviewReason: string };
 async function availableGroup(code: string) {
@@ -24,6 +25,8 @@ function localMembership(group: Group, uid: string) {
   return local.myName;
 }
 export async function prepareBankEntry(request: BankRequest): Promise<PreparedBankEntry> {
+  await accountSync.start();
+  if (accountSync.getSnapshot().email) await accountSync.refresh();
   const {rule,entry} = resolveBankRule(localStorage, request);
   const [id, uid] = await Promise.all([bankExpenseId(rule, request), ensureDeviceIdentity()]);
   const group = await availableGroup(rule.groupCode);

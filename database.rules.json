@@ -2,6 +2,32 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "accountSync": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid && newData.exists()",
+        ".validate": "newData.hasChildren(['version','bank']) && newData.child('version').val() == 1",
+        "version": { ".validate": "newData.val() == 1" },
+        "books": {
+          "$code": {
+            ".validate": "$code.matches(/^\\d{6}$/) && newData.hasChildren(['code','name','myName']) && newData.child('code').val() == $code && newData.child('name').isString() && newData.child('name').val().length <= 100 && newData.child('myName').isString() && (root.child('groups').child($code).child('security/users').child($uid).child('name').val() == newData.child('myName').val() || (!root.child('groups').child($code).child('security').exists() && root.child('groups').child($code).exists()))",
+            "code": { ".validate": "newData.isString()" },
+            "name": { ".validate": "newData.isString()" },
+            "myName": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+            "kind": { ".validate": "newData.val() == 'personal' || newData.val() == 'shared'" },
+            "$other": { ".validate": false }
+          }
+        },
+        "bank": {
+          ".validate": "newData.hasChildren(['rules','bridge','revision'])",
+          "rules": { ".validate": "newData.isString() && newData.val().length <= 200000" },
+          "bridge": { ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9]{64}$/) && (!data.exists() || newData.val() == data.val())" },
+          "revision": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() % 1 == 0 && (!data.exists() || newData.val() >= data.val())" },
+          "$other": { ".validate": false }
+        },
+        "$other": { ".validate": false }
+      }
+    },
     "groups": {
       "$code": {
         ".read": "$code.matches(/^\\d{6}$/) && (!data.child('security').exists() || auth != null) && (data.child('kind').val() != 'personal' || (auth != null && auth.uid == data.child('security/ownerUid').val()))",

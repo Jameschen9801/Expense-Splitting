@@ -5,6 +5,7 @@ import { isPersonalLedger } from '../lib/ledgers';
 import { storage } from '../lib/utils';
 import { Modal } from './Modal';
 import { BankShortcutSettings } from './BankShortcutSettings';
+import { AccountSyncSettings } from './AccountSyncSettings';
 
 export function BankSetup({ setup, groups, currentGroup, onCreateLedger, onClose }: {
   setup: SetupInput; groups: MyGroup[]; currentGroup: Group | null; onCreateLedger: () => void; onClose: () => void;
@@ -22,7 +23,7 @@ export function BankSetup({ setup, groups, currentGroup, onCreateLedger, onClose
   return <Modal title="設定銀行記帳" onClose={onClose}>
     <p className="text-sm text-ink-2 leading-relaxed mb-4">{setup.needsLink ? '捷徑還沒綁定帳本，尚未新增任何帳目。先選擇個人帳本，在 App 儲存銀行規則，再按「已加入，完成綁定」，設定會自動傳入捷徑。' : '這次是手動開啟設定，沒有新增帳目。可在下方確認銀行規則，所有銀行與卡片資料都在 App 修改。'}</p>
     {books.length > 0 && <div className="mb-4"><label className="field-label" htmlFor="bank-setup-ledger">要記入哪個帳本？</label><select id="bank-setup-ledger" value={selected} onChange={event => setSelected(event.target.value)}>{books.map(book => <option key={book.code} value={book.code}>{book.name}（{isPersonalLedger(book) ? '個人帳本' : '共用帳本'}）</option>)}</select></div>}
-    {!books.some(isPersonalLedger) && <div className="mb-5"><p className="text-sm text-ink-2 leading-relaxed mb-3">這個 Safari 還沒有個人帳本。若帳目原本在主畫面 App，請保留原 App 資料；新建帳本會是獨立的一本。</p><button type="button" className="btn btn-primary w-full" onClick={onCreateLedger}>建立個人帳本</button></div>}
+    {!target && <div className="mb-5"><p className="text-sm text-ink-2 leading-relaxed mb-3">原本的帳目在桌面 App？先在那裡開啟帳本同步，再於此登入，就能連回原本帳本。</p><AccountSyncSettings preferLogin /><details className="expense-more mt-4"><summary>我確定要另外建立一本帳本</summary><p className="text-xs text-ink-3 py-3">這會建立獨立的新帳本，不會連回桌面 App 的帳目。</p><button type="button" className="btn w-full" onClick={onCreateLedger}>建立新的個人帳本</button></details></div>}
     {target && <Fragment key={target.code}><BankShortcutSettings group={target} /></Fragment>}
     <button type="button" className="btn w-full mt-2" onClick={onClose}>關閉設定</button>
   </Modal>;

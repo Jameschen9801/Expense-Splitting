@@ -25,6 +25,13 @@ export const currentDeviceUid = () => deviceUid;
 export const memberNameKey = (name: string) => name;
 export const validMemberName = (name: string) => !!name.trim() && name.length <= 12 && !/[.#$\[\]/]/.test(name) && !['__proto__', 'constructor', 'prototype'].includes(name);
 export const ensureDeviceIdentity = async () => { await getDatabaseInstance(); return deviceUid; };
+export const firebaseSession = async () => {
+  const database = await getDatabaseInstance();
+  const { getAuth } = await import('firebase/auth');
+  const auth = getAuth();
+  deviceUid = auth.currentUser?.uid || '';
+  return { database, auth };
+};
 
 const getDatabaseInstance = () => {
   if (!databasePromise) {
