@@ -263,7 +263,7 @@ svg.lucide { stroke-width: 1.75; }
 .panel-header { padding: 18px 20px; }
 .form-error { border-radius: 12px; border: 1px solid var(--ui-danger); }
 .stamp { border: 0; background: var(--ui-positive-soft); color: var(--ui-positive); border-radius: 999px; font-family: inherit; font-weight: 600; font-size: 14px; letter-spacing: 0; padding: 8px 16px; transform: none; }
-input:is([type="text"], [type="number"], [type="date"], [type="search"]), select, textarea {
+input:is([type="text"], [type="number"], [type="date"], [type="search"], [type="email"], [type="password"]), select, textarea {
   min-height: 48px;
   min-width: 0;
   border: 1px solid var(--ui-control);
