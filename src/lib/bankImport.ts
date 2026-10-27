@@ -1,4 +1,4 @@
-import { bankExpense, bankExpenseId, parseBankText, readBankRules, rememberBankReceipt, type BankRequest, type BankRule, type BankEntry } from './bankShortcuts';
+import { bankExpense, bankExpenseId, resolveBankRule, rememberBankReceipt, type BankRequest, type BankRule, type BankEntry } from './bankShortcuts';
 import { ensureDeviceIdentity, fetchGroupOnce } from './firebase';
 import { sync } from './sync';
 import { storage, utils } from './utils';
@@ -24,9 +24,7 @@ function localMembership(group: Group, uid: string) {
   return local.myName;
 }
 export async function prepareBankEntry(request: BankRequest): Promise<PreparedBankEntry> {
-  const rule = readBankRules(localStorage).find(item => item.channel === request.channel && item.enabled);
-  if (!rule) throw new Error('找不到有效的銀行捷徑規則。請在捷徑開啟的同一個 Safari 設定規則；不要清除主畫面 App 資料');
-  const entry = parseBankText(request.text, rule);
+  const {rule,entry} = resolveBankRule(localStorage, request);
   const [id, uid] = await Promise.all([bankExpenseId(rule, request), ensureDeviceIdentity()]);
   const group = await availableGroup(rule.groupCode);
   const myName = localMembership(group, uid);

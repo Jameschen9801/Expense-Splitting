@@ -36,7 +36,8 @@ import { Statistics } from './components/Statistics';
 import { HistoryLog } from './components/HistoryLog';
 import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
-import { takeBankRequest, type BankRequest } from './lib/bankShortcuts';
+import { BankSetup } from './components/BankSetup';
+import { takeBankRequest, type BankInput } from './lib/bankShortcuts';
 import { fingerprint } from './lib/audit';
 import { categories, categoryLabel, categoryOf, defaultExpenseCategory } from './lib/categories';
 import { appUpdates } from './lib/appUpdates';
@@ -80,12 +81,12 @@ const editableShares = (expense: Expense) => {
   return expense.shares || [];
 };
 
-export default function App({ initialBankInput = {} }: { initialBankInput?: { request?: BankRequest; error?: string } } = {}) {
-  const [bankInputs, setBankInputs] = useState<(typeof initialBankInput & { key: string })[]>(initialBankInput.request || initialBankInput.error ? [{ ...initialBankInput, key: 'initial' }] : []);
+export default function App({ initialBankInput = {} }: { initialBankInput?: BankInput } = {}) {
+  const [bankInputs, setBankInputs] = useState<(BankInput & { key: string })[]>(initialBankInput.request || initialBankInput.setup || initialBankInput.error ? [{ ...initialBankInput, key: 'initial' }] : []);
   useEffect(() => {
     const receive = () => {
       const input = takeBankRequest(location, history);
-      if (input.request || input.error) setBankInputs(queue => [...queue, { ...input, key: crypto.randomUUID() }]);
+      if (input.request || input.setup || input.error) setBankInputs(queue => [...queue, { ...input, key: crypto.randomUUID() }]);
     };
     // Safari may reuse the current tab when a Shortcut opens the next fragment.
     window.addEventListener('hashchange', receive);
@@ -1335,7 +1336,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: { re
         )}
       </>
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
-      {bankInputs[0] && !dataSettings && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}><BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} /></React.Fragment>}
+      {bankInputs[0] && !dataSettings && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}

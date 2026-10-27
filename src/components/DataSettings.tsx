@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, useRef, useState, useSyncExternalStore } from 'react';
 import type { Group } from '../types';
 import { appUpdates, flushDraftBeforeNavigation } from '../lib/appUpdates';
 import { commitRestore, createBackup, downloadFile, groupCsv, planRestore, readBackup, type Backup, type RestorePlan } from '../lib/backup';
@@ -65,7 +65,7 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
       </div>
       {updates.message && <p role="status" className="text-xs text-ink-2 mt-3">{updates.message}</p>}
     </section>
-    <BankShortcutSettings group={group} />
+    <Fragment key={group?.code || 'none'}><BankShortcutSettings group={group} /></Fragment>
     <section className="border-t border-line pt-4">
       <h3 className="settings-heading">資料備份</h3>
       <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、草稿與待同步資料，保留舊版備份相容性；不包含登入憑證與銀行捷徑識別碼。檔案含私人帳目，請妥善保管；新裝置的群主身分仍需管理者驗證。</p>

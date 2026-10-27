@@ -4,12 +4,17 @@ import { utils } from './utils';
 import { assertLedgerChange } from './ledgers';
 
 export const bankRulesKey = 'warikan_bank_rules_v1';
+export const bankBridgeKey = 'warikan_bank_bridge_v1';
+export const bankShortcutName = '銀行通知記帳';
+export const bankSetupMarker = 'expense-bank-setup:';
 export type BankRule = {
   id: string; channel: string; secret: string; bank: string; last4: string;
   groupCode: string; payer: string; participants: string[]; category: ExpenseCategory;
   mode: 'review' | 'auto'; limit: number; enabled: boolean; seen: string[];
 };
-export type BankRequest = { channel: string; text: string };
+export type BankRequest = { channel: string; text: string; scope?: 'browser' };
+export type BankSetup = { needsLink: boolean };
+export type BankInput = { request?: BankRequest; setup?: BankSetup; error?: string };
 export type BankEntry = { amount: number; desc: string; date: string; dateInMessage: boolean };
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 const norm = (text: string) => text.normalize('NFKC').replace(/\u200b|\u200e|\u200f/g, '').trim();
@@ -53,21 +58,60 @@ export function bankShortcutPrefix(rule: BankRule, base: string) {
   const url = new URL(base); url.hash = ''; url.search = '';
   return url.href + '#bank-entry?channel=' + rule.channel + '&text=';
 }
+export function bankShortcutSetupUrl(store: Store, base: string) {
+  let channel = store.getItem(bankBridgeKey);
+  if (!key(channel)) { channel = randomKey(); store.setItem(bankBridgeKey, channel); }
+  const url = new URL(base); url.hash = ''; url.search = '';
+  const prefix = url.href + '#bank-entry?channel=' + channel + '&scope=browser&text=';
+  const setup = new URL('shortcuts://run-shortcut');
+  setup.searchParams.set('name', bankShortcutName);
+  setup.searchParams.set('input', 'text');
+  setup.searchParams.set('text', bankSetupMarker + prefix);
+  return setup.href;
+}
 export function parseBankRequest(hash: string): BankRequest | null {
   if (!hash.startsWith('#bank-entry?')) return null;
   if (hash.length > 24000) throw new Error('捷徑訊息過長，未匯入');
   const params = new URLSearchParams(hash.slice('#bank-entry?'.length));
   const channel = params.get('channel'), text = params.get('text');
   if (!key(channel) || !text || text.length > 6000) throw new Error('捷徑資料不完整，請重新產生連結');
-  return { channel: channel!, text };
+  const scope = params.get('scope');
+  if (scope !== null && scope !== 'browser') throw new Error('捷徑資料格式不正確，請從 App 重新綁定');
+  return {channel:channel!,text,...(scope === 'browser' ? {scope} : {})};
 }
-export function takeBankRequest(location: Pick<Location, 'hash' | 'pathname' | 'search'>, history: Pick<History, 'replaceState' | 'state'>): { request?: BankRequest; error?: string } {
+export function takeBankRequest(location: Pick<Location, 'hash' | 'pathname' | 'search'>, history: Pick<History, 'replaceState' | 'state'>): BankInput {
   if (!location.hash.startsWith('#bank-entry?')) return {};
   const hash = location.hash;
   try { history.replaceState(history.state, '', location.pathname + location.search); }
   catch { return { error: '無法清除網址中的通知資料，已停止自動記帳；請關閉此頁後重試' }; }
-  try { return { request: parseBankRequest(hash)! }; }
+  try {
+    if (hash.length > 24000) throw new Error('捷徑訊息過長，未匯入');
+    const params = new URLSearchParams(hash.slice('#bank-entry?'.length));
+    const channel = params.get('channel'), text = params.get('text');
+    if (channel !== 'NOT_CONFIGURED' && !key(channel)) throw new Error('捷徑資料不完整，請重新產生連結');
+    if (channel === 'NOT_CONFIGURED' || !text?.trim()) {
+      return { setup: { needsLink: channel === 'NOT_CONFIGURED' } };
+    }
+    return { request: parseBankRequest(hash)! };
+  }
   catch (error) { return { error: error instanceof Error ? error.message : '無法讀取捷徑資料' }; }
+}
+
+export function resolveBankRule(store: Store, request: BankRequest): { rule: BankRule; entry: BankEntry } {
+  const enabled = readBankRules(store).filter(rule => rule.enabled);
+  if (request.scope === 'browser') {
+    if (!key(store.getItem(bankBridgeKey)) || store.getItem(bankBridgeKey) !== request.channel) throw new Error('找不到這個 Safari 的捷徑綁定。請回到原本設定銀行規則的 App，重新按「完成綁定」；不要清除網站資料');
+    const matching = enabled.flatMap(rule => {
+      try { return [{rule,entry:parseBankText(request.text,rule)}]; }
+      catch { return []; }
+    });
+    if (matching.length > 1) throw new Error('通知符合多個銀行規則，尚未記帳。請在 App 調整銀行關鍵字，避免規則重疊');
+    if (!matching.length) throw new Error('沒有符合的成功消費通知，尚未記帳。請在 App 核對銀行關鍵字與卡號末四碼，或使用測試辨識查看原因');
+    return matching[0];
+  }
+  const rule = enabled.find(rule => rule.channel === request.channel);
+  if (!rule) throw new Error('找不到有效的銀行捷徑規則。請在捷徑開啟的同一個 Safari 設定規則；不要清除主畫面 App 資料');
+  return {rule,entry:parseBankText(request.text,rule)};
 }
 
 function checkedDate(year: number, month: number, day: number) {

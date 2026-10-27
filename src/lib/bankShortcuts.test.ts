@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bankExpense, bankExpenseId, bankRulesKey, bankShortcutPrefix, newBankRule, parseBankRequest, parseBankText, readBankRules, rememberBankReceipt, saveBankRules, takeBankRequest } from './bankShortcuts';
+import { readFileSync } from 'node:fs';
+import { bankBridgeKey, bankExpense, bankExpenseId, bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, bankSetupMarker, newBankRule, parseBankRequest, parseBankText, readBankRules, rememberBankReceipt, resolveBankRule, saveBankRules, takeBankRequest } from './bankShortcuts';
 import { categories, categoryOf, defaultExpenseCategory } from './categories';
 import { createBackup } from './backup';
 import type { Expense, Group } from '../types';
@@ -73,6 +74,86 @@ test('捷徑文字只放網址片段，先清除再處理；格式錯誤也會�
   assert.ok(takeBankRequest(url,{ state:null, replaceState: () => { throw new Error(); } }).error);
   assert.equal(parseBankRequest('#group=123456'),null);
   assert.throws(() => parseBankRequest('#bank-entry?channel=' + rule.channel + '&text=' + 'x'.repeat(6001)));
+});
+
+test('未綁定捷徑開啟 App 銀行設定，不把通知當成支出', () => {
+  let cleared = '';
+  const url = new URL('https://example.com/Expense-Splitting/#bank-entry?channel=NOT_CONFIGURED&text=' + encodeURIComponent(sample));
+  const input = takeBankRequest(url, { state:null, replaceState: (_state,_unused,path) => { cleared = String(path); } });
+  assert.deepEqual(input, { setup: { needsLink:true } });
+  assert.equal(cleared, '/Expense-Splitting/');
+  assert.equal(JSON.stringify(input).includes('1,234.50'), false);
+});
+
+test('已綁定捷徑手動執行只開設定，通知輸入才進入記帳', () => {
+  const rule = newBankRule(input);
+  const prefix = bankShortcutPrefix(rule, 'https://example.com/');
+  const history = { state:null,replaceState: () => {} };
+  assert.deepEqual(takeBankRequest(new URL(prefix), history), { setup: { needsLink:false } });
+  const recorded = takeBankRequest(new URL(prefix + encodeURIComponent(sample)), history);
+  assert.deepEqual(recorded.request, { channel:rule.channel,text:sample });
+  assert.equal(recorded.setup, undefined);
+  assert.equal(takeBankRequest(new URL(prefix.replace(rule.channel,'bad')), history).setup, undefined);
+  assert.throws(()=>parseBankRequest(new URL(prefix + encodeURIComponent(sample) + '&scope=unknown').hash));
+});
+
+test('銀行通知可記入個人帳本，全額屬於自己並拒絕他人分攤', () => {
+  const rule = newBankRule({...input,payer:'我',participants:['我']}), entry = parseBankText(sample,input,today);
+  const group: Group = {kind:'personal',code:rule.groupCode,name:'日常記帳',createdAt:1,members:['我'],expenses:[],transfers:[]};
+  const expense = bankExpense(rule,entry,'e1',group);
+  assert.equal(expense.amount,1234.5);
+  assert.equal(expense.payer,'我'); assert.deepEqual(expense.participants,['我']);
+  assert.throws(() => bankExpense({...rule,participants:['朋友']},entry,'e2',group));
+});
+
+test('App 綁定網址只傳入此瀏覽器的連結，不重填或輸出銀行、卡號與帳目', () => {
+  const store = memory();
+  const setup = new URL(bankShortcutSetupUrl(store,'https://example.com/Expense-Splitting/?private=x#old'));
+  assert.equal(setup.protocol,'shortcuts:'); assert.equal(setup.hostname,'run-shortcut');
+  assert.equal(setup.searchParams.get('name'),'銀行通知記帳');
+  assert.equal(setup.searchParams.get('input'),'text');
+  const config = setup.searchParams.get('text')!;
+  assert.ok(config.startsWith(bankSetupMarker));
+  const prefix = new URL(config.slice(bankSetupMarker.length));
+  assert.equal(prefix.search,'');
+  assert.equal(prefix.hash, '#bank-entry?channel=' + store.getItem(bankBridgeKey) + '&scope=browser&text=');
+  assert.equal(bankShortcutSetupUrl(store,'https://example.com/Expense-Splitting/'),setup.href);
+  assert.equal(createBackup(store).entries[bankBridgeKey],undefined);
+  assert.throws(() => bankShortcutSetupUrl({...store,getItem:()=>null,setItem:()=>{throw new Error('quota');}},'https://example.com/'));
+});
+
+test('同一綁定捷徑由 App 銀行規則選定帳本，修改分類與停用立即生效', () => {
+  const store=memory(), first=newBankRule(input), second=newBankRule({...input,bank:'第二銀行',last4:'5678',groupCode:'654321'});
+  saveBankRules(store,[first,second]); bankShortcutSetupUrl(store,'https://example.com/');
+  const request={channel:store.getItem(bankBridgeKey)!,text:sample,scope:'browser' as const};
+  assert.equal(resolveBankRule(store,request).rule.groupCode,'123456');
+  assert.equal(resolveBankRule(store,{...request,text:sample.replaceAll('測試銀行','第二銀行').replace('末四碼1234','末四碼5678')}).rule.groupCode,'654321');
+  saveBankRules(store,[{...first,category:'travel'},second]);
+  assert.equal(resolveBankRule(store,request).rule.category,'travel');
+  assert.throws(()=>resolveBankRule(store,{...request,channel:'0'.repeat(64)}),/找不到/);
+  assert.throws(()=>resolveBankRule(store,{...request,text:sample+'退款'}),/尚未記帳/);
+  saveBankRules(store,[{...first,enabled:false},second]);
+  assert.throws(()=>resolveBankRule(store,request),/尚未記帳/);
+});
+
+test('銀行規則重疊時停止自動入帳，不任意選一本帳本', () => {
+  const store=memory(), first=newBankRule(input), overlapping=newBankRule({...input,bank:'銀行',groupCode:'654321'});
+  saveBankRules(store,[first,overlapping]);bankShortcutSetupUrl(store,'https://example.com/');
+  assert.throws(()=>resolveBankRule(store,{channel:store.getItem(bankBridgeKey)!,text:sample,scope:'browser'}),/多個銀行規則/);
+});
+
+test('原生捷徑不要求重填資料，並只儲存及開啟本網站的合法綁定連結', () => {
+  const workflow=JSON.parse(readFileSync(new URL('../../scripts/ios-bank-shortcut.json',import.meta.url),'utf8'));
+  assert.deepEqual(workflow.WFWorkflowImportQuestions,[]);
+  const patterns=workflow.WFWorkflowActions.filter((action:any)=>action.WFWorkflowActionIdentifier==='is.workflow.actions.text.match').map((action:any)=>new RegExp(action.WFWorkflowActionParameters.WFMatchTextPattern));
+  assert.equal(patterns.length,2);
+  const prefix='https://jameschen9801.github.io/Expense-Splitting/#bank-entry?channel='+'a'.repeat(64)+'&scope=browser&text=';
+  assert.equal((bankSetupMarker+prefix).match(patterns[0])?.[0],prefix);
+  assert.equal(prefix.match(patterns[1])?.[0],prefix);
+  for(const bad of [prefix.replace('jameschen9801.github.io','example.com'),prefix+'&extra=1',prefix.replace('scope=browser','scope=unknown'),prefix.replace('https:','http:'),prefix.replace('a'.repeat(64),'bad')]) {
+    assert.equal((bankSetupMarker+bad).match(patterns[0]),null);
+    assert.equal(bad.match(patterns[1]),null);
+  }
 });
 
 test('規則只保存在本機，不進入一般帳目備份；儲存失敗不偽裝成功', () => {

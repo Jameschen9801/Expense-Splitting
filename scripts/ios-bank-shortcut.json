@@ -1,23 +1,283 @@
 {
   "WFWorkflowName": "銀行通知記帳",
-  "WFWorkflowClientVersion": "900",
-  "WFWorkflowMinimumClientVersion": 900,
-  "WFWorkflowIcon": { "WFWorkflowIconStartColor": 1239869439, "WFWorkflowIconGlyphNumber": 61440 },
-  "WFWorkflowTypes": ["ActionExtension"],
-  "WFWorkflowInputContentItemClasses": ["WFStringContentItem"],
-  "WFWorkflowImportQuestions": [{
-    "ActionIndex": 1,
-    "Category": "Parameter",
-    "ParameterKey": "WFTextActionText",
-    "Text": "在將開啟的 Safari 建立個人帳本或加入共用帳本，從「資料與 App → iOS 銀行捷徑記帳」儲存規則，再貼上「捷徑連結前綴」。請勿分享這個連結。",
-    "DefaultValue": "https://jameschen9801.github.io/Expense-Splitting/#bank-entry?channel=NOT_CONFIGURED&text="
-  }],
+  "WFWorkflowClientVersion": "5037.0.19",
+  "WFWorkflowMinimumClientVersion": 1106,
+  "WFWorkflowIcon": {
+    "WFWorkflowIconStartColor": 1239869439,
+    "WFWorkflowIconGlyphNumber": 61440
+  },
+  "WFWorkflowTypes": [
+    "ActionExtension"
+  ],
+  "WFWorkflowInputContentItemClasses": [
+    "WFStringContentItem"
+  ],
+  "WFWorkflowImportQuestions": [],
   "WFWorkflowActions": [
-    { "WFWorkflowActionIdentifier": "is.workflow.actions.comment", "WFWorkflowActionParameters": { "WFCommentActionText": "銀行通知記帳：只將你提供的文字 URL 編碼後放進網址片段，再開啟分帳網站。文字不會放在 HTTP 查詢參數；本網站解析後會移除片段。首次請先設定銀行關鍵字與卡號末四碼。iOS 27 通知自動化需先把銀行推播的標題、副標題、訊息組成文字，再傳給此捷徑。捷徑會開啟網站，不保證鎖屏背景執行；不會付款、不會轉帳、不索取登入憑證。" } },
-    { "WFWorkflowActionIdentifier": "is.workflow.actions.gettext", "WFWorkflowActionParameters": { "WFTextActionText": "https://jameschen9801.github.io/Expense-Splitting/#bank-entry?channel=NOT_CONFIGURED&text=", "UUID": "A534132C-C87E-486B-9663-86EFDA3EB4AA" } },
-    { "WFWorkflowActionIdentifier": "is.workflow.actions.gettext", "WFWorkflowActionParameters": { "WFTextActionText": { "Value": { "string": "￼", "attachmentsByRange": { "{0, 1}": { "Type": "ExtensionInput" } } }, "WFSerializationType": "WFTextTokenString" }, "UUID": "44136226-691A-4E9E-98BE-B0E8CE49F946" } },
-    { "WFWorkflowActionIdentifier": "is.workflow.actions.urlencode", "WFWorkflowActionParameters": { "WFEncodeMode": "Encode", "WFInput": { "Value": { "Type": "ActionOutput", "OutputUUID": "44136226-691A-4E9E-98BE-B0E8CE49F946", "OutputName": "文字" }, "WFSerializationType": "WFTextTokenAttachment" }, "UUID": "00437CBF-D579-469B-A676-C87527ECDBEA" } },
-    { "WFWorkflowActionIdentifier": "is.workflow.actions.gettext", "WFWorkflowActionParameters": { "WFTextActionText": { "Value": { "string": "￼￼", "attachmentsByRange": { "{0, 1}": { "Type": "ActionOutput", "OutputUUID": "A534132C-C87E-486B-9663-86EFDA3EB4AA", "OutputName": "連結前綴" }, "{1, 1}": { "Type": "ActionOutput", "OutputUUID": "00437CBF-D579-469B-A676-C87527ECDBEA", "OutputName": "URL 編碼的文字" } } }, "WFSerializationType": "WFTextTokenString" }, "UUID": "42E455AC-9932-482D-8082-2C99EFAB6987" } },
-    { "WFWorkflowActionIdentifier": "is.workflow.actions.openurl", "WFWorkflowActionParameters": { "WFInput": { "Value": { "Type": "ActionOutput", "OutputUUID": "42E455AC-9932-482D-8082-2C99EFAB6987", "OutputName": "文字" }, "WFSerializationType": "WFTextTokenAttachment" } } }
-  ]
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+      "WFWorkflowActionParameters": {
+        "WFCommentActionText": "銀行通知記帳・App 自動綁定版\n銀行、卡號末四碼、分類與個人帳本都在 App 設定。加入本捷徑後，回 App 按「已加入，完成綁定」，會自動保存記帳連結，不用重填或複製。\n只接受本專案的連結，設定只寫入 iCloud Drive 的 Shortcuts/ExpenseSplitting-bank-link.txt。公開範本不含銀行、卡號、帳目與私人連結。\n收到銀行通知時，將標題、副標題與訊息合併成文字，作為此捷徑輸入。通知只經 URL 編碼後放進本網站的網址片段，啟動即移除。捷徑需要開啟網站，鎖屏可能需解鎖；不會付款或轉帳。"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "AA1C41C6-A80A-4225-928A-30FD2DB4DAF3",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "WFConditionalActionString": "expense-bank-setup:",
+        "GroupingIdentifier": "AF89D3CA-6E97-4A57-8DFA-83A012A3CB85",
+        "WFCondition": 99,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "AA1C41C6-A80A-4225-928A-30FD2DB4DAF3",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        },
+        "WFControlFlowMode": 0
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "WFMatchTextPattern": "(?<=^expense-bank-setup:)https://jameschen9801\\.github\\.io/Expense-Splitting/#bank-entry\\?channel=[a-f0-9]{64}&scope=browser&text=$",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "AA1C41C6-A80A-4225-928A-30FD2DB4DAF3",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "UUID": "D28DA42B-AADA-4123-B0A6-58DEC800D205"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "D28DA42B-AADA-4123-B0A6-58DEC800D205",
+            "Type": "ActionOutput",
+            "OutputName": "符合項目"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "UUID": "6329F462-0A9C-483F-92C0-1C49DEB688EE",
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.save",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "6329F462-0A9C-483F-92C0-1C49DEB688EE",
+            "Type": "ActionOutput",
+            "OutputName": "項目"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFAskWhereToSave": false,
+        "UUID": "2221BD2C-B1B9-4A85-B560-3B3C2A45D79B",
+        "WFSaveFileOverwrite": true,
+        "WFFileDestinationPath": "ExpenseSplitting-bank-link.txt"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "WFAlertActionMessage": "銀行、卡片與帳本都使用 App 中的設定，之後直接在 App 修改即可。接著在通知自動化選「銀行通知記帳」，並傳入通知文字。",
+        "WFAlertActionTitle": "銀行捷徑已完成綁定",
+        "WFAlertActionCancelButtonShown": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "WFControlFlowMode": 1,
+        "GroupingIdentifier": "AF89D3CA-6E97-4A57-8DFA-83A012A3CB85"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.open",
+      "WFWorkflowActionParameters": {
+        "WFGetFilePath": "ExpenseSplitting-bank-link.txt",
+        "WFFileErrorIfNotFound": false,
+        "WFShowFilePicker": false,
+        "UUID": "ED42ACE4-747A-43F4-A8FB-C54CC5FDA8A3",
+        "WFGetFileService": "iCloud Drive",
+        "WFGetFolderContents": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "89E9FD00-C606-469E-A6C5-7984118080EF",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "ED42ACE4-747A-43F4-A8FB-C54CC5FDA8A3",
+                "Type": "ActionOutput",
+                "OutputName": "檔案"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "WFMatchTextPattern": "^https://jameschen9801\\.github\\.io/Expense-Splitting/#bank-entry\\?channel=[a-f0-9]{64}&scope=browser&text=$",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "89E9FD00-C606-469E-A6C5-7984118080EF",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "UUID": "9E03E9EC-EFE5-469B-BD99-014A017054DB"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "9E03E9EC-EFE5-469B-BD99-014A017054DB",
+              "Type": "ActionOutput",
+              "OutputName": "符合項目"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        },
+        "WFConditionalActionString": "https://jameschen9801.github.io/Expense-Splitting/#bank-entry?channel=",
+        "WFCondition": 100,
+        "WFControlFlowMode": 0,
+        "GroupingIdentifier": "C1A0DC51-5BBD-40D8-8932-3188BA2EB0D7"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.urlencode",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "UUID": "6C1C0D0A-20E2-47AF-A812-FF5826A65811",
+        "WFEncodeMode": "Encode"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "4A9488CD-8840-46F5-B1D3-0B08C0BE28CC",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼￼",
+            "attachmentsByRange": {
+              "{1, 1}": {
+                "OutputUUID": "6C1C0D0A-20E2-47AF-A812-FF5826A65811",
+                "Type": "ActionOutput",
+                "OutputName": "URL 編碼的文字"
+              },
+              "{0, 1}": {
+                "OutputUUID": "9E03E9EC-EFE5-469B-BD99-014A017054DB",
+                "Type": "ActionOutput",
+                "OutputName": "符合項目"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.openurl",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "4A9488CD-8840-46F5-B1D3-0B08C0BE28CC",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "WFControlFlowMode": 1,
+        "GroupingIdentifier": "C1A0DC51-5BBD-40D8-8932-3188BA2EB0D7"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.openurl",
+      "WFWorkflowActionParameters": {
+        "WFInput": "https://jameschen9801.github.io/Expense-Splitting/#bank-entry?channel=NOT_CONFIGURED&text="
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "C1A0DC51-5BBD-40D8-8932-3188BA2EB0D7",
+        "UUID": "FD74E2EA-AD37-4515-A63E-79AB5DA28012",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "DDCCCE63-E956-48C8-8C8F-83369F0E9B79",
+        "WFControlFlowMode": 2,
+        "GroupingIdentifier": "AF89D3CA-6E97-4A57-8DFA-83A012A3CB85"
+      }
+    }
+  ],
+  "WFWorkflowHasShortcutInputVariables": true
 }
