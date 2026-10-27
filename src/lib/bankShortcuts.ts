@@ -130,11 +130,16 @@ function checkedDate(year: number, month: number, day: number) {
 export function parseBankText(text: string, rule: Pick<BankRule,'bank'|'last4'>, today = utils.todayStr()): BankEntry {
   const message = norm(text);
   if (!message || message.length > 6000) throw new Error('請提供銀行消費通知文字');
-  if (!message.toLocaleLowerCase().includes(norm(rule.bank).toLocaleLowerCase())) throw new Error('銀行關鍵字不符合，未記帳');
+  const keyword = norm(rule.bank).toLocaleLowerCase();
+  const aliases = /^(?:台新|臺新)(?:銀行)?$/.test(keyword) || keyword === 'richart' ? ['台新', '臺新', 'richart'] : [keyword];
+  if (!aliases.some(value => message.toLocaleLowerCase().includes(value))) throw new Error('銀行關鍵字不符合，未記帳');
   if (!/^\d{4}$/.test(rule.last4)) throw new Error('請設定卡號末 4 碼');
   const card = new RegExp(`(?:(?:卡號|卡片|信用卡)(?:末四碼|末4碼|末碼)?|尾號|末四碼|末4碼|末碼|ending\\s*(?:in)?)[\\s:：()（）「」【】\\[\\]#＊*xX•●·-]{0,24}(?:為|是)?\\s*${rule.last4}(?!\\d)`, 'i');
   if (!card.test(message)) throw new Error('通知中的卡號末碼不符合，未記帳');
-  if (/驗證碼|一次性密碼|動態密碼|\bOTP\b|取消|退款|退貨|失敗|未成功|不成功|未完成|尚未|婉拒|拒絕|預授權|預借現金|繳款|繳費通知|帳單|還款|匯款|轉帳|提款|提領|累計|累積|分期|昨日|昨天|refund|declined|verification|pending/i.test(message)) throw new Error('這不是可直接入帳的成功消費通知，請手動確認');
+  // A successful Richart charge includes this disclaimer. Strip only that
+  // known disclaimer before screening; actual bill payments remain rejected.
+  const transaction = message.replace(/(?:實際)?消費(?:資訊|金額|明細)?[，,、\s]*以(?:信用卡)?帳單為準/g, '');
+  if (/驗證碼|一次性密碼|動態密碼|\bOTP\b|取消|退款|退貨|失敗|未成功|不成功|未完成|尚未|婉拒|拒絕|預授權|預借現金|繳款|繳費通知|帳單|還款|匯款|轉帳|提款|提領|累計|累積|分期|昨日|昨天|refund|declined|verification|pending/i.test(transaction)) throw new Error('這不是可直接入帳的成功消費通知，請手動確認');
   if (/(?:USD|US\$|JPY|HKD|CNY|RMB|EUR|GBP|AUD|CAD|SGD|KRW|THB|VND|CHF|NZD|INR|PHP|美元|美金|日圓|日幣|港幣|人民幣|歐元|英鎊|外幣|外匯)/i.test(message)) throw new Error('外幣通知不自動換算，請手動記帳');
   if (!/消費|刷卡|交易|扣款|purchase|spent/i.test(message)) throw new Error('找不到成功消費資訊，未記帳');
   const number = '(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d{1,2})?';
@@ -158,8 +163,9 @@ export function parseBankText(text: string, rule: Pick<BankRule,'bank'|'last4'>,
   if (!new RegExp(`${currency}\\s*${number}|${number}\\s*元`, 'i').test(message)) throw new Error('通知缺少新臺幣金額標示，未記帳');
   const fullDate = message.match(/(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})(?:日)?/);
   const shortDate = fullDate ? null : message.match(/(?:於|在|\s)(\d{1,2})\/(\d{1,2})(?!\d)/);
+  const shortYear = +today.slice(0,4) - Number(!!shortDate && today.slice(5,7) === '01' && shortDate[1] === '12');
   const date = fullDate ? checkedDate(+fullDate[1], +fullDate[2], +fullDate[3])
-    : shortDate ? checkedDate(+today.slice(0,4), +shortDate[1], +shortDate[2]) : today;
+    : shortDate ? checkedDate(shortYear, +shortDate[1], +shortDate[2]) : today;
   const merchant = message.match(/(?:於|在)\s*[「『"]([^」』"\n]{1,60})[」』"]/)
     || message.match(/(?:於|在)\s*([^，,。；;\n]{1,40}?)\s*(?:消費|刷卡|交易)/)
     || message.match(/(?:商店|商家|店家|交易商店|消費店家)[：:]\s*([^，,。；;\n]{1,40})/);

@@ -8,7 +8,7 @@ import { utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
 import { AccountSyncSettings } from './AccountSyncSettings';
 
-export function BankImport({ input, onClose, onGroup }: { input: { request?: BankRequest; error?: string }; onClose: () => void; onGroup: (group: Group, name: string) => void }) {
+export function BankImport({ input, onClose, onGroup, onSaved }: { input: { request?: BankRequest; error?: string }; onClose: () => void; onGroup: (group: Group, name: string, recordDate?: string) => void; onSaved: (message: string) => void }) {
   const [prepared, setPrepared] = useState<PreparedBankEntry | null>(null);
   const [error, setError] = useState(input.error || '');
   const [message, setMessage] = useState('');
@@ -21,7 +21,8 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
     setBusy(true); setError('');
     saving.current ||= saveBankEntry(value, confirmed);
     return saving.current.then(result => {
-      onGroup(result.group, result.myName); setSaved(true); setMessage(result.message + (result.warning ? '\n' + result.warning : ''));
+      onGroup(result.group, result.myName, result.group.expenses.find(item => item.id === value.id)?.date || value.entry.date); setSaved(true); setMessage(result.message + (result.warning ? '\n' + result.warning : ''));
+      if (value.captureFirst && !result.warning) { onSaved(result.message); onClose(); }
     }).catch(error => { saving.current = null; setError(error instanceof Error ? error.message : '記帳未完成，請保留此畫面'); }).finally(() => setBusy(false));
   };
   useEffect(() => {
@@ -32,8 +33,11 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
     preparation.current.then(value => {
       if (!alive) return;
       setPrepared(value);
-      if (value.duplicate) { setSaved(true); setMessage('相同通知已處理，未重複新增'); setBusy(false); }
-      else if (value.rule.mode === 'auto' && !value.reviewReason) void commit(value);
+      if (value.duplicate) {
+        setSaved(true); setMessage('相同通知已處理，未重複新增'); setBusy(false);
+        if (value.captureFirst) { onGroup(value.group, value.myName, value.group.expenses.find(item => item.id === value.id)?.date || value.entry.date); onSaved('相同通知已處理，未重複新增'); onClose(); }
+      }
+      else if (value.automatic) void commit(value);
       else setBusy(false);
     }).catch(error => { if (alive) { setError(error instanceof Error ? error.message : '無法處理銀行通知'); setBusy(false); } });
     return () => { alive = false; };
@@ -43,7 +47,7 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
     {prepared && <div className="rounded-2xl border border-line bg-paper-2 p-4 text-sm leading-loose">
       <p>{prepared.group.name} · {prepared.rule.bank} · {cardSuffixLabel(prepared.rule.last4)} {prepared.rule.last4}</p>
       <p className="money text-2xl">NT$ {utils.fmt(prepared.entry.amount)}</p>
-      <p>{prepared.entry.desc}</p><p>{prepared.entry.date} · {categoryLabel(prepared.rule.category)}</p>
+      <p>{prepared.expense.desc}</p><p>{prepared.entry.date} · {categoryLabel(prepared.expense.category)}</p>
       {!isPersonalLedger(prepared.group) && <p>{prepared.rule.payer} 先付款；分攤：{prepared.rule.participants.join('、')}</p>}
       {!prepared.entry.dateInMessage && <p className="text-xs text-ink-3">通知未含日期，使用本次開啟捷徑的日期。</p>}
     </div>}

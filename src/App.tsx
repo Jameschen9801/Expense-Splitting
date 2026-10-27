@@ -310,13 +310,13 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     toastTimerRef.current = window.setTimeout(() => setToast(null), action ? 5000 : 2600);
   };
 
-  const enterGroup = (data: Group, name: string) => {
+  const enterGroup = (data: Group, name: string, recordDate?: string) => {
     setCurrentGroup(sync.merge(data));
     setMyName(name);
     setSettingsGroupName(data.name);
     setCurrentPage('group');
     setActiveTab('records');
-    setRecordMonth(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : ''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
+    setRecordMonth(isPersonalLedger(data) ? (recordDate || utils.todayStr()).slice(0,7) : ''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
     setFiltersOpen(false);
     storage.setLastGroup(data.code);
   };
@@ -1407,7 +1407,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
       {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
-      {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} />}</React.Fragment>}
+      {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} onSaved={showToast} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}

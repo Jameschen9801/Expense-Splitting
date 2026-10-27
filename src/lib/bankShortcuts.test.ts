@@ -32,6 +32,29 @@ test('辨識明確消費金額，不把餘額、日期和卡號當消費', () =>
   assert.equal(undated.date,today); assert.equal(undated.dateInMessage,false);
 });
 
+test('Richart 成功通知的帳單附註不誤擋，仍拒絕真實帳單扣款與失敗通知', () => {
+  const notice = '【信用卡消費通知】您的Richart卡(末四碼0123)於10/26-19:04刷卡消費約新臺幣58元，實際消費資訊以帳單為準，如有疑問請洽客服';
+  for (const bank of ['Richart', 'richart', '台新', '台新銀行', '臺新銀行']) {
+    assert.deepEqual(parseBankText(notice, { bank, last4: '0123' }, '2026-10-27'), { amount: 58, date: '2026-10-26', dateInMessage: true, desc: '銀行刷卡消費' });
+  }
+  for (const marker of ['帳單扣款', '退款', '交易失敗', 'OTP', '預授權']) {
+    assert.throws(() => parseBankText(notice + marker, { bank: '台新', last4: '0123' }, '2026-10-27'));
+  }
+  assert.throws(() => parseBankText(notice, { bank: '另一銀行', last4: '0123' }, '2026-10-27'));
+  assert.throws(() => parseBankText(notice, { bank: '台新', last4: '9999' }, '2026-10-27'));
+  assert.throws(() => parseBankText('Richart 信用卡優惠 消費新臺幣359元', { bank: 'Richart', last4: '0123' }, '2026-10-27'));
+  assert.throws(() => parseBankText('LINE錢包 付款完成 NT$85 商店名稱：早餐店', { bank: 'Richart', last4: '0123' }, '2026-10-27'));
+});
+
+test('跨年收到十二月消費仍記為上一年，通知不同分鐘保留不同防重複識別碼', async () => {
+  const rule = newBankRule({ ...input, bank: 'Richart' });
+  const text = '您的Richart卡末四碼1234於12/31-23:59刷卡消費約新臺幣58元，實際消費資訊以帳單為準';
+  assert.equal(parseBankText(text, rule, '2027-01-01').date, '2026-12-31');
+  const first = await bankExpenseId(rule, { channel: rule.channel, text });
+  assert.equal(await bankExpenseId(rule, { channel: rule.channel, text }), first);
+  assert.notEqual(await bankExpenseId(rule, { channel: rule.channel, text: text.replace('23:59', '23:58') }), first);
+});
+
 test('銀行和卡號都必須符合，其他數字不能代替卡號', () => {
   for (const text of [sample.replace('測試銀行','另一銀行'),sample.replace('1234','4321'), '測試銀行 卡號4321 消費NT$1234', '測試銀行 信用卡12345 消費NT$100', '測試銀行 消費NT$100 電話1234', '測試銀行 信用卡消費授權碼1234 消費NT$100', '測試銀行 卡號不明 消費金額1234元']) {
     assert.throws(() => parseBankText(text,input,today));

@@ -1,11 +1,12 @@
-import { bankExpense, bankExpenseId, resolveBankRule, rememberBankReceipt, type BankRequest, type BankRule, type BankEntry } from './bankShortcuts';
+import { bankExpenseId, resolveBankRule, rememberBankReceipt, type BankRequest, type BankRule, type BankEntry } from './bankShortcuts';
 import { ensureDeviceIdentity, fetchGroupOnce } from './firebase';
 import { sync } from './sync';
-import { storage, utils } from './utils';
+import { storage } from './utils';
 import type { Group } from '../types';
 import { accountSync } from './accountSync';
+import { bankCapture } from './bankCapture';
 
-export type PreparedBankEntry = { request: BankRequest; rule: BankRule; entry: BankEntry; id: string; group: Group; myName: string; duplicate: boolean; reviewReason: string };
+export type PreparedBankEntry = { request: BankRequest; rule: BankRule; entry: BankEntry; id: string; group: Group; myName: string; duplicate: boolean } & ReturnType<typeof bankCapture>;
 async function availableGroup(code: string) {
   const cached = storage.getGroup(code);
   if (typeof navigator !== 'undefined' && !navigator.onLine && cached) return sync.merge(cached);
@@ -25,33 +26,30 @@ function localMembership(group: Group, uid: string) {
   return local.myName;
 }
 export async function prepareBankEntry(request: BankRequest): Promise<PreparedBankEntry> {
-  await accountSync.start();
-  if (accountSync.getSnapshot().email) await accountSync.refresh();
+  if (typeof navigator === 'undefined' || navigator.onLine) {
+    await accountSync.start();
+    if (accountSync.getSnapshot().email) await accountSync.refresh();
+  }
   const {rule,entry} = resolveBankRule(localStorage, request);
   const [id, uid] = await Promise.all([bankExpenseId(rule, request), ensureDeviceIdentity()]);
   const group = await availableGroup(rule.groupCode);
   const myName = localMembership(group, uid);
-  bankExpense(rule, entry, id, group);
   const duplicate = rule.seen.includes(id) || group.expenses.some(item => item.id === id) || !!group.history?.['m' + id];
-  const nearDuplicate = group.expenses.some(item => item.amount === entry.amount && item.desc === entry.desc && item.date === entry.date && item.payer === rule.payer && Math.abs(Date.now() - item.createdAt) < 120000);
-  const reviewReason = !entry.dateInMessage ? '通知未含消費日期，請核對日期後新增'
-    : entry.date !== utils.todayStr() ? '通知不是今天的消費，請核對日期後新增'
-    : entry.amount > rule.limit ? '超過自動入帳上限，請確認後新增'
-    : nearDuplicate && !duplicate ? '短時間內已有相似費用，請確認是否為另一筆消費' : '';
-  return { request, rule, entry, id, group, myName, duplicate, reviewReason };
+  return { request, rule, entry, id, group, myName, duplicate, ...bankCapture(rule, entry, id, group, duplicate) };
 }
 export async function saveBankEntry(prepared: PreparedBankEntry, confirmed = false) {
   const current = await prepareBankEntry(prepared.request);
   if (current.duplicate) return { group: current.group, myName: current.myName, message: '這份通知已處理，未重複新增' };
   const config = (rule: BankRule) => JSON.stringify({ ...rule, seen: [] });
   if (JSON.stringify(current.entry) !== JSON.stringify(prepared.entry) || config(current.rule) !== config(prepared.rule)) throw new Error('規則或日期已更新，請重新開啟捷徑並確認');
-  if (!confirmed && (current.rule.mode !== 'auto' || current.reviewReason)) throw new Error(current.reviewReason || '此規則需要確認後新增');
-  const expense = bankExpense(current.rule, current.entry, current.id, current.group);
+  if (!confirmed && !current.automatic) throw new Error(current.reviewReason || '此規則需要確認後新增');
+  const expense = current.expense;
   const uid = await ensureDeviceIdentity();
   sync.enqueue(current.group.code, { type: 'expense.put', expense, meta: { id: 'm' + current.id, actor: current.myName, actorUid: uid, at: Date.now(), expected: null } });
   const merged = sync.merge(current.group);
   let warning = '';
   try { storage.saveGroup(merged.code, merged); rememberBankReceipt(localStorage, current.rule.id, current.id); }
   catch { warning = '紀錄已保存在待同步佇列，但顯示快取或通知防重複設定暫時無法更新。請勿清除網站資料。'; }
-  return { group: merged, myName: current.myName, message: sync.getStatus(merged.code).connected ? '已儲存，將自動同步至帳本' : '已離線保存，重新連線後自動同步', warning };
+  const message = sync.getStatus(merged.code).connected ? '已保存，正在同步至帳本' : '已離線保存，連線後自動同步';
+  return { group: merged, myName: current.myName, message: message + (current.captureFirst ? '；說明與分類可稍後補' : ''), warning };
 }
