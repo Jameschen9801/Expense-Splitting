@@ -7,6 +7,8 @@ import { reportBankDelivery } from './bankDelivery';
 export const bankRulesKey = 'warikan_bank_rules_v1';
 export const bankBridgeKey = 'warikan_bank_bridge_v1';
 export const bankShortcutName = '銀行通知記帳';
+export const bankNotificationShortcutName = 'Richart 通知自動化';
+export const bankNotificationShortcutInstallUrl = 'https://www.icloud.com/shortcuts/bb42192198bf423183c8361030091878';
 export const bankSetupMarker = 'expense-bank-setup:';
 export const cardSuffixLabel = (suffix: string) => `末${suffix.length}碼`;
 export type BankRule = {

@@ -1,0 +1,81 @@
+{
+  "WFWorkflowName": "Richart 通知自動化",
+  "WFWorkflowClientVersion": "5037.111",
+  "WFWorkflowMinimumClientVersion": 900,
+  "WFWorkflowMinimumClientVersionString": "900",
+  "WFWorkflowIcon": {
+    "WFWorkflowIconStartColor": 1239869439,
+    "WFWorkflowIconGlyphNumber": 61440
+  },
+  "WFWorkflowHasShortcutInputVariables": false,
+  "WFWorkflowOutputContentItemClasses": [],
+  "WFWorkflowInputContentItemClasses": [
+    "WFStringContentItem"
+  ],
+  "WFWorkflowHasOutputFallback": false,
+  "WFWorkflowImportQuestions": [],
+  "WFWorkflowTypes": [
+    "WFWorkflowTypeShowInSearch"
+  ],
+  "WFQuickActionSurfaces": [],
+  "WFWorkflowTriggers": [
+    {
+      "WFTriggerIdentifier": "WFNotificationTrigger",
+      "WFTriggerUUID": "5A5BBB76-5244-4762-A0FB-1EC8659A9A3A",
+      "WFTriggerSerializedParameters": {
+        "SelectedApps": [
+          {
+            "BundleIdentifier": "tw.com.taishinbank.richart",
+            "Name": "Richart",
+            "TeamIdentifier": "GWE2S42W9T"
+          }
+        ]
+      }
+    }
+  ],
+  "WFWorkflowActions": [
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "7F333008-071A-4D4C-AED4-1FAE7220DD60",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "TriggerIdentifier": "WFNotificationTrigger",
+                "Type": "TriggerOutput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Body"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.runworkflow",
+      "WFWorkflowActionParameters": {
+        "UUID": "3D44A342-E203-4461-8C17-E73EEA9EB7D8",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "7F333008-071A-4D4C-AED4-1FAE7220DD60",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFWorkflow": {
+          "workflowName": "銀行通知記帳",
+          "isSelf": false
+        },
+        "WFWorkflowName": "銀行通知記帳"
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createHmac } from 'node:crypto';
-import { bankBridgeKey, bankExpense, bankExpenseId, bankExpenseIdentity, hasBankReceipt, bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, bankSetupMarker, newBankRule, parseBankRequest, parseBankText, readBankRules, rememberBankReceipt, resolveBankRule, saveBankRules, takeBankRequest } from './bankShortcuts';
+import { bankBridgeKey, bankExpense, bankExpenseId, bankExpenseIdentity, hasBankReceipt, bankRulesKey, bankShortcutName, bankNotificationShortcutName, bankNotificationShortcutInstallUrl, bankShortcutPrefix, bankShortcutSetupUrl, bankSetupMarker, newBankRule, parseBankRequest, parseBankText, readBankRules, rememberBankReceipt, resolveBankRule, saveBankRules, takeBankRequest } from './bankShortcuts';
 import { categories, categoryOf, defaultExpenseCategory } from './categories';
 import { createBackup } from './backup';
 import type { Expense, Group } from '../types';
@@ -210,6 +210,26 @@ test('原生捷徑不要求重填資料，並只儲存及開啟本網站的合�
     assert.equal((bankSetupMarker+bad).match(patterns[0]),null);
     assert.equal(bad.match(patterns[1]),null);
   }
+});
+
+test('通知來源範本已帶入 Richart 觸發條件，僅傳內文給既有記帳捷徑', () => {
+  const workflow = JSON.parse(readFileSync(new URL('../../scripts/ios-richart-trigger.json', import.meta.url), 'utf8'));
+  assert.equal(workflow.WFWorkflowName, bankNotificationShortcutName);
+  assert.match(bankNotificationShortcutInstallUrl, /^https:\/\/www\.icloud\.com\/shortcuts\/[a-f0-9]{32}$/);
+  assert.deepEqual(workflow.WFWorkflowImportQuestions, []);
+  assert.equal(workflow.WFWorkflowTriggers.length, 1);
+  const trigger = workflow.WFWorkflowTriggers[0];
+  assert.equal(trigger.WFTriggerIdentifier, 'WFNotificationTrigger');
+  assert.deepEqual(trigger.WFTriggerSerializedParameters.SelectedApps, [{ BundleIdentifier: 'tw.com.taishinbank.richart', Name: 'Richart', TeamIdentifier: 'GWE2S42W9T' }]);
+  assert.deepEqual(workflow.WFWorkflowActions.map((action: any) => action.WFWorkflowActionIdentifier), ['is.workflow.actions.gettext', 'is.workflow.actions.runworkflow']);
+  const [text, run] = workflow.WFWorkflowActions.map((action: any) => action.WFWorkflowActionParameters);
+  const value = text.WFTextActionText.Value;
+  assert.equal(value.string, '\ufffc');
+  assert.deepEqual(value.attachmentsByRange['{0, 1}'], { TriggerIdentifier: 'WFNotificationTrigger', Type: 'TriggerOutput', Aggrandizements: [{ Type: 'WFPropertyVariableAggrandizement', PropertyName: 'Body' }] });
+  assert.equal(run.WFWorkflowName, bankShortcutName);
+  assert.equal(run.WFWorkflow.workflowName, bankShortcutName);
+  assert.equal(run.WFInput.Value.OutputUUID, text.UUID);
+  assert.doesNotMatch(JSON.stringify(workflow), /https?:|duopurse|supabase|secret|bank-entry|cardaily/i);
 });
 
 test('規則只保存在本機，不進入一般帳目備份；儲存失敗不偽裝成功', () => {

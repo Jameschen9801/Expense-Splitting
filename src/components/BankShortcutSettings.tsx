@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ExpenseCategory, Group } from '../types';
 import { categories, categoryLabel, defaultExpenseCategory } from '../lib/categories';
-import { bankRulesKey, bankShortcutName, bankShortcutPrefix, bankShortcutSetupUrl, cardSuffixLabel, newBankRule, parseBankText, readBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
+import { bankRulesKey, bankNotificationShortcutName, bankNotificationShortcutInstallUrl, bankShortcutPrefix, bankShortcutSetupUrl, cardSuffixLabel, newBankRule, parseBankText, readBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
 import { storage, utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
 import { accountSync } from '../lib/accountSync';
@@ -151,19 +151,21 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     </details>
     <section className="rounded-2xl border border-line bg-paper-2 p-4 mt-5" aria-labelledby="bank-automation-heading">
       <p className="text-xs text-ink-3 mb-2">首次需在 iPhone 完成</p>
-      <h4 id="bank-automation-heading" tabIndex={-1} className="text-base font-medium">3. 設定通知自動化</h4>
-      <p className="text-sm text-ink-2 leading-relaxed mt-3">自動化清單是空的，就還沒有接上通知觸發。這次使用 Richart 作為來源，先完成上方銀行規則與捷徑綁定，再用下方按鈕開啟設定。</p>
-      <p className="text-sm font-medium mt-3">通知來源：Richart</p>
-      <a className="btn btn-primary w-full mt-4" href={'shortcuts://open-shortcut?name=' + encodeURIComponent(bankShortcutName)}>開啟銀行捷徑設定</a>
-      <p className="text-xs text-ink-3 leading-relaxed mt-2">按鈕會開啟已加入的「銀行通知記帳」。通知來源與自動化啟用，需由你在 iPhone 選擇並儲存。</p>
+      <h4 id="bank-automation-heading" tabIndex={-1} className="text-base font-medium">3. 加入 Richart 通知自動化</h4>
+      <p className="text-sm text-ink-2 leading-relaxed mt-3">第二支捷徑已帶入「收到 Richart 通知」的觸發條件，也已接好銀行記帳。先完成上方綁定，再加入這支範本，不用從空白自動化重新設定。</p>
+      <p className="text-sm font-medium mt-3">已預設：Richart → 銀行通知記帳</p>
+      <a className="btn btn-primary w-full mt-4" href={bankNotificationShortcutInstallUrl} target="_blank" rel="noopener noreferrer">加入 Richart 通知自動化</a>
+      <a className="btn w-full mt-3" href={'shortcuts://open-shortcut?name=' + encodeURIComponent(bankNotificationShortcutName)}>已加入，開啟啟用設定</a>
+      <p className="text-xs text-ink-3 leading-relaxed mt-2">需要 iOS 27。匯入後仍要在這支 iPhone 開啟「自動化」，點安裝按鈕不代表已啟用。</p>
       <ol className="text-sm leading-relaxed space-y-3 pl-5 list-decimal mt-4">
-        <li>在「銀行通知記帳」點「編輯 → 自動化」，新增「通知」觸發條件。</li>
-        <li>銀行 App 設為「Richart」，接收它的消費通知。Richart Life 不用另外建立自動化。</li>
-        <li>讓通知文字傳入「銀行通知記帳」，內容需含銀行名稱、卡號末 4 碼及新臺幣金額。若需設定「執行捷徑」動作，選「銀行通知記帳」，並將輸入設為通知文字。</li>
-        <li>儲存並啟用自動化。需要鎖定時執行，可在捷徑「編輯 → 資訊 → 隱私」檢查「允許鎖定時執行」；開啟 Safari 仍可能需要解鎖。</li>
+        <li>按「加入 Richart 通知自動化」，到 Apple 頁面確認加入捷徑。</li>
+        <li>回來按「已加入，開啟啟用設定」，在「Richart 通知自動化」按「編輯」。</li>
+        <li>通知條件與 Richart 已填好。在觸發條件旁的展開選單，開啟「自動化」並儲存。Richart Life 不用另外設定。</li>
+        <li>需要鎖定時執行，可在捷徑「編輯 → 資訊 → 隱私」檢查「允許鎖定時執行」。目前保存仍可能開啟 Safari，鎖定時仍需實機驗證。</li>
       </ol>
       <p className="text-sm leading-relaxed mt-4">設定後，請用下一次實際通知確認觸發。回到 Safari 查看上方「最近一次捷徑接收」，有新的接收時間才表示通知已送進網站。</p>
-      <p className="text-xs text-ink-3 leading-relaxed mt-2">相同 Richart 消費通知重送會略過；即使多了 Richart Life 標題或換行也不再新增。App 無法讀取或代為建立手機上的自動化，因此不會只因按過按鈕就顯示設定完成。</p>
+      <p className="text-xs text-ink-3 leading-relaxed mt-2">範本只將 Richart 通知內文傳給「銀行通知記帳」，由你已儲存的銀行與末 4 碼規則檢查。相同消費重送會略過。App 無法讀取手機上的啟用狀態，請以實際接收結果確認。</p>
+      <details className="expense-more mt-3"><summary>安裝頁無法開啟？</summary><p className="text-xs text-ink-3 leading-relaxed py-3">可下載 ZIP 備用檔，在「檔案」解壓後開啟「Richart 通知自動化.shortcut」。加入後仍需依上方步驟開啟自動化。</p><a className="btn w-full mb-3" href={import.meta.env.BASE_URL + 'shortcuts/richart-notification-source.zip'} download="Richart 通知自動化.zip">下載通知來源 ZIP</a></details>
       <a className="inline-block text-sm underline mt-3" href="https://support.apple.com/en-ng/guide/shortcuts/apdfbdbd7123/ios" target="_blank" rel="noreferrer">Apple 自動化設定說明</a>
     </section>
     <details className="expense-more mt-4"><summary>通知入帳與資料保存方式</summary><p className="text-sm leading-relaxed py-3">{personal ? '個人帳本收到有效消費後先保存在待確認區；可稍後一次處理，補好說明與分類再確認加入帳本。可先用「測試辨識」核對通知格式，測試不會記帳。' : '先以「先確認再新增」試跑，核對帳本、日期和金額。啟用自動新增前需完成測試與同意設定。'}</p><p className="text-xs text-ink-3 leading-relaxed pb-3">開啟帳本同步後，銀行規則保存在自己的私人同步空間；未開啟時僅存在此瀏覽器。原始通知不保存或上傳。完全相同通知會去重；若確為另一筆相同交易，請手動新增。</p></details>
