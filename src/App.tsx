@@ -37,11 +37,14 @@ import { HistoryLog } from './components/HistoryLog';
 import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
 import { BankSetup } from './components/BankSetup';
+import { BankShortcutSettings } from './components/BankShortcutSettings';
+import { DeleteLedgerDialog } from './components/DeleteLedgerDialog';
 import { takeBankRequest, type BankInput } from './lib/bankShortcuts';
 import { fingerprint } from './lib/audit';
 import { categories, categoryLabel, categoryOf, defaultExpenseCategory } from './lib/categories';
 import { appUpdates } from './lib/appUpdates';
 import { isPersonalLedger, expenseFormForLedger } from './lib/ledgers';
+import { cleanupDeletedLedger } from './lib/ledgerDeletion';
 import type { ExpenseForm, TransferForm } from './lib/drafts';
 import {
   joinGroupInCloud,
@@ -51,6 +54,8 @@ import {
   validMemberName,
   createGroupInCloud,
   fetchGroupOnce,
+  deletePersonalLedgerInCloud,
+  personalLedgerWasDeleted,
   subscribeToConnection,
   subscribeToGroup,
 } from './lib/firebase';
@@ -105,6 +110,11 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [recordCategory, setRecordCategory] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dataSettings, setDataSettings] = useState(false);
+  const [bankSettings, setBankSettings] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
+  const [isDeletingLedger, setIsDeletingLedger] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleteLock = useRef(false);
   const [deviceUid, setDeviceUid] = useState('');
   const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
 
@@ -264,7 +274,11 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
           } else {
             setSyncState('error');
           }
-        }, () => { if (!disposed) setSyncState('error'); })
+        }, () => { if (!disposed) setSyncState('error'); }, () => {
+          // Firebase may emit this tab's optimistic deletion before the server
+          // accepts it. The local delete handler waits for the acknowledgement.
+          if (!disposed && !deleteLock.current) finishLedgerRemoval(currentGroup.code);
+        })
         .then(stopListening => {
           if (disposed) stopListening();
           else unsubscribe = stopListening;
@@ -788,6 +802,47 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     showToast('已離開群組');
   };
 
+  function finishLedgerRemoval(code: string) {
+    sync.forgetGroup(code);
+    let message = '個人帳本已刪除';
+    try { cleanupDeletedLedger(localStorage, code); }
+    catch { message = '雲端帳本已刪除；本機清理未完成，請重新載入 App'; }
+    setMyGroups(storage.getMyGroups().filter(group => group.code !== code));
+    setDeleteTarget(target => target?.code === code ? null : target);
+    if (groupCodeRef.current === code) {
+      setCurrentGroup(null); setMyName(''); setCurrentPage('home');
+      setDataSettings(false); setBankSettings(false);
+      setModals({createGroup:false,joinGroup:false,addRecord:false,groupSettings:false,expenseDetail:false,transferDetail:false});
+    }
+    showToast(message);
+  }
+
+  const deletePersonalLedger = async () => {
+    const target = deleteTarget;
+    if (!target || deleteLock.current) return;
+    if (!navigator.onLine || !sync.getStatus(target.code).connected) { setDeleteError('需要連線才能刪除，請稍後再試'); return; }
+    deleteLock.current = true; setIsDeletingLedger(true); setDeleteError('');
+    let release: (() => void) | undefined;
+    try {
+      release = sync.beginDeletion(target.code);
+      await sync.flush(target.code);
+      if (sync.getStatus(target.code).pending > 0) throw new Error('還有資料尚未同步，請先處理同步問題，再刪除帳本');
+      await deletePersonalLedgerInCloud(target.code);
+      finishLedgerRemoval(target.code);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      setDeleteError(/permission|denied/i.test(message) ? '此裝置沒有刪除這本帳本的權限' : message || '尚未確認刪除結果，請保持連線後重試');
+      void personalLedgerWasDeleted(target.code).then(deleted => { if (deleted) finishLedgerRemoval(target.code); }).catch(() => {});
+    } finally {
+      release?.(); deleteLock.current = false; setIsDeletingLedger(false);
+    }
+  };
+
+  const openBankSettings = () => {
+    toggleModal('groupSettings', false);
+    setBankSettings(true);
+  };
+
   const balances = useMemo(() => currentGroup ? utils.calcBalances(currentGroup) : {}, [currentGroup]);
   const settlements = useMemo(() => utils.calcSettlements(balances), [balances]);
 
@@ -946,7 +1001,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} />}
               {activeTab === 'records' && (
                 <section>
-                  {personal && <div className="personal-overview"><div className="stat-label">{recordMonth === utils.todayStr().slice(0,7) ? '本月支出' : recordMonth ? recordMonth.replace('-',' / ') + ' 支出' : '累計支出'}</div><div className="money stat-total"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(personalTotal))}</div></div>}
+                  {personal && <div className="personal-overview"><div className="stat-label">{recordMonth === utils.todayStr().slice(0,7) ? '本月支出' : recordMonth ? recordMonth.replace('-',' / ') + ' 支出' : '累計支出'}</div><div className="money stat-total"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(personalTotal))}</div><button type="button" className="btn btn-sm mt-4 w-full" onClick={openBankSettings}><Wallet size={16} aria-hidden="true" />銀行自動記帳設定</button></div>}
                   <div className="records-heading">
                     <h2>明細記錄<span className="record-count">{visibleRecordCount} 筆</span></h2>
                     <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
@@ -1224,6 +1279,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
 
         {modals.groupSettings && (
           <Modal title={personal ? '帳本設定' : '群組設定'} onClose={() => toggleModal('groupSettings', false)}>
+            <button type="button" className="btn btn-primary w-full mb-4" onClick={openBankSettings}>銀行與卡片設定</button>
             <p className="text-xs text-ink-3 leading-relaxed mb-4">{personal ? '這是只有你能存取的個人帳本，可記錄日常支出並查看分類統計。請保留此 App 的網站資料並定期備份；換裝置或瀏覽器時，雲端存取身分需由管理者協助驗證。' : currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
             {!personal && <p className="text-xs text-ink-3 mb-4 break-all">此裝置識別碼：{deviceUid || '連線後取得'}<br />裝置身分不包含在備份內。請勿清除網站資料，以免失去群主綁定。</p>}
             <div className="field">
@@ -1239,6 +1295,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               <button className="btn btn-primary btn-sm" onClick={saveGroupSettings} disabled={isSaving || (!!currentGroup?.security && !isOwner)}>{isSaving ? '同步中…' : '儲存'}</button>
             </div>
             {currentGroup && <HistoryLog group={currentGroup} />}
+            {personal && isOwner && <div className="ledger-delete-entry"><p>刪除會移除這本個人帳本與所有記錄，下一步會再次確認。</p><button type="button" className="btn btn-danger w-full" onClick={() => { setDeleteError(''); setDeleteTarget(currentGroup); toggleModal('groupSettings', false); }}>刪除個人帳本</button></div>}
           </Modal>
         )}
 
@@ -1336,7 +1393,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
         )}
       </>
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
-      {bankInputs[0] && !dataSettings && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} />}</React.Fragment>}
+      {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
+      {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
+      {bankInputs[0] && !dataSettings && !bankSettings && !deleteTarget && !Object.values(modals).some(Boolean) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={enterGroup} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">
         <span className="text-xs">有新版可更新，待同步資料會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button>
       </div>}

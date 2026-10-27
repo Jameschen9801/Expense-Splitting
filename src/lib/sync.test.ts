@@ -12,6 +12,29 @@ function memoryStorage() {
 const group: Group = { code: '123456', name: '測試', members: ['A', 'B'], expenses: [], transfers: [], createdAt: 1 };
 const expense: Expense = { id: 'e1', desc: '晚餐', amount: 100, payer: 'A', participants: ['A', 'B'], splitMode: 'equal', date: '2026-10-02', createdAt: 2 };
 
+test('刪除期間阻擋新記帳，但仍能清空既有同步；取消刪除後恢復',async()=>{
+  const store=memoryStorage();
+  const engine=createSyncEngine({getStorage:()=>store,saveGroup:()=>{},send:async(code,change)=>applyChange({...group,code},change)});
+  engine.enqueue(group.code,{type:'expense.put',expense});
+  const release=engine.beginDeletion(group.code);
+  assert.throws(()=>engine.enqueue(group.code,{type:'expense.put',expense}),/正在刪除/);
+  engine.enqueue('999999',{type:'group.rename',name:'其他帳本'});
+  engine.setConnected(true);assert.equal(await engine.flush(group.code),true);
+  assert.equal(engine.getStatus(group.code).pending,0);
+  release();assert.doesNotThrow(()=>engine.enqueue(group.code,{type:'expense.put',expense}));
+});
+
+test('另一分頁刪除帳本後，延遲的同步回覆不能把舊帳本寫回快取',async()=>{
+  const store=memoryStorage();let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});const saved:Group[]=[];
+  const engine=createSyncEngine({getStorage:()=>store,saveGroup:(_,value)=>saved.push(value),send:async()=>{await gate;return group;}});
+  engine.enqueue(group.code,{type:'expense.put',expense});engine.setConnected(true);
+  const pending=engine.flush(group.code);await Promise.resolve();
+  engine.forgetGroup(group.code);release();
+  assert.equal(await pending,false);assert.equal(saved.length,0);
+  assert.throws(()=>engine.enqueue(group.code,{type:'expense.put',expense}),/已刪除/);
+  assert.equal(await engine.flush(group.code),false);
+});
+
 test('重開 App 後離線新增、編輯、刪除的順序仍保留，且不混入別的群組', () => {
   const store = memoryStorage();
   const before = new Outbox(store);

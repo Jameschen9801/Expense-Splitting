@@ -38,6 +38,18 @@ test('銀行和卡號都必須符合，其他數字不能代替卡號', () => {
   }
 });
 
+test('末五碼可保留開頭的零，末四碼與末五碼不得部分比對',()=>{
+  const five={...input,last4:'01234'};
+  const notice='測試銀行 信用卡末五碼01234 於2026/10/27 消費 NT$125';
+  assert.equal(parseBankText(notice,five).amount,125);
+  assert.equal(parseBankText(notice.replace('末五碼','末5碼'),five).amount,125);
+  assert.equal(newBankRule(five).last4,'01234');
+  assert.throws(()=>parseBankText(notice,input));
+  assert.throws(()=>parseBankText(sample,five));
+  assert.throws(()=>newBankRule({...input,last4:'001234'}));
+  const store=memory(),rule=newBankRule(five);saveBankRules(store,[rule]);assert.deepEqual(readBankRules(store),[rule]);
+});
+
 test('驗證碼、退款、失敗、外幣、預授權和非消費通知全部拒絕', () => {
   for (const marker of ['驗證碼','OTP','一次性密碼','取消','退款','退貨','失敗','未成功','尚未完成','不成功','婉拒','預授權','帳單扣款','轉帳','累計','分期','pending','昨日','USD','US$','JPY','SGD','AUD','日圓','港幣']) {
     assert.throws(() => parseBankText(sample + marker,input,today), marker);

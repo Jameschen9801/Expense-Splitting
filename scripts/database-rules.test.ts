@@ -4,6 +4,7 @@ import { initializeTestEnvironment, assertFails, assertSucceeds, type RulesTestE
 import type { Group } from '../src/types';
 import { applyChange } from '../src/lib/outbox';
 import { cloudGroup } from '../src/lib/firebase';
+import { personalLedgerDeletionUpdate } from '../src/lib/ledgerDeletion';
 const cloud = (group: Group) => cloudGroup(group) as any;
 
 let env: RulesTestEnvironment;
@@ -115,6 +116,38 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('個人帳本刪除必須與防重建標記同時完成，只允許本人操作',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertSucceeds(privateRef().set(cloud({...personal,expenses:[personalExpense]})));
+  const patch=personalLedgerDeletionUpdate(personal,'owner',{'.sv':'timestamp'});
+  await assertFails(privateRef().remove());
+  await assertFails(env.authenticatedContext('owner').database().ref('deletedPersonalLedgers/654321').set({ownerUid:'owner',deletedAt:{'.sv':'timestamp'}}));
+  await assertFails(env.authenticatedContext('stranger').database().ref().update(patch));
+  await assertFails(env.unauthenticatedContext().database().ref().update(patch));
+  await assertSucceeds(env.authenticatedContext('owner').database().ref().update(patch));
+  const deleted=await assertSucceeds(privateRef().get());
+  if (deleted.exists()) throw new Error('帳本及記錄仍存在');
+  await assertSucceeds(env.authenticatedContext('owner').database().ref('deletedPersonalLedgers/654321').get());
+  await assertFails(env.authenticatedContext('stranger').database().ref('deletedPersonalLedgers/654321').get());
+  await assertFails(env.authenticatedContext('owner').database().ref('deletedPersonalLedgers').get());
+});
+test('舊版、離線佇列與備份不能重建已刪除帳本或移除防重建標記',async()=>{
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertSucceeds(env.authenticatedContext('owner').database().ref().update(personalLedgerDeletionUpdate(personal,'owner',{'.sv':'timestamp'})));
+  await assertFails(privateRef().set(cloud(personal)));
+  await assertFails(privateRef().child('expenses/pe1').set(personalExpense));
+  await assertFails(env.unauthenticatedContext().database().ref('groups/654321').set({...personal,security:null}));
+  await assertFails(env.authenticatedContext('owner').database().ref('deletedPersonalLedgers/654321').remove());
+  await assertFails(env.authenticatedContext('owner').database().ref('deletedPersonalLedgers/654321/deletedAt').set(1));
+  await assertFails(env.authenticatedContext('stranger').database().ref('groups/654321').set(cloud({...personal,security:{...personal.security!,ownerUid:'stranger',users:{stranger:{name:'A',nameKey:'A',role:'owner'}},names:{A:'stranger'}}})));
+});
+test('新的刪除權限不允許刪除共用帳本或舊群組',async()=>{
+  await assertFails(owner().remove());
+  await assertFails(env.authenticatedContext('owner').database().ref().update({'groups/123456':null,'deletedPersonalLedgers/123456':{ownerUid:'owner',deletedAt:{'.sv':'timestamp'}}}));
+  const {security,...legacy}=group;
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456').set(legacy));
+  await assertFails(env.unauthenticatedContext().database().ref('groups/123456').remove());
+});
 test('個人帳本只能由建立者讀取，知道帳本代碼仍不能讀取明細或名稱',async()=>{
   await assertSucceeds(privateRef().set(cloud(personal)));
   await assertSucceeds(privateRef().get());

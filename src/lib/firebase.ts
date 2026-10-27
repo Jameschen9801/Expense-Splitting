@@ -4,6 +4,7 @@ import { withoutUndefined } from './firebaseData';
 import { applyCloudChange, type GroupChange } from './outbox';
 import { RecordConflictError, updatedRecord } from './audit';
 import { isPersonalLedger } from './ledgers';
+import { personalLedgerDeletionUpdate } from './ledgerDeletion';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -91,16 +92,50 @@ export const subscribeToGroup = (
   groupCode: string,
   onUpdate: (data: Group | null) => void,
   onError?: (error: Error) => void,
+  onDeleted?: () => void,
 ): Promise<Unsubscribe> => Promise.all([
   getDatabaseInstance(),
   import('firebase/database'),
-]).then(([database, { ref, onValue }]) => {
+]).then(([database, { ref, onValue, get }]) => {
   const groupRef = ref(database, 'groups/' + groupCode);
-  return onValue(groupRef, (snapshot) => {
+  let stopped = false;
+  const stop = onValue(groupRef, (snapshot) => {
     const data = snapshot.val();
+    if (!data && onDeleted) {
+      void get(ref(database, 'deletedPersonalLedgers/' + groupCode)).then(marker => {
+        if (stopped) return;
+        if (marker.val()?.ownerUid === deviceUid) onDeleted(); else onUpdate(null);
+      }).catch(() => { if (!stopped) onUpdate(null); });
+      return;
+    }
     onUpdate(data ? normalizeGroup(data as Group) : null);
   }, error => onError?.(error));
+  return () => { stopped = true; stop(); };
 });
+
+export const deletePersonalLedgerInCloud = async (code: string): Promise<void> => {
+  if (!/^\d{6}$/.test(code)) throw new Error('帳本代碼格式錯誤');
+  const [database, { ref, get, update, serverTimestamp }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
+  const markerRef = ref(database, 'deletedPersonalLedgers/' + code);
+  const group = await fetchGroupOnce(code);
+  if (!group) {
+    if ((await get(markerRef)).val()?.ownerUid === deviceUid) return;
+    throw new Error('這本帳本不存在，未執行刪除');
+  }
+  const changes = personalLedgerDeletionUpdate(group, deviceUid, serverTimestamp());
+  try { await update(ref(database), changes); }
+  catch (error) {
+    // An acknowledgement may be lost or another tab may finish the deletion first.
+    if ((await get(markerRef)).val()?.ownerUid === deviceUid) return;
+    throw error;
+  }
+};
+
+export const personalLedgerWasDeleted = async (code: string): Promise<boolean> => {
+  if (!/^\d{6}$/.test(code)) return false;
+  const [database, {ref,get}] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
+  return (await get(ref(database, 'deletedPersonalLedgers/' + code))).val()?.ownerUid === deviceUid;
+};
 
 // 一次性讀取群組資料（遠端加入用）
 export const fetchGroupOnce = async (groupCode: string): Promise<Group | null> => {

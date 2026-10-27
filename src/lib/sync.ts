@@ -14,6 +14,8 @@ export function createSyncEngine(dependencies: {
   const active = new Map<string, Promise<boolean>>();
   const failures = new Map<string, string>();
   const conflicts = new Map<string, { cloud: Group; targetId: string; change: GroupChange }>();
+  const deleting = new Set<string>();
+  const removed = new Set<string>();
   let connected = false;
   let version = 0;
 
@@ -32,6 +34,7 @@ export function createSyncEngine(dependencies: {
       if (value) sync.flushAll();
     },
     enqueue(code: string, change: GroupChange) {
+      if (deleting.has(code) || removed.has(code)) throw new Error('這本帳本正在刪除或已刪除，無法新增記錄');
       // Persist the intention BEFORE updating the UI or sending anything to Firebase.
       outbox().enqueue(code, change);
       failures.delete(code);
@@ -41,7 +44,16 @@ export function createSyncEngine(dependencies: {
     flushAll() {
       for (const code of new Set(outbox().list().map(item => item.groupCode))) void sync.flush(code);
     },
+    beginDeletion(code: string) {
+      if (deleting.has(code) || removed.has(code)) throw new Error('這本帳本正在刪除或已刪除');
+      deleting.add(code); notify();
+      return () => { deleting.delete(code); notify(); };
+    },
+    forgetGroup(code: string) {
+      removed.add(code); failures.delete(code); conflicts.delete(code); notify();
+    },
     resolveConflict(code: string, keep: 'cloud' | 'mine') {
+      if (deleting.has(code) || removed.has(code)) return;
       const conflict = conflicts.get(code);
       if (!conflict) return;
       const entityId = (change: GroupChange) => change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
@@ -59,6 +71,7 @@ export function createSyncEngine(dependencies: {
       if (connected) void sync.flush(code);
     },
     flush(code: string): Promise<boolean> {
+      if (removed.has(code)) return Promise.resolve(false);
       const running = active.get(code);
       if (running) return running;
       if (!connected) return Promise.resolve(false);
@@ -69,11 +82,12 @@ export function createSyncEngine(dependencies: {
         notify();
         let sending: PendingChange | undefined;
         try {
-          while (connected) {
+          while (connected && !removed.has(code)) {
             const item = outbox().list().find(item => item.groupCode === code);
             if (!item) return true;
             sending = item;
             const group = await dependencies.send(code, item.change);
+            if (removed.has(code)) return false;
             // Keep newer queued edits over the server acknowledgement.
             dependencies.saveGroup(code, overlayPending(group, outbox().list().filter(pending => pending.id !== item.id)));
             outbox().acknowledge(item.id);
@@ -81,6 +95,7 @@ export function createSyncEngine(dependencies: {
           }
           return false;
         } catch (error) {
+          if (removed.has(code)) return false;
           if (error instanceof RecordConflictError && sending) {
             conflicts.set(code, { cloud: error.cloud, targetId: error.targetId, change: sending.change });
             failures.set(code, error.message);

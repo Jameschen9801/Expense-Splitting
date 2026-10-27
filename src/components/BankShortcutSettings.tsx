@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ExpenseCategory, Group } from '../types';
 import { categories, categoryLabel, defaultExpenseCategory } from '../lib/categories';
-import { bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, newBankRule, parseBankText, readBankRules, saveBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
+import { bankRulesKey, bankShortcutPrefix, bankShortcutSetupUrl, cardSuffixLabel, newBankRule, parseBankText, readBankRules, saveBankRules, type BankRule, type BankEntry } from '../lib/bankShortcuts';
 import { storage, utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
 
@@ -81,7 +81,7 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
   };
   return <section className="settings-section bank-shortcut-settings">
     <h3 className="settings-heading">iOS 銀行捷徑記帳</h3>
-    <p className="text-sm text-ink-2 leading-relaxed">在 App 填好銀行、卡號末四碼與{personal ? '個人帳本' : '記帳帳本'}，再加入捷徑。設定會自動帶入，不用到捷徑裡重填。</p>
+    <p className="text-sm text-ink-2 leading-relaxed">在 App 填好銀行、卡號末碼與{personal ? '個人帳本' : '記帳帳本'}，再加入捷徑。支援通知中的末 4 或 5 碼，不用到捷徑裡重填。</p>
     <details className="expense-more mt-3"><summary>使用前須知</summary><div className="text-xs text-ink-2 leading-relaxed py-3">
       <p>這是「捷徑開啟網站後記帳」，不是關閉 App 也持續監聽通知。開啟網站可能需要解鎖手機。</p>
       <p className="mt-2">{personal ? '個人帳本綁定建立時的 App 身分。若捷徑開啟到不同的 Safari 身分，請改在該 Safari 建立個人帳本與規則；不要清除原 App 資料。' : '主畫面 App 與 Safari 可能使用不同儲存與裝置身分。請在捷徑會開啟的同一個 Safari 加入群組、設定規則。不要清除原 App 資料。'}</p>
@@ -91,8 +91,8 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     <h4 className="text-sm font-medium mt-5">1. 設定銀行與卡片</h4>
     {group && !formOpen && <button type="button" className="btn btn-primary w-full mt-4" onClick={() => openForm()}>新增銀行規則</button>}
     {group && formOpen ? <div className="bank-rule-form mt-4">
-      <div><label className="field-label" htmlFor="bank-keyword">銀行關鍵字</label><input id="bank-keyword" value={bank} maxLength={40} placeholder="通知中會出現的銀行名稱" onChange={event => setBank(event.target.value)} autoComplete="off" /></div>
-      <div><label className="field-label" htmlFor="bank-last4">卡號末四碼</label><input id="bank-last4" value={last4} maxLength={4} inputMode="numeric" pattern="[0-9]{4}" placeholder="只填末四碼，不填完整卡號" onChange={event => setLast4(event.target.value.normalize('NFKC').replace(/\D/g,''))} autoComplete="off" /></div>
+      <div><label className="field-label" htmlFor="bank-keyword">銀行關鍵字</label><input type="text" id="bank-keyword" value={bank} maxLength={40} placeholder="通知中會出現的銀行名稱" onChange={event => setBank(event.target.value)} autoComplete="off" /></div>
+      <div><label className="field-label" htmlFor="bank-last4">卡號末碼（4 或 5 碼）</label><input type="text" id="bank-last4" value={last4} maxLength={5} inputMode="numeric" pattern="[0-9]{4,5}" placeholder="依通知顯示填 4 或 5 碼，不填完整卡號" onChange={event => setLast4(event.target.value.normalize('NFKC').replace(/\D/g,''))} autoComplete="off" /></div>
       <div className={personal ? '' : 'grid grid-cols-2 gap-3'}>
         <div><label className="field-label" htmlFor="bank-category">入帳分類</label><select id="bank-category" value={category} onChange={event => setCategory(event.target.value as ExpenseCategory)}>{categories.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></div>
         {!personal && <div><label className="field-label" htmlFor="bank-payer">誰先付款</label><select id="bank-payer" value={payer} onChange={event => { setPayer(event.target.value); setParticipants([event.target.value]); }}>{group.members.map(name => <option key={name}>{name}</option>)}</select></div>}
@@ -106,14 +106,14 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
       <div className="flex gap-2"><button type="button" className="btn" onClick={() => { setFormOpen(false); setEditing(''); setSample(''); setTest(null); }}>取消</button><button type="button" className="btn btn-primary flex-1" onClick={save}>儲存銀行規則</button></div>
     </div> : !group && <p className="text-sm text-ink-3 py-4">請先開啟要記帳的個人帳本，再從「資料與 App」設定銀行規則。</p>}
     <div className="mt-5 space-y-3">{rules.filter(rule => !group || rule.groupCode === group.code).map(rule => <div key={rule.id} className="rounded-2xl border border-line p-3">
-      <p className="text-sm font-medium">{rule.bank} · 末四碼 {rule.last4} · {rule.enabled ? '啟用' : '停用'}</p><p className="text-xs text-ink-3 mt-1">{categoryLabel(rule.category)} · {rule.mode === 'auto' ? '自動新增' : '先確認'} · 上限 NT$ {utils.fmt(rule.limit)}</p>
+      <p className="text-sm font-medium">{rule.bank} · {cardSuffixLabel(rule.last4)} {rule.last4} · {rule.enabled ? '啟用' : '停用'}</p><p className="text-xs text-ink-3 mt-1">{categoryLabel(rule.category)} · {rule.mode === 'auto' ? '自動新增' : '先確認'} · 上限 NT$ {utils.fmt(rule.limit)}</p>
       <div className="flex flex-wrap gap-2 mt-3">{group && <button type="button" className="btn btn-sm" onClick={() => openForm(rule)}>編輯規則</button>}<button type="button" className="btn btn-sm" onClick={() => { try { update(items => { const next = items.map(item => item.id === rule.id ? { ...item, enabled: !item.enabled } : item); if (!rule.enabled && next.some(item => item.id !== rule.id && item.enabled && item.bank.toLocaleLowerCase() === rule.bank.toLocaleLowerCase() && item.last4 === rule.last4)) throw new Error('同張卡已有啟用規則，請先停用另一個規則'); return next; }); setMessage('規則狀態已更新'); } catch (error) { setMessage((error as Error).message); } }}>{rule.enabled ? '停用' : '啟用'}</button><button type="button" className="btn btn-danger btn-sm" onClick={() => { try { update(items => items.filter(item => item.id !== rule.id)); setActiveLink(''); if (editing === rule.id) setFormOpen(false); setMessage('規則已移除，舊捷徑連結已失效；既有帳目不變'); } catch (error) { setMessage((error as Error).message); } }}>移除規則</button></div>
     </div>)}</div>
     <h4 className="text-sm font-medium mt-6">2. 加入並綁定捷徑</h4>
     <p className="text-sm text-ink-2 leading-relaxed mt-2">先到 Apple 頁面確認加入新版，回到這裡按「完成綁定」，App 會自動傳入設定。只需填寫一次，不用複製連結或編輯捷徑動作。</p>
     <a className="btn btn-primary w-full mt-4" href="https://www.icloud.com/shortcuts/1e2ff51948f94e508a80098f7367b2f7" target="_blank" rel="noopener noreferrer">加入銀行通知捷徑</a>
     <button type="button" className="btn w-full mt-3" disabled={!group || !rules.some(rule => rule.enabled && rule.groupCode === group.code)} onClick={bindShortcut}>已加入，完成綁定</button>
-    <p className="text-xs text-ink-3 mt-2 leading-relaxed">捷徑會保存此 App 的記帳連結。之後新增卡片、修改分類或入帳方式，直接在 App 儲存即可。同一個捷徑會依銀行與末四碼選擇帳本。</p>
+    <p className="text-xs text-ink-3 mt-2 leading-relaxed">捷徑會保存此 App 的記帳連結。之後新增卡片、修改分類或入帳方式，直接在 App 儲存即可。同一個捷徑會依銀行與卡號末碼選擇帳本。</p>
     <details className="expense-more mt-4"><summary>無法開啟安裝頁面？</summary>
       <p className="text-sm leading-relaxed py-3">請用 Safari 開啟安裝頁。也可下載 ZIP 備用檔，在「檔案 → 下載項目」點 ZIP 解壓，再點「銀行通知記帳.shortcut」加入捷徑。</p>
       <a className="btn w-full mb-3" href={import.meta.env.BASE_URL + 'shortcuts/bank-notification-shortcut.zip'} download="銀行通知記帳.zip">下載 ZIP 備用檔</a>
@@ -121,7 +121,7 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     </details>
     <details className="expense-more mt-5"><summary>3. 接上 iOS 銀行通知自動化</summary><ol className="text-sm leading-relaxed space-y-3 pl-5 list-decimal py-3">
       <li>先在 App 儲存銀行規則，加入新版「銀行通知記帳」，再回到 App 按「已加入，完成綁定」。捷徑顯示設定已儲存後，即可使用。</li>
-      <li>在 iOS 27「捷徑 → 自動化」新增「通知」，選銀行 App、篩選消費通知。把通知的標題、副標題、訊息合併成文字，需包含銀行名稱、卡號末四碼與新臺幣金額。</li>
+      <li>在 iOS 27「捷徑 → 自動化」新增「通知」，選銀行 App、篩選消費通知。把通知的標題、副標題、訊息合併成文字，需包含銀行名稱、對應的卡號末碼與新臺幣金額。</li>
       <li>加入「執行捷徑」，選「銀行通知記帳」，將合併後的文字傳給它。捷徑會編碼文字並開啟網站；請依系統提供的選項設定執行方式，鎖屏時可能需要解鎖。</li>
       <li>先以「先確認再新增」試跑，核對帳本、日期和金額。啟用自動新增前需完成測試與同意設定。</li>
     </ol><p className="text-xs text-ink-3 leading-relaxed pb-3">規則僅存此瀏覽器，不包含在一般備份；原始通知不保存或上傳。完全相同通知會去重；若確為另一筆相同交易，請手動新增。</p><a className="text-sm underline" href="https://support.apple.com/en-ng/guide/shortcuts/apd932ff833f/10.0/ios/27" target="_blank" rel="noreferrer">Apple iOS 27 通知自動化說明</a></details>

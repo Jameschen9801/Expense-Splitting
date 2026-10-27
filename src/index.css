@@ -399,6 +399,11 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .bank-rule-form { display: grid; gap: 18px; }
 .bank-setup-target { padding: 14px 16px; border-radius: 18px; border: 1px solid var(--ui-line); background: var(--ui-muted); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
 .bank-setup-target span { display: block; font-size: 12px; color: var(--ui-secondary); margin-top: 3px; }
+.ledger-delete-entry { border-top: 1px solid var(--ui-line); padding-top: 20px; margin-top: 24px; }
+.ledger-delete-entry p { font-size: 12px; line-height: 1.7; color: var(--ui-secondary); margin-bottom: 12px; }
+.delete-ledger-summary { padding: 18px; border: 1px solid var(--ui-line); border-radius: 18px; background: var(--ui-muted); overflow-wrap: anywhere; }
+.delete-ledger-summary strong, .delete-ledger-summary span { display: block; }
+.delete-ledger-summary span { color: var(--ui-secondary); font-size: 13px; margin-top: 6px; }
 .bank-choice { display: inline-flex; gap: 9px; align-items: center; min-height: 44px; padding: 9px 12px; border: 1px solid var(--ui-control); border-radius: 16px; font-size: 14px; line-height: 1.6; }
 .bank-choice input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--ui-accent); margin-top: 2px; }
 .settings-section { padding-bottom: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--ui-line); }

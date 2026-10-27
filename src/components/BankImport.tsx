@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Modal } from './Modal';
 import { categoryLabel } from '../lib/categories';
 import { prepareBankEntry, saveBankEntry, type PreparedBankEntry } from '../lib/bankImport';
-import type { BankRequest } from '../lib/bankShortcuts';
+import { cardSuffixLabel, type BankRequest } from '../lib/bankShortcuts';
 import type { Group } from '../types';
 import { utils } from '../lib/utils';
 import { isPersonalLedger } from '../lib/ledgers';
@@ -38,7 +38,7 @@ export function BankImport({ input, onClose, onGroup }: { input: { request?: Ban
   return <Modal title="銀行捷徑記帳" onClose={() => { if (!busy) onClose(); }}>
     {busy && <p role="status" className="text-sm py-4">正在辨識與保存通知，請稍候…</p>}
     {prepared && <div className="rounded-2xl border border-line bg-paper-2 p-4 text-sm leading-loose">
-      <p>{prepared.group.name} · {prepared.rule.bank} · 末四碼 {prepared.rule.last4}</p>
+      <p>{prepared.group.name} · {prepared.rule.bank} · {cardSuffixLabel(prepared.rule.last4)} {prepared.rule.last4}</p>
       <p className="money text-2xl">NT$ {utils.fmt(prepared.entry.amount)}</p>
       <p>{prepared.entry.desc}</p><p>{prepared.entry.date} · {categoryLabel(prepared.rule.category)}</p>
       {!isPersonalLedger(prepared.group) && <p>{prepared.rule.payer} 先付款；分攤：{prepared.rule.participants.join('、')}</p>}

@@ -7,6 +7,7 @@ export const bankRulesKey = 'warikan_bank_rules_v1';
 export const bankBridgeKey = 'warikan_bank_bridge_v1';
 export const bankShortcutName = '銀行通知記帳';
 export const bankSetupMarker = 'expense-bank-setup:';
+export const cardSuffixLabel = (suffix: string) => `末${suffix.length}碼`;
 export type BankRule = {
   id: string; channel: string; secret: string; bank: string; last4: string;
   groupCode: string; payer: string; participants: string[]; category: ExpenseCategory;
@@ -21,7 +22,7 @@ const norm = (text: string) => text.normalize('NFKC').replace(/\u200b|\u200e|\u2
 const key = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const validRule = (rule: any): rule is BankRule => rule && key(rule.id) && key(rule.channel) && key(rule.secret)
   && typeof rule.bank === 'string' && norm(rule.bank).length >= 2 && rule.bank.length <= 40
-  && /^\d{4}$/.test(rule.last4) && /^\d{6}$/.test(rule.groupCode)
+  && /^\d{4,5}$/.test(rule.last4) && /^\d{6}$/.test(rule.groupCode)
   && typeof rule.payer === 'string' && rule.payer.length > 0 && rule.payer.length <= 100
   && Array.isArray(rule.participants) && rule.participants.length > 0 && rule.participants.length <= 1000
   && rule.participants.every((name: any) => typeof name === 'string' && name.length > 0 && name.length <= 100)
@@ -47,7 +48,7 @@ export function saveBankRules(store: Store, rules: BankRule[]) {
 const randomKey = () => [...crypto.getRandomValues(new Uint8Array(32))].map(byte => byte.toString(16).padStart(2,'0')).join('');
 export function newBankRule(input: Pick<BankRule, 'bank' | 'last4' | 'groupCode' | 'payer' | 'participants' | 'category' | 'mode' | 'limit'>): BankRule {
   const rule = { ...input, bank: norm(input.bank), id: randomKey(), channel: randomKey(), secret: randomKey(), enabled: true, seen: [] };
-  if (!validRule(rule)) throw new Error('請填寫銀行關鍵字、4 位卡號、付款人與分攤對象');
+  if (!validRule(rule)) throw new Error('請填寫銀行關鍵字、卡號末 4 或 5 碼與記帳對象');
   return rule;
 }
 export const defaultBankCategory = defaultExpenseCategory;
@@ -106,7 +107,7 @@ export function resolveBankRule(store: Store, request: BankRequest): { rule: Ban
       catch { return []; }
     });
     if (matching.length > 1) throw new Error('通知符合多個銀行規則，尚未記帳。請在 App 調整銀行關鍵字，避免規則重疊');
-    if (!matching.length) throw new Error('沒有符合的成功消費通知，尚未記帳。請在 App 核對銀行關鍵字與卡號末四碼，或使用測試辨識查看原因');
+    if (!matching.length) throw new Error('沒有符合的成功消費通知，尚未記帳。請在 App 核對銀行關鍵字與卡號末碼，或使用測試辨識查看原因');
     return matching[0];
   }
   const rule = enabled.find(rule => rule.channel === request.channel);
@@ -124,9 +125,9 @@ export function parseBankText(text: string, rule: Pick<BankRule,'bank'|'last4'>,
   const message = norm(text);
   if (!message || message.length > 6000) throw new Error('請提供銀行消費通知文字');
   if (!message.toLocaleLowerCase().includes(norm(rule.bank).toLocaleLowerCase())) throw new Error('銀行關鍵字不符合，未記帳');
-  if (!/^\d{4}$/.test(rule.last4)) throw new Error('卡號設定錯誤');
-  const card = new RegExp(`(?:(?:卡號|卡片|信用卡)(?:末四碼|末4碼|末碼)?|尾號|末四碼|末4碼|末碼|ending\\s*(?:in)?)[\\s:：()（）「」【】\\[\\]#＊*xX•●·-]{0,24}(?:為|是)?\\s*${rule.last4}(?!\\d)`, 'i');
-  if (!card.test(message)) throw new Error('通知中的卡號末四碼不符合，未記帳');
+  if (!/^\d{4,5}$/.test(rule.last4)) throw new Error('請設定卡號末 4 或 5 碼');
+  const card = new RegExp(`(?:(?:卡號|卡片|信用卡)(?:末四碼|末4碼|末五碼|末5碼|末碼)?|尾號|末四碼|末4碼|末五碼|末5碼|末碼|ending\\s*(?:in)?)[\\s:：()（）「」【】\\[\\]#＊*xX•●·-]{0,24}(?:為|是)?\\s*${rule.last4}(?!\\d)`, 'i');
+  if (!card.test(message)) throw new Error('通知中的卡號末碼不符合，未記帳');
   if (/驗證碼|一次性密碼|動態密碼|\bOTP\b|取消|退款|退貨|失敗|未成功|不成功|未完成|尚未|婉拒|拒絕|預授權|預借現金|繳款|繳費通知|帳單|還款|匯款|轉帳|提款|提領|累計|累積|分期|昨日|昨天|refund|declined|verification|pending/i.test(message)) throw new Error('這不是可直接入帳的成功消費通知，請手動確認');
   if (/(?:USD|US\$|JPY|HKD|CNY|RMB|EUR|GBP|AUD|CAD|SGD|KRW|THB|VND|CHF|NZD|INR|PHP|美元|美金|日圓|日幣|港幣|人民幣|歐元|英鎊|外幣|外匯)/i.test(message)) throw new Error('外幣通知不自動換算，請手動記帳');
   if (!/消費|刷卡|交易|扣款|purchase|spent/i.test(message)) throw new Error('找不到成功消費資訊，未記帳');
