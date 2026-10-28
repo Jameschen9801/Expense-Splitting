@@ -1,0 +1,12 @@
+{
+  "name": "expense-background-notifications",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": { "node": "22" },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --packages=external --outfile=lib/index.js",
+    "gcp-build": ""
+  },
+  "dependencies": { "firebase-admin": "14.5.0", "firebase-functions": "7.4.0" },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

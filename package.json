@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "test:logic": "tsx --test src/lib/*.test.ts",
     "test:rules": "tsx --test scripts/database-rules.test.ts",
-    "test:pwa": "tsx --test scripts/pwa.test.ts"
+    "test:pwa": "tsx --test scripts/pwa.test.ts",
+    "test:background": "tsx --test functions/src/api.test.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

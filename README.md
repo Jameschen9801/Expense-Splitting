@@ -32,28 +32,28 @@
 
 ## iOS 銀行通知捷徑
 
-1. 先在有原本帳目的桌面 App 開啟「帳本同步」，設定 Email 與密碼；這會將目前匿名身分連結為正式帳號，保留原 UID 與所有帳目。捷徑開到 Safari 時登入同一帳號，就能使用原本的個人帳本。點帳本首頁「銀行自動記帳設定」，或「帳本設定 → 銀行與卡片設定」進入，不需要新增第二本帳本。
-2. 在 App 填寫銀行關鍵字、卡號末 4 碼與分類，僅填最後四碼，保留開頭的零，儲存銀行規則。個人帳本收到有效通知後先保存在獨立的「手機通知待確認」，包含原有「先確認」規則；首頁與帳本頁會顯示待處理筆數、最近一則與「繼續確認」。補好說明、明確選擇分類並按「確認加入帳本」後才成為正式支出；既有正式帳目不會移動。無日期時使用執行捷徑當天，通知已含日期則保留該消費日；個人帳本不受舊規則的單筆確認上限及相近支出提示阻擋。共用帳本才顯示付款人、分攤、分類與入帳方式，維持原有確認及上限規則。通知測試不會新增帳目。
-3. 按「加入銀行通知捷徑」，由 [Apple iCloud 安裝頁](https://www.icloud.com/shortcuts/1e2ff51948f94e508a80098f7367b2f7)加入新版，再回 App 按「已加入，完成綁定」。App 會透過 Apple 的 `shortcuts://run-shortcut` 自動傳入這個瀏覽器的記帳連結，不用重填銀行、卡號或複製連結；Apple 的安裝確認仍須由使用者操作。捷徑將連結存入 iCloud Drive 的 `Shortcuts/ExpenseSplitting-bank-link.txt`，不把銀行、卡號、帳目或登入憑證放入公開範本。之後新增卡片、改分類或停用規則，都只需在 App 儲存；同一個捷徑會選擇唯一符合銀行與末四碼的啟用規則，規則重疊時停止入帳。
-4. 綁定主捷徑後，在第 3 步按「加入 Richart 通知自動化」，由 [第二支捷徑的 Apple 安裝頁](https://www.icloud.com/shortcuts/bb42192198bf423183c8361030091878) 加入通知來源範本。它已包含 `WFNotificationTrigger`，只選 Richart（`tw.com.taishinbank.richart`，Team ID `GWE2S42W9T`），將通知內文傳入既有的「銀行通知記帳」，不需從空白自動化新增條件或選擇 Richart Life。App 身分由 Apple App Store 與 Richart 官方 `apple-app-site-association` 核對。公開範本不含銀行規則、卡號、私人連結或登入憑證。
-5. 匯入的通知來源仍須由使用者在這支 iPhone 開啟。回 App 按「已加入，開啟啟用設定」，在「Richart 通知自動化」點「編輯」，展開觸發條件選單並打開「自動化」。App 不會因點過安裝按鈕就宣稱已啟用；請用實際 Richart 消費通知與 Safari 的最近一次接收時間確認。需要鎖定時執行，可檢查捷徑的允許鎖定時執行；主記帳捷徑目前仍可能開啟 Safari，尚未提供免開啟網頁的背景保存服務。參考 [Apple 的 iOS 27 自動化說明](https://support.apple.com/en-ng/guide/shortcuts/apdfbdbd7123/ios)。
+個人帳本提供背景接收版：Richart 通知經自己的 Firebase 接收服務驗證銀行與末 4 碼後，先進「手機通知待確認」，成功時不開 Safari。待確認不計入支出、分類統計或 CSV，補好說明與分類後才正式入帳；不串接 AI。
 
-Richart 成功消費通知以完整交易內文的私密 HMAC 辨識，忽略已知的 Richart／Richart Life 來源標題與空白換行；日期、時間、金額或其他交易內容不同，仍保留為不同通知。辨識時也核對舊版通知雜湊，保留既有正式帳目、待確認與忽略紀錄的去重效果。其他銀行沿用原本辨識方式，原始通知不新增保存或上傳。
+**發布狀態：背景版已完成本機與原生捷徑測試，尚待專案擁有者同意 Blaze 計費後部署。現有線上版本與舊捷徑繼續運作。** 後端部署順序、資料範圍、憑證權限與測試方式見 [functions/README.md](functions/README.md)。
 
-銀行設定提供「最近一次捷徑接收」，只在目前瀏覽器保留時間、結果與失敗原因，不含原始通知或卡片資料，也不進行帳號同步。捷徑通常開啟 Safari，因此要在 Safari 查看；沒有新接收時間表示該瀏覽器尚未收到資料，不能只憑已安裝捷徑就判定自動化有效。先手動測試傳入，再以實際通知驗證觸發。尚未提供免開啟網頁的鎖屏背景接收服務。
+上線後，在原本的個人帳本「銀行自動記帳設定」完成：
 
-捷徑會開啟網站後記帳，鎖屏時可能需要解鎖。網站不會在背景監聽其他 App，也不會付款或轉帳。個人帳本會在本機待同步佇列保存通知成功後回到帳本，提示已放入待確認；失敗時保留錯誤畫面，離線時先保存並在連線後同步。待確認內容儲存在同一本私人帳本的 `bankInbox`，只有本人身分可存取；確認入帳使用同一次交易新增費用並移出待確認，保留收據標記防止重送或舊備份復活。待確認不計入支出、分類統計或 CSV，包含在 JSON 備份與離線佇列。填寫草稿依每則通知獨立保存，不影響一般新增記帳的草稿。沒有串接 AI。共用帳本維持測試、同意與確認規則。退款、驗證碼、帳單繳款、外幣與無法明確辨識的金額不會自動新增。Richart 成功消費句尾的「實際消費資訊以帳單為準」不會被當成帳單繳款；「台新」「臺新銀行」與「Richart」可互相辨識。先以銀行通知作為唯一入帳來源，LINE 錢包尚未加入跨來源配對，避免同一交易重複記錄。
+1. 開啟帳本同步，儲存銀行關鍵字及卡號末 4 碼。不提供完整卡號，也不需在捷徑重填。
+2. 加入 [銀行背景記帳](https://www.icloud.com/shortcuts/4272d179108f4076aa557226b6aab076)，回 App 按「已加入，綁定並測試連線」。設定只交給自己的主捷徑，連線測試不新增帳目。
+3. 加入 [Richart 背景記帳](https://www.icloud.com/shortcuts/43a2030779cc4fb188f72c1132773e80)，在 iPhone 開啟其自動化開關。已帶入 Richart 通知來源及背景主捷徑，不需另選 Richart Life。
+4. 停用舊「Richart 通知自動化」的開關，避免它仍開 Safari。App 會提供捷徑設定入口與最近一次背景接收結果，無法代替手機啟用開關。
 
-通知文字放在網址片段，啟動時即移除；不放進 HTTP 查詢參數、不保存原始通知。未開啟帳本同步時，規則與私人識別碼只存此瀏覽器。開啟後，銀行規則、HMAC 去重金鑰、捷徑橋接碼與帳本索引儲存在 `accountSync/<uid>`，資料庫只允許同一 UID 讀寫；一般 JSON 備份仍不包含它們，通知原文與密碼不寫入這個同步空間。銀行設定需連網儲存，並檢查另一邊是否已修改，避免覆蓋新設定。捷徑儲存的連結只允許本網站與固定格式，不能指向其他服務；未綁定或手動執行時會開啟 App 設定，不建立支出。既有每張卡一條連結的舊捷徑仍可使用，手動前綴放在「舊版捷徑手動設定」。支出透過既有身分權限與離線待同步清單保存；相同通知用固定 ID 防止重送重複。本機另保留最近 500 筆通知識別碼；已刪除且超出保留範圍的舊通知不保證去重。確為另一筆相同消費時請手動新增。
+背景服務不保存原始通知，只保存解析後的待確認資料及接收結果。相同 Richart 通知使用 HMAC 去重，包含已知 Richart／Richart Life 標題變體、舊 ID 及已處理墓碑；交易時間不同仍保留為不同通知。驗證碼、退款、失敗、帳單、外幣及不明金額不自動新增。先只接銀行通知，不另接 LINE 錢包。
 
-主捷徑原始內容在 `scripts/ios-bank-shortcut.json`；第二支通知來源在 `scripts/ios-richart-trigger.json`，使用 macOS 內建工具產生可匯入的簽署檔：
+主捷徑將受限憑證存於 `Shortcuts/ExpenseSplitting-bank-background.txt`，它只能送入自己的待確認，不能讀帳、刪帳或改設定；可在 App 二次確認後停用全部綁定。公開捷徑及一般 JSON 備份不包含憑證。成功、重複或不符合規則時安靜結束；失敗不代表已保存，無網路不會自動補送。鎖定時執行受 iOS 權限限制，請在解鎖時完成首次授權並用實機通知驗證。
 
-```bash
-plutil -convert xml1 scripts/ios-bank-shortcut.json -o /tmp/expense-bank-notification-unsigned.shortcut
-shortcuts sign --mode anyone --input /tmp/expense-bank-notification-unsigned.shortcut --output 'public/shortcuts/銀行通知記帳.shortcut'
-```
+無法開啟 Apple 安裝頁面時，使用 App 的 ZIP 備用檔，在「檔案」解壓後加入，避免直接預覽二進位原始檔而顯示亂碼。新版主捷徑與來源原始內容為 `scripts/ios-bank-background.json`、`scripts/ios-richart-background.json`；由 `scripts/create-background-shortcuts.mjs` 產生。簽署檔及 ZIP 位於 `public/shortcuts/`。
 
-iPhone 安裝入口使用 iCloud 分享頁，不直接導向原始二進位檔，避免主畫面 App 將 AEA1 簽署內容顯示成亂碼。無法開啟安裝頁時，可用「下載 ZIP 備用檔」，在「檔案」解壓後開啟 `.shortcut`。ZIP 僅包含簽署的通用捷徑，不含私人資料。更新捷徑時請同步重新產生 `public/shortcuts/bank-notification-shortcut.zip`，並檢查 iCloud 分享版本是否需更新。第二支來源的 ZIP 為 `public/shortcuts/richart-notification-source.zip`，只含「Richart 通知自動化.shortcut」。更新來源範本時也須保留通知觸發設定，並核對 Apple 公開分享檔中仍有 Richart 來源與正確的記帳捷徑名稱。
+### 舊版與共用帳本
+
+原本 [銀行通知記帳](https://www.icloud.com/shortcuts/1e2ff51948f94e508a80098f7367b2f7) 與 [Richart 通知自動化](https://www.icloud.com/shortcuts/bb42192198bf423183c8361030091878) 繼續保留。這條流程開啟 Safari 後才記帳，使用同一個同步帳號連回原本帳本；通知以網址片段傳入並立即移除，不進 HTTP 查詢參數，不保存或上傳原始通知。最近接收結果僅存該瀏覽器。
+
+個人帳本的舊版通知同樣先進待確認；共用帳本沿用原本測試、同意與分攤規則。原始範本為 `scripts/ios-bank-shortcut.json`、`scripts/ios-richart-trigger.json`。可從個人設定內收合的「舊版：開啟 Safari 記帳」查看，不會在背景版部署前停用它。
 
 ## 🚀 快速開始
 
@@ -61,6 +61,7 @@ iPhone 安裝入口使用 iCloud 分享頁，不直接導向原始二進位檔�
 確保你已經安裝 Node.js，然後執行：
 ```bash
 npm install
+npm ci --prefix functions
 ```
 
 ### 2. 啟動開發環境

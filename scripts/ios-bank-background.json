@@ -1,0 +1,830 @@
+{
+  "WFWorkflowName": "銀行背景記帳",
+  "WFWorkflowClientVersion": "5037.111",
+  "WFWorkflowMinimumClientVersion": 900,
+  "WFWorkflowMinimumClientVersionString": "900",
+  "WFWorkflowIcon": {
+    "WFWorkflowIconStartColor": 1239869439,
+    "WFWorkflowIconGlyphNumber": 61440
+  },
+  "WFWorkflowTypes": [
+    "WFWorkflowTypeShowInSearch"
+  ],
+  "WFWorkflowInputContentItemClasses": [
+    "WFStringContentItem"
+  ],
+  "WFWorkflowOutputContentItemClasses": [],
+  "WFWorkflowHasOutputFallback": false,
+  "WFWorkflowImportQuestions": [],
+  "WFQuickActionSurfaces": [],
+  "WFWorkflowActions": [
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+      "WFWorkflowActionParameters": {
+        "WFCommentActionText": "銀行背景記帳・個人帳本待確認版\n先在 App 設定銀行與卡號末 4 碼，加入本捷徑後按「綁定並測試連線」。設定僅存於 Shortcuts/ExpenseSplitting-bank-background.txt，請勿分享該檔案。公開範本不含任何銀行、卡號或帳目。\n只將通知以 HTTPS POST 傳到自己的 expense-splitting-a9b78 接收服務，不經瀏覽器，不使用 AI，不付款、不轉帳。成功、重複或不符合規則時安靜結束。接收服務只保存辨識後的待確認資料，不保存原始通知。\n本捷徑不會自行監聽通知。另加入「Richart 背景記帳」並在 iPhone 啟用自動化；同時停用舊版「Richart 通知自動化」，避免舊版仍開 Safari。鎖定時執行仍受 iOS 權限、網路與檔案存取限制，請先在解鎖時完成連線授權。網路中斷不會自動補送，請確認 App 接收結果。"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "45ECF44C-3C27-4470-A6EB-A67DAF8316C1",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ExtensionInput"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "519C7D5B-E55C-4B45-A30F-B36AAFBC8BE6",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "45ECF44C-3C27-4470-A6EB-A67DAF8316C1",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "(?<=^expense-bank-background:)\\{[\\s\\S]*\\}$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "56FA9858-2789-4810-AE2E-81D25D30C79E",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "519C7D5B-E55C-4B45-A30F-B36AAFBC8BE6",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "F8844FCA-D1A5-4A5F-ACCD-DAAFA71CDA20",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "519C7D5B-E55C-4B45-A30F-B36AAFBC8BE6",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "CAE30655-D7FA-4356-A645-29B52CA816B7",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "F8844FCA-D1A5-4A5F-ACCD-DAAFA71CDA20",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^\\{\"version\":1,\"endpoint\":\"https://asia-east1-expense-splitting-a9b78\\.cloudfunctions\\.net/bankInboxApi/capture\",\"token\":\"[a-f0-9]{64}\"\\}$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "E5BF7185-0F44-49A6-AD66-3152FB669998",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "CAE30655-D7FA-4356-A645-29B52CA816B7",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "DA559175-5B68-4543-A46D-14D11EE21A58",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "CAE30655-D7FA-4356-A645-29B52CA816B7",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.save",
+      "WFWorkflowActionParameters": {
+        "UUID": "94FDFF9B-034E-4A24-A5AD-8C3368380F36",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "DA559175-5B68-4543-A46D-14D11EE21A58",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFAskWhereToSave": false,
+        "WFSaveFileOverwrite": true,
+        "WFFileDestinationPath": "ExpenseSplitting-bank-background.txt"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "B380F468-409F-4EB6-A526-D4AD65E8BE17",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "DA559175-5B68-4543-A46D-14D11EE21A58",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "(?<=\"token\":\")[a-f0-9]{64}(?=\")",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "F831105E-01BD-4AC4-AD7F-526F421C42AD",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "B380F468-409F-4EB6-A526-D4AD65E8BE17",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
+      "WFWorkflowActionParameters": {
+        "UUID": "98680E18-FFDA-482A-A714-56DD032A441E",
+        "WFURL": "https://asia-east1-expense-splitting-a9b78.cloudfunctions.net/bankInboxApi/capture",
+        "WFHTTPMethod": "POST",
+        "ShowHeaders": true,
+        "WFHTTPHeaders": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "X-Expense-Key"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "￼",
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputUUID": "F831105E-01BD-4AC4-AD7F-526F421C42AD",
+                        "Type": "ActionOutput",
+                        "OutputName": "文字"
+                      }
+                    }
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "Content-Type"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "application/json"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        },
+        "WFHTTPBodyType": "JSON",
+        "WFJSONValues": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "mode"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "test"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "FB8EB12D-3D3C-413C-AD89-A19C687E7BF9",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "98680E18-FFDA-482A-A714-56DD032A441E",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFDictionaryKey": "status",
+        "WFGetDictionaryValueType": "Value"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "1A53D0E3-4A2E-4CD1-A8B3-B7FB7BD18A11",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "FB8EB12D-3D3C-413C-AD89-A19C687E7BF9",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^ready$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "6C541BE2-6093-4ED9-AB0B-5B32FA7BBD9C",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "1A53D0E3-4A2E-4CD1-A8B3-B7FB7BD18A11",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "WFAlertActionTitle": "背景記帳已綁定",
+        "WFAlertActionMessage": "連線成功，測試未新增帳目。回 App 加入「Richart 背景記帳」並啟用自動化；停用舊版「Richart 通知自動化」。之後有效消費先進待確認，成功不開 Safari。",
+        "WFAlertActionCancelButtonShown": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "6C541BE2-6093-4ED9-AB0B-5B32FA7BBD9C",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "WFAlertActionTitle": "連線測試未完成",
+        "WFAlertActionMessage": "請回 App 查看「最近一次背景接收」與銀行規則，確認後重新綁定。測試不會新增帳目。",
+        "WFAlertActionCancelButtonShown": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "15651DC0-329F-4C07-A520-C9477A942DCC",
+        "GroupingIdentifier": "6C541BE2-6093-4ED9-AB0B-5B32FA7BBD9C",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "E5BF7185-0F44-49A6-AD66-3152FB669998",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "WFAlertActionTitle": "綁定資料不正確",
+        "WFAlertActionMessage": "本捷徑只接受自己的記帳服務。請回 App 按「綁定並測試連線」，不要手動修改檔案或網址。",
+        "WFAlertActionCancelButtonShown": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "CA93438A-7D40-47A7-A7BD-086832F1AF22",
+        "GroupingIdentifier": "E5BF7185-0F44-49A6-AD66-3152FB669998",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "56FA9858-2789-4810-AE2E-81D25D30C79E",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "8625DBB9-0EBC-45D9-A9E7-4D44CA133C95",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "45ECF44C-3C27-4470-A6EB-A67DAF8316C1",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "\\S",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "039C6F34-7626-4ECD-AAD0-57F205EEA640",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "8625DBB9-0EBC-45D9-A9E7-4D44CA133C95",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.open",
+      "WFWorkflowActionParameters": {
+        "UUID": "8952FE46-2921-451B-AFFE-DC31683BD4B6",
+        "WFGetFilePath": "ExpenseSplitting-bank-background.txt",
+        "WFFileErrorIfNotFound": false,
+        "WFShowFilePicker": false,
+        "WFGetFileService": "iCloud Drive",
+        "WFGetFolderContents": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "89D94D67-153C-4FFD-A929-12D1B243C577",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "8952FE46-2921-451B-AFFE-DC31683BD4B6",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "85EA973E-1FBB-4AC4-A687-46B3965D052F",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "89D94D67-153C-4FFD-A929-12D1B243C577",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^\\{\"version\":1,\"endpoint\":\"https://asia-east1-expense-splitting-a9b78\\.cloudfunctions\\.net/bankInboxApi/capture\",\"token\":\"[a-f0-9]{64}\"\\}$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "3C642937-D713-4007-AB7B-EC475ACB6E33",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "85EA973E-1FBB-4AC4-A687-46B3965D052F",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "BEA4B94F-4F19-438E-AF81-335D071DF639",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "85EA973E-1FBB-4AC4-A687-46B3965D052F",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "4022774E-0001-46D7-AD54-2B3F548735B9",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "BEA4B94F-4F19-438E-AF81-335D071DF639",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "(?<=\"token\":\")[a-f0-9]{64}(?=\")",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "11D7DB4A-D88E-4E97-A33B-8A44B9CF04B2",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "4022774E-0001-46D7-AD54-2B3F548735B9",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
+      "WFWorkflowActionParameters": {
+        "UUID": "29AE462C-F84D-4DAA-ABEB-541B8E7BF258",
+        "WFURL": "https://asia-east1-expense-splitting-a9b78.cloudfunctions.net/bankInboxApi/capture",
+        "WFHTTPMethod": "POST",
+        "ShowHeaders": true,
+        "WFHTTPHeaders": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "X-Expense-Key"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "￼",
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputUUID": "11D7DB4A-D88E-4E97-A33B-8A44B9CF04B2",
+                        "Type": "ActionOutput",
+                        "OutputName": "文字"
+                      }
+                    }
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "Content-Type"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "application/json"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        },
+        "WFHTTPBodyType": "JSON",
+        "WFJSONValues": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "mode"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "capture"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "text"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "￼",
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputUUID": "45ECF44C-3C27-4470-A6EB-A67DAF8316C1",
+                        "Type": "ActionOutput",
+                        "OutputName": "文字"
+                      }
+                    }
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "7994128B-50B6-4EA8-AAD8-C97B158B8F7B",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "29AE462C-F84D-4DAA-ABEB-541B8E7BF258",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFDictionaryKey": "status",
+        "WFGetDictionaryValueType": "Value"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "AF958DE6-9651-434D-A226-5B6411A1D435",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "7994128B-50B6-4EA8-AAD8-C97B158B8F7B",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^(pending|duplicate|ignored)$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "D341BC2B-5A87-4141-AA7B-3ECDAF4052BF",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "AF958DE6-9651-434D-A226-5B6411A1D435",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.nothing",
+      "WFWorkflowActionParameters": {}
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "D341BC2B-5A87-4141-AA7B-3ECDAF4052BF",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "C206A9E5-C11D-4F01-A91E-7EA5DBEF4C6A",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "29AE462C-F84D-4DAA-ABEB-541B8E7BF258",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFDictionaryKey": "message",
+        "WFGetDictionaryValueType": "Value"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "WFNotificationActionTitle": "背景記帳未完成",
+        "WFNotificationActionBody": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "C206A9E5-C11D-4F01-A91E-7EA5DBEF4C6A",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "B1B6C128-F5A1-412F-A2DC-4A23AA70EF4F",
+        "GroupingIdentifier": "D341BC2B-5A87-4141-AA7B-3ECDAF4052BF",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "3C642937-D713-4007-AB7B-EC475ACB6E33",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "WFNotificationActionTitle": "背景記帳未完成",
+        "WFNotificationActionBody": {
+          "Value": {
+            "string": "尚未綁定背景記帳。請回 App 加入主捷徑，再按「綁定並測試連線」。"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "876FBFD9-BE78-44E8-A65C-324C421C247E",
+        "GroupingIdentifier": "3C642937-D713-4007-AB7B-EC475ACB6E33",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "039C6F34-7626-4ECD-AAD0-57F205EEA640",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "WFAlertActionTitle": "沒有收到通知文字",
+        "WFAlertActionMessage": "手動執行不會新增帳目。請使用已啟用的「Richart 背景記帳」，並以下次實際通知驗證 App 的接收時間。",
+        "WFAlertActionCancelButtonShown": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "28272156-7262-4838-AF87-CFF87A9C2B03",
+        "GroupingIdentifier": "039C6F34-7626-4ECD-AAD0-57F205EEA640",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "45D7C527-6AE9-45F0-A076-AC673B003B3B",
+        "GroupingIdentifier": "56FA9858-2789-4810-AE2E-81D25D30C79E",
+        "WFControlFlowMode": 2
+      }
+    }
+  ]
+}

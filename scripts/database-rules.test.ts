@@ -40,6 +40,15 @@ beforeEach(async () => {
   await env.clearDatabase();
   await env.withSecurityRulesDisabled(context => context.database().ref('groups/123456').set(cloud(group)));
 });
+test('背景憑證與接收管理路徑不允許前端帳號直接讀寫', async () => {
+  await env.withSecurityRulesDisabled(context => context.database().ref().update({ bankIngressKeys: { digest: { uid: 'owner' } }, bankIngressUsers: { owner: { keys: { digest: { enabled: true } } } } }));
+  for (const context of [env.authenticatedContext('owner'), env.authenticatedContext('stranger'), env.unauthenticatedContext()]) {
+    for (const path of ['bankIngressKeys', 'bankIngressKeys/digest', 'bankIngressUsers/owner', 'bankIngressUsers/owner/keys/digest']) {
+      await assertFails(context.database().ref(path).get());
+      await assertFails(context.database().ref(path).set({ enabled: true }));
+    }
+  }
+});
 test('未登入不能讀取新群組，也不能列出所有群組', async () => {
   await assertFails(env.unauthenticatedContext().database().ref('groups/123456').get());
   await assertFails(env.authenticatedContext('owner').database().ref('groups').get());

@@ -8,6 +8,7 @@ import { accountSync } from '../lib/accountSync';
 import { bankConfig } from '../lib/accountData';
 import { AccountSyncSettings } from './AccountSyncSettings';
 import { BankDeliveryStatus } from './BankDeliveryStatus';
+import { BankBackgroundSettings } from './BankBackgroundSettings';
 
 export function BankShortcutSettings({ group }: { group: Group | null }) {
   const personal = isPersonalLedger(group);
@@ -86,10 +87,11 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     catch { setMessage('請長按下方連結前綴複製'); }
   };
   const openAutomationGuide = () => {
-    const heading = document.getElementById('bank-automation-heading');
+    const heading = document.getElementById(personal ? 'bank-background-heading' : 'bank-automation-heading');
     const content = heading?.closest<HTMLElement>('.modal-content');
     if (heading && content) {
-      content.scrollTo({ top: content.scrollTop + heading.getBoundingClientRect().top - content.getBoundingClientRect().top - 20 });
+      const anchor = personal ? heading.closest('.bank-background-settings') || heading : heading;
+      content.scrollTo({ top: content.scrollTop + anchor.getBoundingClientRect().top - content.getBoundingClientRect().top - 20 });
       heading.focus({ preventScroll: true });
     }
   };
@@ -107,13 +109,12 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     <p className="text-sm text-ink-2 leading-relaxed">{personal ? '填好銀行與卡號末 4 碼，捷徑收到有效消費後先放入待確認，補好說明與分類後再確認入帳。' : '在 App 填好銀行、卡號末 4 碼與記帳帳本，再加入捷徑，不用到捷徑裡重填。'}</p>
     <button type="button" className="btn w-full mt-4" onClick={openAutomationGuide}>設定通知自動化</button>
     <div className="mt-4"><AccountSyncSettings compact /></div>
-    <BankDeliveryStatus />
-    <p className="text-xs text-ink-3 leading-relaxed mt-3">目前仍須開啟 Safari 才會保存通知，鎖定手機時可能需要解鎖。加入捷徑後，也須在 iOS 設定通知自動化；網站無法代替手機啟用它。</p>
+    {!personal && <><p className="text-xs text-ink-3 leading-relaxed mt-3">共用帳本仍須開啟 Safari 才會保存通知，鎖定手機時可能需要解鎖。加入捷徑後，也須在 iOS 設定通知自動化；網站無法代替手機啟用它。</p>
     <details className="expense-more mt-3"><summary>使用前須知</summary><div className="text-xs text-ink-2 leading-relaxed py-3">
       <p>這是「捷徑開啟網站後記帳」，不是關閉 App 也持續監聽通知。開啟網站可能需要解鎖手機。</p>
       <p className="mt-2">捷徑通常會開啟 Safari。先在原本記帳的桌面 App 開啟「帳本同步」，再在 Safari 登入同一帳號，就能使用同一本帳本與銀行規則，不需要另建帳本。</p>
       <p className="mt-2">只處理新臺幣成功消費；不直接處理退款、驗證碼、外幣與不明金額。同張卡請只選一個自動化來源。</p>
-    </div></details>
+    </div></details></>}
     {group && <p className="bank-setup-target mt-4">記帳帳本：<strong>{group.name}</strong><span>{personal ? '個人帳本 · 全額記為自己的支出' : '共用帳本 · 依規則分攤'}</span></p>}
     {personal && <div className="rounded-2xl border border-line bg-paper-2 p-4 mt-4 text-sm leading-relaxed"><strong>通知先收好，確認後入帳</strong><p className="text-ink-2 mt-2">金額與日期自動保存在「手機通知待確認」，不計入支出、分類統計或 CSV。補好說明並選擇分類，按「確認加入帳本」才成為正式帳目。</p><p className="text-xs text-ink-3 mt-2">通知沒有日期時，使用執行捷徑當天；重複通知不再新增。請先只接銀行通知，避免 LINE 錢包重複入帳。</p></div>}
     <h4 className="text-sm font-medium mt-5">1. 設定銀行與卡片</h4>
@@ -138,6 +139,12 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
       {rule.last4.length !== 4 && <p className="form-error mt-2">舊規則已停用，請編輯並改填卡號末 4 碼。</p>}
       <div className="flex flex-wrap gap-2 mt-3">{group && <button type="button" className="btn btn-sm" onClick={() => openForm(rule)}>編輯規則</button>}<button type="button" className="btn btn-sm" disabled={updating || rule.last4.length !== 4} onClick={async () => { try { await update(items => { const next = items.map(item => item.id === rule.id ? { ...item, enabled: !item.enabled } : item); if (!rule.enabled && next.some(item => item.id !== rule.id && item.enabled && item.bank.toLocaleLowerCase() === rule.bank.toLocaleLowerCase() && item.last4 === rule.last4)) throw new Error('同張卡已有啟用規則，請先停用另一個規則'); return next; }); setMessage('規則狀態已更新'); } catch (error) { setMessage((error as Error).message); } }}>{rule.enabled ? '停用' : '啟用'}</button><button type="button" className="btn btn-danger btn-sm" disabled={updating} onClick={async () => { try { await update(items => items.filter(item => item.id !== rule.id)); setActiveLink(''); if (editing === rule.id) setFormOpen(false); setMessage('規則已移除，舊捷徑連結已失效；既有帳目不變'); } catch (error) { setMessage((error as Error).message); } }}>移除規則</button></div>
     </div>)}</div>
+    {personal && <BankBackgroundSettings hasRule={!!group && rules.some(rule => rule.enabled && rule.groupCode === group.code)} />}
+    <details className="expense-more mt-5" open={!personal}>
+    <summary>{personal ? '舊版：開啟 Safari 記帳' : '共用帳本的捷徑設定'}</summary>
+    <div className="py-3">
+    <BankDeliveryStatus />
+    {personal && <p className="text-xs text-ink-3 leading-relaxed mt-3">以下是原本會開啟 Safari 的記帳方式。改用上方背景版後，請停用舊通知自動化。</p>}
     <h4 className="text-sm font-medium mt-6">2. 加入並綁定捷徑</h4>
     <p className="text-sm text-ink-2 leading-relaxed mt-2">先到 Apple 頁面確認加入新版，回到這裡按「完成綁定」，App 會自動傳入設定。只需填寫一次，不用複製連結或編輯捷徑動作。</p>
     <a className="btn btn-primary w-full mt-4" href="https://www.icloud.com/shortcuts/1e2ff51948f94e508a80098f7367b2f7" target="_blank" rel="noopener noreferrer">加入銀行通知捷徑</a>
@@ -170,6 +177,7 @@ export function BankShortcutSettings({ group }: { group: Group | null }) {
     </section>
     <details className="expense-more mt-4"><summary>通知入帳與資料保存方式</summary><p className="text-sm leading-relaxed py-3">{personal ? '個人帳本收到有效消費後先保存在待確認區；可稍後一次處理，補好說明與分類再確認加入帳本。可先用「測試辨識」核對通知格式，測試不會記帳。' : '先以「先確認再新增」試跑，核對帳本、日期和金額。啟用自動新增前需完成測試與同意設定。'}</p><p className="text-xs text-ink-3 leading-relaxed pb-3">開啟帳本同步後，銀行規則保存在自己的私人同步空間；未開啟時僅存在此瀏覽器。原始通知不保存或上傳。完全相同通知會去重；若確為另一筆相同交易，請手動新增。</p></details>
     {group && rules.some(rule => rule.groupCode === group.code) && <details className="expense-more mt-4"><summary>舊版捷徑手動設定</summary><p className="text-xs text-ink-3 py-3">僅供尚未更新的舊捷徑使用。新版請使用上方「完成綁定」。</p><div className="flex flex-wrap gap-2">{rules.filter(rule => rule.groupCode === group.code).map(rule => <button key={rule.id} type="button" className="btn btn-sm" onClick={() => copyLink(rule)}>{rule.bank} · {rule.last4} 連結</button>)}</div>{activeLink && <div className="mt-3"><label className="field-label" htmlFor="bank-shortcut-link">捷徑連結前綴（請勿分享）</label><textarea id="bank-shortcut-link" readOnly value={activeLink} rows={3} className="text-xs" /></div>}</details>}
+    </div></details>
     {message && <p role="status" className="text-sm mt-4 whitespace-pre-line">{message}</p>}
   </section>;
 }

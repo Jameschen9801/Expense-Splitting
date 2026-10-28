@@ -15,6 +15,7 @@ dist/
 dist-ssr/
 build/
 coverage/
+functions/lib/
 
 # Editor directories and files
 .vscode/*
