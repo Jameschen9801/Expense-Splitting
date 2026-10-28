@@ -32,14 +32,14 @@
 
 ## iOS 銀行通知捷徑
 
-個人帳本提供背景接收版：Richart 通知經自己的 Firebase 接收服務驗證銀行與末 4 碼後，先進「手機通知待確認」，成功時不開 Safari。待確認不計入支出、分類統計或 CSV，補好說明與分類後才正式入帳；不串接 AI。
+個人帳本提供背景接收版：Richart 通知經自己的 Cloudflare Workers 免費接收服務驗證銀行與末 4 碼後，先進原本 Firebase 的「手機通知待確認」，成功時不開 Safari。待確認不計入支出、分類統計或 CSV，補好說明與分類後才正式入帳；不串接 AI。
 
-**發布狀態：背景版已完成本機與原生捷徑測試，尚待專案擁有者同意 Blaze 計費後部署。現有線上版本與舊捷徑繼續運作。** 後端部署順序、資料範圍、憑證權限與測試方式見 [functions/README.md](functions/README.md)。
+接收服務使用 Cloudflare Workers Free，帳本保留 Firebase Spark，不需要 Blaze、信用卡或付費綁定。免費額度用完會拒絕請求，不自動升級。部署順序、受限服務身分與測試方式見 [worker/README.md](worker/README.md)。
 
-上線後，在原本的個人帳本「銀行自動記帳設定」完成：
+在原本的個人帳本「銀行自動記帳設定」完成：
 
 1. 開啟帳本同步，儲存銀行關鍵字及卡號末 4 碼。不提供完整卡號，也不需在捷徑重填。
-2. 加入 [銀行背景記帳](https://www.icloud.com/shortcuts/4272d179108f4076aa557226b6aab076)，回 App 按「已加入，綁定並測試連線」。設定只交給自己的主捷徑，連線測試不新增帳目。
+2. 加入 [銀行背景記帳](https://www.icloud.com/shortcuts/8648f008f0e94bcdaf81d487cbc16ae8)，回 App 按「已加入，綁定並測試連線」。設定只交給自己的主捷徑，連線測試不新增帳目。
 3. 加入 [Richart 背景記帳](https://www.icloud.com/shortcuts/43a2030779cc4fb188f72c1132773e80)，在 iPhone 開啟其自動化開關。已帶入 Richart 通知來源及背景主捷徑，不需另選 Richart Life。
 4. 停用舊「Richart 通知自動化」的開關，避免它仍開 Safari。App 會提供捷徑設定入口與最近一次背景接收結果，無法代替手機啟用開關。
 
@@ -53,7 +53,7 @@
 
 原本 [銀行通知記帳](https://www.icloud.com/shortcuts/1e2ff51948f94e508a80098f7367b2f7) 與 [Richart 通知自動化](https://www.icloud.com/shortcuts/bb42192198bf423183c8361030091878) 繼續保留。這條流程開啟 Safari 後才記帳，使用同一個同步帳號連回原本帳本；通知以網址片段傳入並立即移除，不進 HTTP 查詢參數，不保存或上傳原始通知。最近接收結果僅存該瀏覽器。
 
-個人帳本的舊版通知同樣先進待確認；共用帳本沿用原本測試、同意與分攤規則。原始範本為 `scripts/ios-bank-shortcut.json`、`scripts/ios-richart-trigger.json`。可從個人設定內收合的「舊版：開啟 Safari 記帳」查看，不會在背景版部署前停用它。
+個人帳本的舊版通知同樣先進待確認；共用帳本沿用原本測試、同意與分攤規則。原始範本為 `scripts/ios-bank-shortcut.json`、`scripts/ios-richart-trigger.json`。可從個人設定內收合的「舊版：開啟 Safari 記帳」查看；切換時請手動停用舊來源，避免它仍開網頁。
 
 ## 🚀 快速開始
 
@@ -61,7 +61,7 @@
 確保你已經安裝 Node.js，然後執行：
 ```bash
 npm install
-npm ci --prefix functions
+npm ci --prefix worker
 ```
 
 ### 2. 啟動開發環境

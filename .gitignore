@@ -16,6 +16,8 @@ dist-ssr/
 build/
 coverage/
 functions/lib/
+.wrangler/
+.dev.vars*
 
 # Editor directories and files
 .vscode/*

@@ -28,7 +28,7 @@ test('App 綁定內容符合原生驗證格式，其他網址或不完整憑證�
   const patterns = main.WFWorkflowActions.filter((action: any) => action.WFWorkflowActionIdentifier.endsWith('.text.match')).map((action: any) => action.WFWorkflowActionParameters.WFMatchTextPattern);
   const guard = new RegExp(patterns.find((pattern: string) => pattern.startsWith('^\\{')));
   assert.ok(guard.test(config));
-  assert.ok(!guard.test(config.replace('expense-splitting-a9b78', 'other-project')));
+  assert.ok(!guard.test(config.replace('expense-bank-background', 'other-service')));
   assert.ok(!guard.test(config.replace('https:', 'http:')));
   assert.throws(() => backgroundSetupUrl('bad'));
   assert.ok(!guard.test(config + '\nextra'));

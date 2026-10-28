@@ -1,8 +1,8 @@
 export const bankBackgroundName = '銀行背景記帳';
 export const richartBackgroundName = 'Richart 背景記帳';
-export const bankBackgroundEndpoint = 'https://asia-east1-expense-splitting-a9b78.cloudfunctions.net/bankInboxApi';
+export const bankBackgroundEndpoint = 'https://expense-bank-background.poetes-wine-catalog.workers.dev';
 export const bankBackgroundSetupMarker = 'expense-bank-background:';
-export const bankBackgroundInstallUrl = 'https://www.icloud.com/shortcuts/4272d179108f4076aa557226b6aab076';
+export const bankBackgroundInstallUrl = 'https://www.icloud.com/shortcuts/8648f008f0e94bcdaf81d487cbc16ae8';
 export const richartBackgroundInstallUrl = 'https://www.icloud.com/shortcuts/43a2030779cc4fb188f72c1132773e80';
 
 export function backgroundSetupUrl(token: string) {

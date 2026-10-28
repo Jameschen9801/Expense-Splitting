@@ -1,15 +1,17 @@
-import test, { after, before, beforeEach } from 'node:test';
+import test, { before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { initializeApp, deleteApp } from 'firebase-admin/app';
-import { getDatabase } from 'firebase-admin/database';
 import { bankExpenseIdentity, newBankRule } from '../../src/lib/bankShortcuts';
 import { taipeiToday } from '../../src/lib/bankBackground';
 
 // Deliberately fixed to the local demo namespace, never a production project.
-process.env.FIREBASE_DATABASE_EMULATOR_HOST = '127.0.0.1:9000';
-const app = initializeApp({ projectId: 'demo-expense-splitting', databaseURL: 'https://demo-expense-splitting-default-rtdb.firebaseio.com' }, 'background-tests');
-const db = getDatabase(app);
-const base = 'http://127.0.0.1:5001/demo-expense-splitting/asia-east1/bankInboxApi';
+const base = 'http://127.0.0.1:8787';
+const serviceUid = process.env.TEST_WORKER_UID;
+if (!serviceUid) throw new Error('Run npm run test:background to create the local-only service session');
+const db = { ref(path = '') { return {
+  async get() { const response = await fetch('http://127.0.0.1:9000/' + path + '.json?ns=demo-expense-splitting-default-rtdb', { headers: { Authorization: 'Bearer owner' } }); if (!response.ok) throw new Error('Local fixture read failed'); const value = await response.json(); return { val: () => value, exists: () => value !== null }; },
+  async set(value: unknown) { const response = await fetch('http://127.0.0.1:9000/' + path + '.json?ns=demo-expense-splitting-default-rtdb', { method: 'PUT', headers: { Authorization: 'Bearer owner', 'Content-Type': 'application/json' }, body: JSON.stringify(value) }); if (!response.ok) throw new Error('Local fixture write failed'); },
+  async remove() { return this.set(null); },
+}; } };
 const notice = '【信用卡消費通知】您的Richart卡(末四碼0123)於10/26-19:04刷卡消費約新臺幣58元，實際消費資訊以帳單為準，如有疑問請洽客服';
 let uid: string, loginToken: string, key: string;
 const rule = newBankRule({ bank: 'Richart', last4: '0123', groupCode: '123456', payer: 'A', participants: ['A'], category: 'food', mode: 'auto', limit: 1e9 });
@@ -22,18 +24,17 @@ async function post(path: string, body: unknown, headers: Record<string, string>
 const manage = (action: string) => post('/manage', { action }, { Authorization: 'Bearer ' + loginToken, ...(key ? { 'X-Expense-Key': key } : {}) });
 const capture = (text = notice, token = key) => post('/capture', { mode: 'capture', text }, { 'X-Expense-Key': token });
 before(async () => {
-  assert.equal((await fetch(base + '/health')).status, 200, 'Start the auth/database/functions emulators first');
+  assert.equal((await fetch(base + '/health')).status, 200, 'Start the local auth/database emulators and Worker first');
   const response = await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: `background-${Date.now()}@example.test`, password: 'local-test-only-123', returnSecureToken: true }) });
   const user = await response.json() as any;
   assert.ok(user.localId); uid = user.localId; loginToken = user.idToken;
 });
 beforeEach(async () => {
   key = '';
-  await db.ref().set({ groups: { '123456': group() }, accountSync: { [uid]: profile() } });
+  await db.ref().set({ bankBackgroundServices: { [serviceUid!]: true }, groups: { '123456': group() }, accountSync: { [uid]: profile() } });
   const result = await manage('create');
   assert.equal(result.status, 200, result.body.code + ': ' + result.body.message); key = result.body.token; assert.match(key, /^[a-f0-9]{64}$/);
 });
-after(async () => { await deleteApp(app); });
 
 test('真實 HTTP 綁定僅存雜湊，狀態與連線測試不新增帳目', async () => {
   const before = (await db.ref('groups/123456').get()).val();
@@ -133,4 +134,15 @@ test('拒絕把通知放網址、超長或帶額外操作的要求', async () =>
   assert.equal((await post('/capture', { mode: 'capture', text: 'x'.repeat(33000) }, { 'X-Expense-Key': key })).status, 413);
   assert.equal((await fetch(base + '/capture')).status, 405);
   assert.equal((await db.ref('groups/123456/bankInbox').get()).exists(), false);
+});
+test('只允許自己的 App 跨來源連線，原生捷徑無 Origin 仍可使用', async () => {
+  const preflight = await fetch(base + '/manage', { method: 'OPTIONS', headers: { Origin: 'https://jameschen9801.github.io', 'Access-Control-Request-Method': 'POST' } });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), 'https://jameschen9801.github.io');
+  const denied = await post('/capture', { mode: 'capture', text: notice }, { Origin: 'https://unrelated.example', 'X-Expense-Key': key });
+  assert.equal(denied.status, 403);
+  assert.equal((await db.ref('groups/123456/bankInbox').get()).exists(), false);
+  const malformed = await fetch(base + '/capture', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Expense-Key': key }, body: '{invalid' });
+  assert.equal(malformed.status, 400);
+  assert.equal((await capture()).body.status, 'pending');
 });

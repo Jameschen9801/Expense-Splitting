@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "expense-bank-background-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-28",
+  "send_metrics": false,
+  "observability": { "enabled": false },
+  "vars": {
+    "FIREBASE_PROJECT_ID": "demo-expense-splitting",
+    "FIREBASE_DATABASE_URL": "http://127.0.0.1:9000",
+    "FIREBASE_API_KEY": "demo-key",
+    "AUTH_EMULATOR_ORIGIN": "http://127.0.0.1:9099"
+  }
+}

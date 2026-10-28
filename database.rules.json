@@ -4,8 +4,8 @@
     ".write": false,
     "accountSync": {
       "$uid": {
-        ".read": "auth != null && auth.uid == $uid",
-        ".write": "auth != null && auth.uid == $uid && newData.exists()",
+        ".read": "(auth != null && auth.uid == $uid) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
+        ".write": "(auth != null && auth.uid == $uid && newData.exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
         ".validate": "newData.hasChildren(['version','bank']) && newData.child('version').val() == 1",
         "version": {
           ".validate": "newData.val() == 1"
@@ -33,7 +33,8 @@
         "bank": {
           ".validate": "newData.hasChildren(['rules','bridge','revision'])",
           "rules": {
-            ".validate": "newData.isString() && newData.val().length <= 200000"
+            ".validate": "newData.isString() && newData.val().length <= 200000",
+            ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true"
           },
           "bridge": {
             ".validate": "newData.isString() && newData.val().matches(/^[a-f0-9]{64}$/) && (!data.exists() || newData.val() == data.val())"
@@ -52,8 +53,8 @@
     },
     "groups": {
       "$code": {
-        ".read": "$code.matches(/^\\d{6}$/) && (!data.child('security').exists() || auth != null) && (data.child('kind').val() != 'personal' || (auth != null && auth.uid == data.child('security/ownerUid').val()))",
-        ".write": "(!root.child('deletedPersonalLedgers').child($code).exists() && ($code.matches(/^\\d{6}$/) && newData.exists() && ((data.exists() && !data.child('security').exists() && !newData.child('security').exists()) || (auth != null && newData.child('security').exists() && ((!data.exists() && newData.child('security/ownerUid').val() == auth.uid) || auth.uid == data.child('security/ownerUid').val()))))) || (!newData.exists() && data.child('kind').val() == 'personal' && auth != null && auth.uid == data.child('security/ownerUid').val() && newData.parent().parent().child('deletedPersonalLedgers').child($code).child('ownerUid').val() == auth.uid)",
+        ".read": "($code.matches(/^\\d{6}$/) && (!data.child('security').exists() || auth != null) && (data.child('kind').val() != 'personal' || (auth != null && auth.uid == data.child('security/ownerUid').val()))) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
+        ".write": "((!root.child('deletedPersonalLedgers').child($code).exists() && ($code.matches(/^\\d{6}$/) && newData.exists() && ((data.exists() && !data.child('security').exists() && !newData.child('security').exists()) || (auth != null && newData.child('security').exists() && ((!data.exists() && newData.child('security/ownerUid').val() == auth.uid) || auth.uid == data.child('security/ownerUid').val()))))) || (!newData.exists() && data.child('kind').val() == 'personal' && auth != null && auth.uid == data.child('security/ownerUid').val() && newData.parent().parent().child('deletedPersonalLedgers').child($code).child('ownerUid').val() == auth.uid)) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
         ".validate": "!root.child('deletedPersonalLedgers').child($code).exists() && (newData.hasChildren(['code','name','members','createdAt']) && newData.child('code').val() == $code && newData.child('name').isString() && newData.child('members').hasChildren() && (!newData.child('kind').exists() || newData.child('kind').val() == 'personal' || newData.child('kind').val() == 'shared') && (!data.exists() || newData.child('kind').val() == data.child('kind').val()) && (newData.child('kind').val() != 'personal' || (newData.child('security').exists() && newData.child('members').child(newData.child('security/users').child(newData.child('security/ownerUid').val()).child('name').val()).val() == true && !newData.child('transfers').exists()))) && (!data.child('bankInbox').exists() || newData.child('bankInbox').exists())",
         "security": {
           ".validate": "newData.hasChildren(['version','ownerUid','users','names']) && newData.child('version').val() == 1 && newData.child('ownerUid').isString() && newData.child('users').child(newData.child('ownerUid').val()).child('role').val() == 'owner' && (!data.exists() || newData.child('ownerUid').val() == data.child('ownerUid').val())",
@@ -65,7 +66,7 @@
           },
           "users": {
             "$uid": {
-              ".write": "auth != null && $uid == auth.uid && data.parent().parent().child('version').val() == 1 && newData.exists() && ((!data.exists() && newData.child('role').val() == 'member') || (newData.child('name').val() == data.child('name').val() && newData.child('nameKey').val() == data.child('nameKey').val() && newData.child('role').val() == data.child('role').val())) && (root.child('groups').child($code).child('kind').val() != 'personal' || auth.uid == root.child('groups').child($code).child('security/ownerUid').val())",
+              ".write": "(auth != null && $uid == auth.uid && data.parent().parent().child('version').val() == 1 && newData.exists() && ((!data.exists() && newData.child('role').val() == 'member') || (newData.child('name').val() == data.child('name').val() && newData.child('nameKey').val() == data.child('nameKey').val() && newData.child('role').val() == data.child('role').val())) && (root.child('groups').child($code).child('kind').val() != 'personal' || auth.uid == root.child('groups').child($code).child('security/ownerUid').val())) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
               ".validate": "newData.hasChildren(['name','nameKey','role']) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 12 && newData.child('name').val() != '__proto__' && newData.child('name').val() != 'constructor' && newData.child('name').val() != 'prototype' && newData.child('nameKey').val() == newData.child('name').val() && newData.parent().parent().child('names').child(newData.child('name').val()).val() == $uid && (($uid == newData.parent().parent().child('ownerUid').val() && newData.child('role').val() == 'owner') || ($uid != newData.parent().parent().child('ownerUid').val() && newData.child('role').val() == 'member')) && (newData.parent().parent().parent().child('kind').val() != 'personal' || $uid == newData.parent().parent().child('ownerUid').val())",
               "$other": {
                 ".validate": "$other == 'name' || $other == 'nameKey' || $other == 'role'"
@@ -74,42 +75,45 @@
           },
           "names": {
             "$name": {
-              ".write": "auth != null && data.parent().parent().child('version').val() == 1 && newData.val() == auth.uid && (!data.exists() || data.val() == auth.uid) && (root.child('groups').child($code).child('kind').val() != 'personal' || auth.uid == root.child('groups').child($code).child('security/ownerUid').val())",
+              ".write": "(auth != null && data.parent().parent().child('version').val() == 1 && newData.val() == auth.uid && (!data.exists() || data.val() == auth.uid) && (root.child('groups').child($code).child('kind').val() != 'personal' || auth.uid == root.child('groups').child($code).child('security/ownerUid').val())) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
               ".validate": "newData.isString() && newData.parent().parent().child('users').child(newData.val()).child('name').val() == $name"
             }
           },
           "$other": {
             ".validate": false
-          }
+          },
+          ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
         },
         "members": {
           "$name": {
-            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.val() == true && $name == root.child('groups').child($code).child('security/users').child(auth.uid).child('name').val() && (!data.exists() || data.val() == true)",
+            ".write": "(auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.val() == true && $name == root.child('groups').child($code).child('security/users').child(auth.uid).child('name').val() && (!data.exists() || data.val() == true)) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
             ".validate": "(!newData.parent().parent().child('security').exists() || newData.val() == true) && (newData.parent().parent().child('kind').val() != 'personal' || $name == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val())"
           }
         },
         "expenses": {
           "$id": {
-            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()",
+            ".write": "(auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
             ".validate": "(!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('desc').isString() && newData.child('payer').isString() && newData.child('participants').hasChildren() && (newData.child('splitMode').val() == 'equal' || newData.child('splitMode').val() == 'custom' || newData.child('splitMode').val() == 'percent') && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))) && (newData.parent().parent().child('kind').val() != 'personal' || (newData.child('payer').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('participants/0').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('splitMode').val() == 'equal'))",
             "participants": {
               "$index": {
                 ".validate": "newData.parent().parent().parent().parent().child('kind').val() != 'personal' || ($index == '0' && newData.val() == newData.parent().parent().parent().parent().child('security/users').child(newData.parent().parent().parent().parent().child('security/ownerUid').val()).child('name').val())"
               }
             }
-          }
+          },
+          ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
         },
         "transfers": {
           "$id": {
-            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()",
+            ".write": "(auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
             ".validate": "(!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','from','to']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('from').isString() && newData.child('to').isString() && newData.child('from').val() != newData.child('to').val() && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))) && (newData.parent().parent().child('kind').val() != 'personal')"
           }
         },
         "history": {
           "$id": {
-            ".write": "auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && !data.exists() && newData.exists()",
-            ".validate": "!newData.parent().parent().child('security').exists() || (newData.child('id').val() == $id && newData.child('at').isNumber() && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('actorUid').val() == auth.uid && newData.child('actor').val() == newData.parent().parent().child('security/users').child(auth.uid).child('name').val())))"
-          }
+            ".write": "((auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && !data.exists() && newData.exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)) || (auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal' && !data.exists() && newData.exists() && $id.matches(/^mebank_[a-f0-9]{64}$/) && newData.child('id').val() == $id && $id == 'm' + newData.child('target').val() && newData.child('action').val() == 'bankDraft.put' && newData.child('actorUid').val() == newData.parent().parent().child('security/ownerUid').val() && newData.child('actor').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.parent().parent().child('bankInbox').child(newData.child('target').val()).child('_lastAudit/id').val() == $id && newData.parent().parent().child('bankInbox').child(newData.child('target').val()).child('createdAt').val() == newData.child('at').val())",
+            ".validate": "(!newData.parent().parent().child('security').exists() || (newData.child('id').val() == $id && newData.child('at').isNumber() && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('actorUid').val() == auth.uid && newData.child('actor').val() == newData.parent().parent().child('security/users').child(auth.uid).child('name').val())))) || (auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal' && !data.exists() && newData.exists() && $id.matches(/^mebank_[a-f0-9]{64}$/) && newData.child('id').val() == $id && $id == 'm' + newData.child('target').val() && newData.child('action').val() == 'bankDraft.put' && newData.child('actorUid').val() == newData.parent().parent().child('security/ownerUid').val() && newData.child('actor').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.parent().parent().child('bankInbox').child(newData.child('target').val()).child('_lastAudit/id').val() == $id && newData.parent().parent().child('bankInbox').child(newData.child('target').val()).child('createdAt').val() == newData.child('at').val())"
+          },
+          ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
         },
         "bankInbox": {
           ".validate": "newData.parent().child('kind').val() == 'personal'",
@@ -122,20 +126,66 @@
             },
             "$other": {
               ".validate": "$other == 'id' || $other == 'amount' || $other == 'date' || $other == 'createdAt' || $other == 'desc' || $other == 'payer' || $other == 'participants' || $other == 'splitMode' || $other == 'bank' || $other == 'last4' || $other == 'category' || $other == 'shares' || $other == 'percentages' || $other == 'revision' || $other == 'createdBy' || $other == 'createdByUid' || $other == 'updatedAt' || $other == 'updatedBy' || $other == 'updatedByUid' || $other == 'lastMutationId' || $other == '_lastAudit' || $other == '_deleted'"
-            }
-          }
+            },
+            ".write": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal' && !data.exists() && newData.exists() && !root.child('deletedPersonalLedgers').child($code).exists() && $id.matches(/^ebank_[a-f0-9]{64}$/) && newData.child('revision').val() == 1 && newData.child('category').val() == 'other' && newData.child('createdByUid').val() == newData.parent().parent().child('security/ownerUid').val() && newData.child('updatedByUid').val() == newData.parent().parent().child('security/ownerUid').val() && newData.child('lastMutationId').val() == 'm' + $id && newData.child('createdAt').val() <= now + 60000 && newData.child('_lastAudit/id').val() == 'm' + $id && newData.child('_lastAudit/action').val() == 'bankDraft.put' && newData.child('_lastAudit/target').val() == $id && newData.child('_lastAudit/actorUid').val() == newData.parent().parent().child('security/ownerUid').val()"
+          },
+          ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
         }
       }
     },
     "deletedPersonalLedgers": {
       "$code": {
-        ".read": "$code.matches(/^\\d{6}$/) && auth != null && (!data.exists() || data.child('ownerUid').val() == auth.uid)",
-        ".write": "$code.matches(/^\\d{6}$/) && auth != null && !data.exists() && newData.exists() && newData.child('ownerUid').val() == auth.uid && root.child('groups').child($code).child('kind').val() == 'personal' && root.child('groups').child($code).child('security/ownerUid').val() == auth.uid && !newData.parent().parent().child('groups').child($code).exists()",
+        ".read": "($code.matches(/^\\d{6}$/) && auth != null && (!data.exists() || data.child('ownerUid').val() == auth.uid)) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
+        ".write": "($code.matches(/^\\d{6}$/) && auth != null && !data.exists() && newData.exists() && newData.child('ownerUid').val() == auth.uid && root.child('groups').child($code).child('kind').val() == 'personal' && root.child('groups').child($code).child('security/ownerUid').val() == auth.uid && !newData.parent().parent().child('groups').child($code).exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
         ".validate": "newData.hasChildren(['ownerUid','deletedAt']) && newData.child('ownerUid').isString() && newData.child('deletedAt').isNumber() && newData.child('deletedAt').val() > 0 && newData.child('deletedAt').val() <= now",
         "ownerUid": {
           ".validate": "newData.isString()"
         },
         "deletedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "bankBackgroundServices": {
+      ".read": false,
+      ".write": false
+    },
+    "bankIngressKeys": {
+      "$digest": {
+        ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true",
+        ".write": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && !data.exists() && newData.exists()",
+        ".validate": "$digest.matches(/^[a-f0-9]{64}$/) && newData.hasChildren(['uid','createdAt']) && newData.child('uid').isString() && newData.child('uid').val().matches(/^[A-Za-z0-9_-]{1,128}$/) && newData.child('createdAt').isNumber()",
+        "uid": {
+          ".validate": "newData.isString()"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "bankIngressUsers": {
+      "$uid": {
+        ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true",
+        ".write": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && newData.exists()",
+        ".validate": "$uid.matches(/^[A-Za-z0-9_-]{1,128}$/)",
+        "keys": {
+          "$digest": {
+            ".validate": "$digest.matches(/^[a-f0-9]{64}$/) && newData.hasChildren(['enabled','createdAt']) && newData.child('enabled').isBoolean() && newData.child('createdAt').isNumber()"
+          }
+        },
+        "lastDelivery": {
+          ".validate": "newData.hasChildren(['at','status','message']) && newData.child('at').isNumber() && newData.child('status').isString() && newData.child('status').val().matches(/^(ready|pending|duplicate|ignored|error)$/) && newData.child('message').isString() && newData.child('message').val().length <= 300"
+        },
+        "lastKeyCreatedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "revokedAt": {
           ".validate": "newData.isNumber()"
         },
         "$other": {

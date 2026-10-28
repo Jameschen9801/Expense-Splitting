@@ -12,7 +12,7 @@
     "test:logic": "tsx --test src/lib/*.test.ts",
     "test:rules": "tsx --test scripts/database-rules.test.ts",
     "test:pwa": "tsx --test scripts/pwa.test.ts",
-    "test:background": "tsx --test functions/src/api.test.ts"
+    "test:background": "node scripts/test-bank-worker.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

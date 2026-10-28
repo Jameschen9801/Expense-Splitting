@@ -141,6 +141,57 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+const serviceRef = (path = '') => env.authenticatedContext('bank-service').database().ref(path || undefined);
+async function seedBankService() {
+  await env.withSecurityRulesDisabled(context => context.database().ref().update({
+    'bankBackgroundServices/bank-service': true,
+    'groups/654321': cloud(personal),
+    'accountSync/owner': { version: 1, books: { '654321': { code: '654321', name: personal.name, myName: 'A' } }, bank: { rules: '[]', bridge: 'b'.repeat(64), revision: 1 } },
+  }));
+}
+function serviceCapture() {
+  const id = 'ebank_' + 'a'.repeat(64), at = Date.now();
+  const next = applyChange(personal, { type: 'bankDraft.put', draft: { ...personalExpense, id, createdAt: at, category: 'other', bank: 'Richart', last4: '0123' }, meta: { id: 'm' + id, actor: 'A', actorUid: 'owner', at, expected: null } });
+  return { id, draft: cloud(next).bankInbox[id], audit: next.history!['m' + id] };
+}
+test('背景服務只能讀取所需路徑，不能列出帳號、讀同步憑證或變更設定', async () => {
+  await seedBankService();
+  for (const path of ['accountSync/owner/bank/rules', 'groups/654321/security', 'groups/654321/expenses', 'groups/654321/bankInbox', 'groups/654321/history']) await assertSucceeds(serviceRef(path).get());
+  for (const path of ['', 'groups', 'groups/654321', 'groups/123456/security', 'accountSync', 'accountSync/owner', 'accountSync/owner/bank/bridge', 'accountSync/owner/books', 'bankBackgroundServices/bank-service']) await assertFails(serviceRef(path).get());
+  await assertFails(serviceRef('accountSync/owner/bank/rules').set('[]'));
+  await assertFails(serviceRef('groups/654321/name').set('不能改名'));
+  await assertFails(serviceRef('groups/654321/security/ownerUid').set('bank-service'));
+  await assertFails(serviceRef('groups/123456/security/users/bank-service').set({ name: 'D', nameKey: 'D', role: 'member' }));
+  await assertFails(serviceRef('bankBackgroundServices/another-service').set(true));
+  const ownServiceBook = { ...personal, security: { ...personal.security!, ownerUid: 'bank-service', users: { 'bank-service': { name: 'A', nameKey: 'A', role: 'owner' as const } }, names: { A: 'bank-service' } } };
+  await assertFails(serviceRef('groups/765432').set(cloud({ ...ownServiceBook, code: '765432' })));
+});
+test('背景服務可原子新增待確認及歷史，但不能覆寫、刪除或修改正式帳目', async () => {
+  await seedBankService();
+  const { id, draft, audit } = serviceCapture();
+  await assertSucceeds(serviceRef().update({ ['groups/654321/bankInbox/' + id]: draft, ['groups/654321/history/m' + id]: audit }));
+  await assertFails(serviceRef('groups/654321/bankInbox/' + id + '/amount').set(999));
+  await assertFails(serviceRef('groups/654321/bankInbox/' + id + '/_deleted').set(true));
+  await assertFails(serviceRef('groups/654321/bankInbox/' + id).remove());
+  await assertFails(serviceRef('groups/654321/history/m' + id).set({ ...audit, at: Date.now() + 1 }));
+  await assertFails(serviceRef('groups/654321/history/m' + id).remove());
+  await assertFails(serviceRef('groups/654321/expenses/' + id).set(draft));
+  await assertFails(serviceRef('groups/654321').remove());
+});
+test('背景服務拒絕偽造身分、共用帳本、任意歷史與已刪帳本，撤銷登錄立即生效', async () => {
+  await seedBankService();
+  const { id, draft, audit } = serviceCapture();
+  await assertFails(serviceRef('groups/654321/bankInbox/' + id).set({ ...draft, createdByUid: 'stranger' }));
+  await assertFails(serviceRef('groups/654321/bankInbox/' + id).set({ ...draft, category: 'food' }));
+  await assertFails(serviceRef('groups/654321/bankInbox/' + id).set({ ...draft, rawNotification: '不保存全文' }));
+  await assertFails(serviceRef('groups/654321/history/m' + id).set(audit));
+  await assertFails(serviceRef('groups/123456/bankInbox/' + id).set(draft));
+  await assertSucceeds(env.authenticatedContext('owner').database().ref().update(personalLedgerDeletionUpdate(personal, 'owner', { '.sv': 'timestamp' })));
+  await assertFails(serviceRef().update({ ['groups/654321/bankInbox/' + id]: draft, ['groups/654321/history/m' + id]: audit }));
+  await env.withSecurityRulesDisabled(context => context.database().ref('bankBackgroundServices/bank-service').remove());
+  await assertFails(serviceRef('accountSync/owner/bank/rules').get());
+  await assertFails(serviceRef('bankIngressKeys/' + 'a'.repeat(64)).set({ uid: 'owner', createdAt: Date.now() }));
+});
 test('手機通知待確認只供本人讀寫，不能混入共用帳本或其他成員',async()=>{
   const root=env.authenticatedContext('owner').database().ref('groups/654321');
   const draft={...personalExpense,id:'bank1',category:'other' as const,bank:'測試銀行',last4:'0123'};

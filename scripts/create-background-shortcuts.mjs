@@ -1,7 +1,9 @@
 // Builds generic Apple workflows only. Never put an account key in this script.
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-const endpoint = 'https://asia-east1-expense-splitting-a9b78.cloudfunctions.net/bankInboxApi/capture';
+const protocol = readFileSync(new URL('../src/lib/bankBackgroundProtocol.ts', import.meta.url), 'utf8');
+const endpoint = protocol.match(/export const bankBackgroundEndpoint = '([^']+)'/)?.[1] + '/capture';
+if (endpoint !== 'https://expense-bank-background.poetes-wine-catalog.workers.dev/capture') throw new Error('Unexpected background service');
 // Shortcuts saves a Text item with .txt even when a .json path is supplied.
 // Use the same text filename for Save File and Get File on every device.
 const file = 'ExpenseSplitting-bank-background.txt';
@@ -25,7 +27,7 @@ const request = (name, key, mode, input) => add(name, 'downloadurl', { WFURL: en
 const strictConfig = '^\\{"version":1,"endpoint":"' + endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '","token":"[a-f0-9]{64}"\\}$';
 const keyFrom = (name, input) => first(name + '-first', match(name, input, '(?<="token":")[a-f0-9]{64}(?=")'));
 
-add('', 'comment', { WFCommentActionText: `銀行背景記帳・個人帳本待確認版\n先在 App 設定銀行與卡號末 4 碼，加入本捷徑後按「綁定並測試連線」。設定僅存於 Shortcuts/${file}，請勿分享該檔案。公開範本不含任何銀行、卡號或帳目。\n只將通知以 HTTPS POST 傳到自己的 expense-splitting-a9b78 接收服務，不經瀏覽器，不使用 AI，不付款、不轉帳。成功、重複或不符合規則時安靜結束。接收服務只保存辨識後的待確認資料，不保存原始通知。\n本捷徑不會自行監聽通知。另加入「Richart 背景記帳」並在 iPhone 啟用自動化；同時停用舊版「Richart 通知自動化」，避免舊版仍開 Safari。鎖定時執行仍受 iOS 權限、網路與檔案存取限制，請先在解鎖時完成連線授權。網路中斷不會自動補送，請確認 App 接收結果。` });
+add('', 'comment', { WFCommentActionText: `銀行背景記帳・個人帳本待確認版\n先在 App 設定銀行與卡號末 4 碼，加入本捷徑後按「綁定並測試連線」。設定僅存於 Shortcuts/${file}，請勿分享該檔案。公開範本不含任何銀行、卡號或帳目。\n只將通知以 HTTPS POST 傳到自己的 Cloudflare 免費接收服務，再存回原本 Firebase 帳本，不經瀏覽器，不使用 AI，不付款、不轉帳。成功、重複或不符合規則時安靜結束。接收服務只保存辨識後的待確認資料，不保存原始通知。\n本捷徑不會自行監聽通知。另加入「Richart 背景記帳」並在 iPhone 啟用自動化；同時停用舊版「Richart 通知自動化」，避免舊版仍開 Safari。鎖定時執行仍受 iOS 權限、網路與檔案存取限制，請先在解鎖時完成連線授權。網路中斷不會自動補送，請確認 App 接收結果。` });
 const input = text('input', { Value: { string: '\ufffc', attachmentsByRange: { '{0, 1}': { Type: 'ExtensionInput' } } }, WFSerializationType: 'WFTextTokenString' });
 const setup = match('setup-json', input, '(?<=^' + marker + ')\\{[\\s\\S]*\\}$');
 start('setup', setup);

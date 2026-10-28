@@ -2,9 +2,7 @@
   "database": {
     "rules": "database.rules.json"
   },
-  "functions": [{ "source": "functions", "codebase": "bank-background", "ignore": ["node_modules", ".git", "src", "README.md"], "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"] }],
   "emulators": {
-    "functions": { "host": "127.0.0.1", "port": 5001 },
     "database": {
       "host": "127.0.0.1",
       "port": 9000

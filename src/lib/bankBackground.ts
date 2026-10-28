@@ -36,6 +36,16 @@ export function personalBackgroundOwner(raw: any, uid: string): string | null {
 export async function backgroundIdentity(rule: BankRule, text: string) {
   return bankExpenseIdentity(rule, { channel: rule.channel, text });
 }
+export function buildBackgroundDraft(raw: any, uid: string, matched: { rule: BankRule; entry: BankEntry }, id: string, now: number) {
+  const owner = personalBackgroundOwner(raw, uid);
+  if (!owner || raw.code !== matched.rule.groupCode) throw new BankBackgroundError('ledger_unavailable', '個人帳本不存在或已無權限，請回 App 檢查', 403);
+  if (matched.rule.payer !== owner || matched.rule.participants.length !== 1 || matched.rule.participants[0] !== owner) throw new BankBackgroundError('rule_invalid', '銀行規則與個人帳本身分不符，請回 App 檢查', 422);
+  const group: Group = { code: raw.code, name: raw.name, kind: 'personal', members: [owner], expenses: [], transfers: [], createdAt: raw.createdAt, security: raw.security };
+  const captured = bankCapture(matched.rule, matched.entry, id, group, false, taipeiToday(now), now);
+  const meta: MutationMeta = { id: 'm' + id, actor: owner, actorUid: uid, at: now, expected: null };
+  const draft: BankDraft = updatedRecord({ ...captured.expense, bank: matched.rule.bank, last4: matched.rule.last4 }, undefined, meta);
+  return { draft, audit: auditEntry('bankDraft.put', id, undefined, draft, meta) };
+}
 export function applyBackgroundCapture(raw: any, uid: string, matched: { rule: BankRule; entry: BankEntry }, receipt: { id: string; equivalentIds: string[] }, now: number) {
   const owner = personalBackgroundOwner(raw, uid);
   if (!owner || raw.code !== matched.rule.groupCode) throw new BankBackgroundError('ledger_unavailable', '個人帳本不存在或已無權限，請回 App 檢查', 403);
@@ -44,11 +54,7 @@ export function applyBackgroundCapture(raw: any, uid: string, matched: { rule: B
   // receipt, even after the visible audit history has been pruned.
   const known = new Set([...Object.keys(raw.bankInbox || {}), ...Object.keys(raw.expenses || {}), ...Object.values(raw.expenses || {}).map((record: any) => record?.id)]);
   if (receipt.equivalentIds.some(id => known.has(id) || raw.history?.['m' + id])) return { value: raw, duplicate: true };
-  const group: Group = { code: raw.code, name: raw.name, kind: 'personal', members: [owner], expenses: [], transfers: [], createdAt: raw.createdAt, security: raw.security };
-  const captured = bankCapture(matched.rule, matched.entry, receipt.id, group, false, taipeiToday(now), now);
-  const meta: MutationMeta = { id: 'm' + receipt.id, actor: owner, actorUid: uid, at: now, expected: null };
-  const draft: BankDraft = updatedRecord({ ...captured.expense, bank: matched.rule.bank, last4: matched.rule.last4 }, undefined, meta);
-  const audit = auditEntry('bankDraft.put', receipt.id, undefined, draft, meta);
+  const { draft, audit } = buildBackgroundDraft(raw, uid, matched, receipt.id, now);
   const history = Object.fromEntries(Object.values({ ...raw.history, [audit.id]: audit }).sort((a: any, b: any) => b.at - a.at).slice(0, 300).map((entry: any) => [entry.id, entry]));
   return { value: withoutUndefined({ ...raw, bankInbox: { ...raw.bankInbox, [receipt.id]: { ...draft, _lastAudit: audit } }, history }), duplicate: false };
 }
