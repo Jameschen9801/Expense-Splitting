@@ -885,7 +885,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   };
 
   const openBankInstallation = () => {
-    toggleModal('groupSettings', false); setBankSettings(false);
+    toggleModal('groupSettings', false); setBankSettings(false); setDataSettings(false);
     history.pushState(history.state, '', location.pathname + location.search + bankInstallationHash);
     setBankInstallationOpen(true);
   };
@@ -1457,7 +1457,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
           </Modal>
         )}
       </>
-      {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} />}
+      {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} onOpenBankInstallation={openBankInstallation} />}
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
       {homeInboxSelect && <Modal title="選擇待確認帳本" onClose={() => setHomeInboxSelect(false)}><div className="space-y-3">{inboxBooks.map(item => <button type="button" className="btn w-full justify-between" key={item.book.code} onClick={() => { enterGroup(item.group, item.book.myName); setHomeInboxSelect(false); setBankInboxOpen(true); }}><span>{item.group.name}</span><span>{item.group.bankInbox?.length || 0} 筆待確認</span></button>)}</div></Modal>}

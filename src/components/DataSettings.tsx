@@ -1,13 +1,12 @@
-import { Fragment, useRef, useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import type { Group } from '../types';
 import { appUpdates, flushDraftBeforeNavigation } from '../lib/appUpdates';
 import { commitRestore, createBackup, downloadFile, groupCsv, planRestore, readBackup, type Backup, type RestorePlan } from '../lib/backup';
 import { utils } from '../lib/utils';
 import { Modal } from './Modal';
 import { AppearanceSettings } from './AppearanceSettings';
-import { BankShortcutSettings } from './BankShortcutSettings';
 
-export function DataSettings({ group, onClose }: { group: Group | null; onClose: () => void }) {
+export function DataSettings({ group, onClose, onOpenBankInstallation }: { group: Group | null; onClose: () => void; onOpenBankInstallation: () => void }) {
   const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
   const [message, setMessage] = useState('');
   const [preview, setPreview] = useState<{ backup: Backup; plan: RestorePlan; previous: string } | null>(null);
@@ -65,7 +64,11 @@ export function DataSettings({ group, onClose }: { group: Group | null; onClose:
       </div>
       {updates.message && <p role="status" className="text-xs text-ink-2 mt-3">{updates.message}</p>}
     </section>
-    <Fragment key={group?.code || 'none'}><BankShortcutSettings group={group} /></Fragment>
+    <section className="mb-6">
+      <h3 className="settings-heading">手機自動記帳</h3>
+      <p className="text-xs text-ink-3 leading-relaxed mb-3">銀行資料與捷徑安裝，統一在三步設定頁完成。</p>
+      <button type="button" className="btn w-full" onClick={onOpenBankInstallation}>前往三步設定</button>
+    </section>
     <section className="border-t border-line pt-4">
       <h3 className="settings-heading">資料備份</h3>
       <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、手機通知待確認、草稿與待同步資料，保留舊版備份相容性；不包含登入憑證與銀行捷徑識別碼。檔案含私人帳目，請妥善保管；新裝置請登入同一個同步帳號，備份本身不會授予帳本權限。</p>

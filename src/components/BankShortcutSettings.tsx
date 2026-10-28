@@ -134,7 +134,7 @@ export function BankShortcutSettings({ group, rulesOnly = false }: { group: Grou
       {test?.signature === signature && <p className="text-sm bg-paper-2 p-3 rounded-xl">{test.entry.desc} · NT$ {utils.fmt(test.entry.amount)} · {test.entry.date}</p>}
       {!personal && mode === 'auto' && <label className="bank-choice items-start"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} /><span>我同意符合這個規則的通知，開啟網站後直接新增支出。這不會代為付款或轉帳。</span></label>}
       <div className="flex gap-2"><button type="button" className="btn" onClick={() => { setFormOpen(false); setEditing(''); setSample(''); setTest(null); }}>取消</button><button type="button" className="btn btn-primary flex-1" onClick={save}>儲存銀行規則</button></div>
-    </fieldset> : !group && <p className="text-sm text-ink-3 py-4">請先開啟要記帳的個人帳本，再從「資料與 App」設定銀行規則。</p>}
+    </fieldset> : !group && <p className="text-sm text-ink-3 py-4">請先開啟要記帳的帳本，再進入銀行與卡片設定。</p>}
     <div className="mt-5 space-y-3">{rules.filter(rule => !group || rule.groupCode === group.code).map(rule => <div key={rule.id} className="rounded-2xl border border-line p-3">
       <p className="text-sm font-medium">{rule.bank} · {cardSuffixLabel(rule.last4)} {rule.last4} · {rule.enabled ? '啟用' : '停用'}</p><p className="text-xs text-ink-3 mt-1">{isPersonalLedger(group || storage.getGroup(rule.groupCode)) ? '自動收進待確認 · 填寫資料後入帳' : `${categoryLabel(rule.category)} · ${rule.mode === 'auto' ? '自動新增' : '先確認'} · 上限 NT$ ${utils.fmt(rule.limit)}`}</p>
       {rule.last4.length !== 4 && <p className="form-error mt-2">舊規則已停用，請編輯並改填卡號末 4 碼。</p>}
