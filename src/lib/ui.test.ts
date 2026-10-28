@@ -24,11 +24,12 @@ const expense: RecordItem = { id: 'e1', type: 'expense', desc: '午餐', amount:
 function render(records: RecordItem[], myName = '沛庭', filtered = false) {
   return renderToStaticMarkup(createElement(RecordsList, { groups: records.length ? { '2026-10-12': records } : {}, myName, filtered, resetKey: 'test', onClear() {}, onExpense() {}, onTransfer() {} }));
 }
-test('明細同時保留全額與精確分攤，未分攤者看到的是費用總額', () => {
+test('共用明細右側只顯示自己的正數分攤，未分攤及零元均留空', () => {
   const included = render([expense]); assert.ok(included.includes('先付 NT$100.01')); assert.ok(included.includes('你的分攤')); assert.ok(included.includes('50.01'));
-  const other = render([expense], '昕宇'); assert.ok(other.includes('費用總額')); assert.equal(other.includes('你的分攤'), false);
+  assert.ok(included.includes('record-own-expense'));
+  const other = render([expense], '昕宇'); assert.equal(other.includes('record-amount'), false); assert.ok(other.includes('你不需負擔'));
   const zero = render([{ ...expense, splitMode: 'custom', shares: [{ name: '沛庭', amount: 0 }, { name: '子晴', amount: 100.01 }] }]);
-  assert.ok(zero.includes('你的分攤')); assert.ok(zero.includes('>0.00<'));
+  assert.equal(zero.includes('record-amount'), false); assert.ok(zero.includes('先付 NT$100.01'));
 });
 test('空白與搜尋無結果有明確提示，長清單分批呈現', () => {
   assert.ok(render([]).includes('尚無任何記錄'));

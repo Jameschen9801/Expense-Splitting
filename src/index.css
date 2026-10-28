@@ -386,6 +386,22 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .money { font-variant-numeric: tabular-nums; font-weight: 650; letter-spacing: -0.3px; overflow-wrap: anywhere; }
 .record-amount .money { font-size: 18px; }
 .record-amount .amount-long { font-size: 14px; }
+.record-own-expense .money { color: var(--ui-danger); }
+.personal-sync-settings { padding: 18px; margin-bottom: 22px; border: 1px solid var(--ui-line); border-radius: 20px; background: var(--ui-muted); }
+.personal-sync-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.personal-sync-title > svg { color: var(--ui-accent); }
+.personal-sync-title h3 { font-size: 15px; font-weight: 600; flex: 1; }
+.personal-sync-title > span { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--ui-accent); }
+.personal-sync-settings p, .shared-match-notice p, .shared-source-detail p { font-size: 13px; line-height: 1.8; color: var(--ui-secondary); margin: 8px 0 14px; overflow-wrap: anywhere; }
+.personal-sync-settings .personal-sync-note { font-size: 12px; margin: 10px 0 0; color: var(--ui-subtle); }
+.personal-sync-confirm { margin-top: 14px; }
+.personal-sync-confirm > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.shared-sync-entry { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; margin-bottom: 10px; border: 1px solid var(--ui-line); border-radius: 18px; font-size: 13px; color: var(--ui-accent); background: var(--ui-surface); text-align: left; }
+.shared-match-notice, .shared-source-detail { padding: 16px; margin: 12px 0 18px; border: 1px solid var(--ui-line); border-radius: 16px; background: var(--ui-accent-soft); }
+.shared-match-notice strong, .shared-source-detail strong { font-size: 14px; font-weight: 600; }
+.shared-match-notice label { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.8; margin-top: 14px; }
+.shared-match-notice input[type="checkbox"] { width: 20px; height: 20px; flex: 0 0 20px; margin-top: 2px; }
+.shared-match-notice .btn { max-width: 100%; white-space: normal; }
 .currency { font-size: 0.7em; font-weight: 500; letter-spacing: 0; margin-right: 3px; }
 .mobile-add-button { background: var(--ui-accent); color: var(--ui-on-accent); min-height: 52px; padding: 12px 22px; font-size: 15px; bottom: calc(82px + env(safe-area-inset-bottom)); right: 18px; z-index: var(--layer-add); box-shadow: 0 6px 20px rgb(37 53 43 / 16%); }
 .settings-heading { font-size: 16px; font-weight: 600; color: var(--ui-text); margin-bottom: 14px; }

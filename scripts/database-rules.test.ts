@@ -6,6 +6,7 @@ import { applyChange } from '../src/lib/outbox';
 import { fingerprint } from '../src/lib/audit';
 import { cloudGroup } from '../src/lib/firebase';
 import { personalLedgerDeletionUpdate } from '../src/lib/ledgerDeletion';
+import { projectSharedExpenses } from '../src/lib/sharedExpenses';
 const cloud = (group: Group) => cloudGroup(group) as any;
 
 let env: RulesTestEnvironment;
@@ -141,6 +142,47 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('分攤同步設定只由本人存取，只能連結自己的個人帳本與正確的共用身分', async () => {
+  await privateRef().set(cloud(personal));
+  const own = env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456');
+  const link = {targetCode:'654321',memberName:'A',enabled:true};
+  await assertSucceeds(own.set(link)); await assertSucceeds(own.get());
+  await assertFails(env.authenticatedContext('member').database().ref('personalLedgerLinks/owner').get());
+  await assertFails(env.authenticatedContext('member').database().ref('personalLedgerLinks/owner/123456').set(link));
+  await assertFails(env.authenticatedContext('member').database().ref('personalLedgerLinks/member/123456').set({...link,memberName:'B'}));
+  await assertFails(own.set({...link,memberName:'B'}));
+  await assertFails(own.set({...link,targetCode:'123456'}));
+  await assertFails(own.set({...link,extra:'unexpected'}));
+  await assertFails(env.unauthenticatedContext().database().ref('personalLedgerLinks/owner').get());
+  await assertSucceeds(own.set({...link,enabled:false}));
+});
+test('舊版共用帳本也能設定分攤同步，個人帳本不能當來源', async () => {
+  await privateRef().set(cloud(personal));
+  const {security,...legacy}=group;
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456').set(legacy));
+  const links=env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner');
+  await assertSucceeds(links.child('123456').set({targetCode:'654321',memberName:'A',enabled:true}));
+  await assertFails(links.child('654321').set({targetCode:'654321',memberName:'A',enabled:true}));
+});
+test('同步分攤與通知連結可原子儲存，其他成員不能讀寫個人記錄', async () => {
+  const expense={...personalExpense,id:'shared',amount:2000,payer:'A',participants:['A','B']};
+  const [copy]=await projectSharedExpenses({...group,expenses:[expense]},'A','A');
+  const draft={...personalExpense,id:'ebank_notice',amount:2000,bank:'Richart',last4:'0123',category:'other' as const};
+  const initial={...personal,expenses:[copy],bankInbox:[draft],bankReceiptIds:[draft.id]};
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456').set({targetCode:'654321',memberName:'A',enabled:true});
+  await assertSucceeds(privateRef().set(cloud(initial)));
+  const {sharedSource,...detached}=cloud(initial).expenses[copy.id];
+  await assertFails(privateRef().child('expenses/'+copy.id).set(detached));
+  const linked=applyChange(initial,{type:'bankDraft.link',id:draft.id,expenseId:copy.id,meta:{id:'link',actor:'A',actorUid:'owner',at:3}});
+  await assertSucceeds(privateRef().set(cloudGroup(linked,cloud(initial))));
+  await assertFails(privateRef('member').child('expenses/'+copy.id).get());
+  await assertFails(privateRef('member').child('expenses/'+copy.id).set(copy));
+  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456/enabled').set(false);
+  const removed=applyChange(linked,{type:'expense.remove',id:copy.id,meta:{id:'unlink',actor:'A',actorUid:'owner',at:4}});
+  await assertSucceeds(privateRef().set(cloudGroup(removed,cloudGroup(linked,cloud(initial)))));
+  await assertFails(privateRef().child('expenses/'+copy.id).set(cloud(initial).expenses[copy.id]));
+});
 const serviceRef = (path = '') => env.authenticatedContext('bank-service').database().ref(path || undefined);
 async function seedBankService() {
   await env.withSecurityRulesDisabled(context => context.database().ref().update({
@@ -158,6 +200,8 @@ test('背景服務只能讀取所需路徑，不能列出帳號、讀同步憑�
   await seedBankService();
   for (const path of ['accountSync/owner/bank/rules', 'groups/654321/security', 'groups/654321/expenses', 'groups/654321/bankInbox', 'groups/654321/history']) await assertSucceeds(serviceRef(path).get());
   for (const path of ['', 'groups', 'groups/654321', 'groups/123456/security', 'accountSync', 'accountSync/owner', 'accountSync/owner/bank/bridge', 'accountSync/owner/books', 'bankBackgroundServices/bank-service']) await assertFails(serviceRef(path).get());
+  await assertFails(serviceRef('personalLedgerLinks/owner').get());
+  await assertFails(serviceRef('personalLedgerLinks/bank-service/123456').set({targetCode:'654321',memberName:'A',enabled:true}));
   await assertFails(serviceRef('accountSync/owner/bank/rules').set('[]'));
   await assertFails(serviceRef('groups/654321/name').set('不能改名'));
   await assertFails(serviceRef('groups/654321/security/ownerUid').set('bank-service'));

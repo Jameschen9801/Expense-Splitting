@@ -9,6 +9,7 @@ export interface Group {
   history?: Record<string, AuditEntry>;
   bankInbox?: BankDraft[];
   bankReceiptIds?: string[];
+  bankLinks?: Record<string, string>;
   security?: GroupSecurity;
 }
 
@@ -40,7 +41,17 @@ export interface Expense extends RecordMetadata {
   date: string;
   createdAt: number;
   category?: ExpenseCategory;
+  sharedSource?: {
+    groupCode: string;
+    groupName: string;
+    expenseId: string;
+    memberName: string;
+    totalAmount: number;
+    payer: string;
+  };
 }
+
+export type PersonalLedgerLink = { targetCode: string; memberName: string; enabled: boolean };
 
 export interface BankDraft extends Expense {
   bank: string;

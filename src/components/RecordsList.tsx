@@ -5,6 +5,7 @@ import { utils } from '../lib/utils';
 import { categoryLabel } from '../lib/categories';
 import { recordDateLabel } from '../lib/ui';
 import { CategoryIcon } from './CategoryIcon';
+import { memberExpenseAmount } from '../lib/sharedExpenses';
 
 export type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
 
@@ -37,21 +38,19 @@ export const RecordsList = memo(function RecordsList({ groups, myName, personal 
       <div className="day-items">
       {items.map(item => {
         if (item.type === 'expense') {
-          const myCost = item.participants.includes(myName)
-            ? (item.splitMode === 'equal' ? utils.equalShares(item.amount, item.participants) : item.shares || []).find(share => share.name === myName)?.amount || 0
-            : 0;
-          const included = item.participants.includes(myName);
-          const shownAmount = utils.fmt(personal ? item.amount : included ? myCost : item.amount);
+          const myCost = memberExpenseAmount(item, myName);
+          const showAmount = personal || myCost > 0;
+          const shownAmount = utils.fmt(personal ? item.amount : myCost);
           return <button type="button" key={item.id} onClick={() => onExpense(item)} className="record-row"
-            aria-label={personal ? `${item.desc}，${categoryLabel(item.category)}，支出 NT$${shownAmount}` : `${item.desc}，${categoryLabel(item.category)}，${item.payer}先付 NT$${utils.fmt(item.amount)}，${included ? '你的分攤' : '費用總額'} NT$${shownAmount}`}>
+            aria-label={personal ? `${item.desc}，${categoryLabel(item.category)}，支出 NT$${shownAmount}${item.sharedSource ? '，來自' + item.sharedSource.groupName : ''}` : `${item.desc}，${categoryLabel(item.category)}，${item.payer}先付 NT$${utils.fmt(item.amount)}，${myCost > 0 ? '你的分攤 NT$' + shownAmount : '你不需負擔'}`}>
             <span className="record-kind"><CategoryIcon category={item.category} /></span>
             <div className="min-w-0">
               <div className="record-name">{item.desc}</div>
-              <div className="record-meta">{personal ? categoryLabel(item.category) : item.payer + '先付 NT' + utils.fmt(item.amount)}</div>
+              <div className="record-meta">{personal ? item.sharedSource ? `分攤 · ${item.sharedSource.groupName}` : categoryLabel(item.category) : item.payer + '先付 NT$' + utils.fmt(item.amount)}</div>
             </div>
-            <div className="record-amount"><div className="record-amount-label">{personal ? '支出' : included ? '你的分攤' : '費用總額'}</div>
+            {showAmount && <div className={`record-amount ${!personal ? 'record-own-expense' : ''}`}><div className="record-amount-label">{personal ? '支出' : '你的分攤'}</div>
               <div className={`money ${shownAmount.length > 11 ? 'amount-long' : ''}`}><span className="currency">NT$</span>{shownAmount}</div>
-            </div>
+            </div>}
           </button>;
         }
         const shownAmount = utils.fmt(item.amount);

@@ -51,6 +51,18 @@
         }
       }
     },
+    "personalLedgerLinks": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid && root.child('bankBackgroundServices').child(auth.uid).val() != true",
+        ".write": "auth != null && auth.uid == $uid && root.child('bankBackgroundServices').child(auth.uid).val() != true",
+        "$source": {
+          ".validate": "$source.matches(/^\\d{6}$/) && newData.hasChildren(['targetCode','memberName','enabled']) && newData.child('targetCode').isString() && newData.child('targetCode').val().matches(/^\\d{6}$/) && newData.child('memberName').isString() && newData.child('memberName').val().length > 0 && newData.child('memberName').val().length <= 100 && newData.child('enabled').isBoolean() && (newData.child('enabled').val() == false || (root.child('groups').child($source).exists() && root.child('groups').child($source).child('kind').val() != 'personal' && root.child('groups').child(newData.child('targetCode').val()).child('kind').val() == 'personal' && root.child('groups').child(newData.child('targetCode').val()).child('security/ownerUid').val() == $uid && (root.child('groups').child($source).child('security/users').child($uid).child('name').val() == newData.child('memberName').val() || (!root.child('groups').child($source).child('security').exists()))))",
+          "$field": {
+            ".validate": "$field == 'targetCode' || $field == 'memberName' || $field == 'enabled'"
+          }
+        }
+      }
+    },
     "groups": {
       "$code": {
         ".read": "($code.matches(/^\\d{6}$/) && (!data.child('security').exists() || auth != null) && (data.child('kind').val() != 'personal' || (auth != null && auth.uid == data.child('security/ownerUid').val()))) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
@@ -93,7 +105,13 @@
         "expenses": {
           "$id": {
             ".write": "(auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
-            ".validate": "(!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('desc').isString() && newData.child('payer').isString() && newData.child('participants').hasChildren() && (newData.child('splitMode').val() == 'equal' || newData.child('splitMode').val() == 'custom' || newData.child('splitMode').val() == 'percent') && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))) && (newData.parent().parent().child('kind').val() != 'personal' || (newData.child('payer').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('participants/0').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('splitMode').val() == 'equal'))",
+            ".validate": "(!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('desc').isString() && newData.child('payer').isString() && newData.child('participants').hasChildren() && (newData.child('splitMode').val() == 'equal' || newData.child('splitMode').val() == 'custom' || newData.child('splitMode').val() == 'percent') && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))) && (newData.parent().parent().child('kind').val() != 'personal' || (newData.child('payer').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('participants/0').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('splitMode').val() == 'equal')) && (!data.child('sharedSource').exists() || newData.child('sharedSource').exists())",
+            "sharedSource": {
+              ".validate": "newData.parent().parent().parent().child('kind').val() == 'personal' && newData.hasChildren(['groupCode','groupName','expenseId','memberName','totalAmount','payer']) && newData.child('groupCode').isString() && newData.child('groupCode').val().matches(/^\\d{6}$/) && newData.child('groupName').isString() && newData.child('groupName').val().length <= 100 && newData.child('expenseId').isString() && newData.child('expenseId').val().length > 0 && newData.child('expenseId').val().length <= 150 && newData.child('memberName').isString() && newData.child('memberName').val().length > 0 && newData.child('memberName').val().length <= 100 && newData.child('totalAmount').isNumber() && newData.child('totalAmount').val() > 0 && newData.child('totalAmount').val() <= 1000000000 && newData.child('payer').isString() && newData.child('payer').val().length <= 100 && (newData.parent().child('_deleted').val() == true || (data.exists() && data.parent().child('_deleted').val() != true && newData.child('groupCode').val() == data.child('groupCode').val() && newData.child('groupName').val() == data.child('groupName').val() && newData.child('expenseId').val() == data.child('expenseId').val() && newData.child('memberName').val() == data.child('memberName').val() && newData.child('totalAmount').val() == data.child('totalAmount').val() && newData.child('payer').val() == data.child('payer').val()) || (auth != null && root.child('personalLedgerLinks').child(auth.uid).child(newData.child('groupCode').val()).child('enabled').val() == true && root.child('personalLedgerLinks').child(auth.uid).child(newData.child('groupCode').val()).child('targetCode').val() == $code && root.child('personalLedgerLinks').child(auth.uid).child(newData.child('groupCode').val()).child('memberName').val() == newData.child('memberName').val()))",
+              "$field": {
+                ".validate": "$field == 'groupCode' || $field == 'groupName' || $field == 'expenseId' || $field == 'memberName' || $field == 'totalAmount' || $field == 'payer'"
+              }
+            },
             "participants": {
               "$index": {
                 ".validate": "newData.parent().parent().parent().parent().child('kind').val() != 'personal' || ($index == '0' && newData.val() == newData.parent().parent().parent().parent().child('security/users').child(newData.parent().parent().parent().parent().child('security/ownerUid').val()).child('name').val())"
@@ -101,6 +119,12 @@
             }
           },
           ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
+        },
+        "bankLinks": {
+          ".validate": "newData.parent().child('kind').val() == 'personal'",
+          "$id": {
+            ".validate": "$id.matches(/^ebank_[A-Za-z0-9_-]+$/) && newData.isString() && newData.val().matches(/^eshared_[a-f0-9]{64}$/)"
+          }
         },
         "transfers": {
           "$id": {

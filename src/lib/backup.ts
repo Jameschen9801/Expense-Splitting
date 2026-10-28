@@ -33,6 +33,9 @@ function validRecord(record: any): record is Expense | Transfer {
   if (record.updatedAt != null && (typeof record.updatedAt !== 'number' || !Number.isFinite(record.updatedAt))) return false;
   if (['createdBy','createdByUid','updatedBy','updatedByUid','lastMutationId'].some(key => record[key] != null && !text(record[key], 150))) return false;
   if ('desc' in record) {
+    const source = record.sharedSource;
+    if (source != null && (!object(source) || !code(source.groupCode) || !text(source.groupName,100) || !recordId(source.expenseId)
+      || !text(source.memberName,100) || !source.memberName || !text(source.payer,100) || !amount(source.totalAmount))) return false;
     if (!text(record.desc, 200) || !text(record.payer, 100) || !names(record.participants) || !record.participants.length
       || !['equal', 'custom', 'percent'].includes(record.splitMode)
       || record.category && !categories.some(category => category.id === record.category)) return false;
@@ -60,7 +63,7 @@ function validGroup(group: any): group is Group {
     || new Set([...group.expenses, ...group.transfers].map(record => record.id)).size !== group.expenses.length + group.transfers.length) return false;
   if (group.history && (!object(group.history) || Object.keys(group.history).length > 300 || Object.entries(group.history).some(([id, entry]: [string, any]) =>
     !object(entry) || entry.id !== id || !text(entry.actor, 100) || !text(entry.target, 200) || !Number.isFinite(entry.at)
-    || !['expense.put','expense.remove','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove'].includes(entry.action)
+    || !['expense.put','expense.remove','expense.linkBank','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link'].includes(entry.action)
     || !Array.isArray(entry.changes) || entry.changes.length > 30 || entry.changes.some((change: any) => !object(change) || !text(change.label, 100) || !text(change.before, 10000) || !text(change.after, 10000))))) return false;
   if (group.security) {
     const security = group.security;
@@ -72,6 +75,8 @@ function validGroup(group: any): group is Group {
   if (group.bankInbox != null && (!isPersonalLedger(group) || !Array.isArray(group.bankInbox) || group.bankInbox.length > 50000 || !group.bankInbox.every(validBankDraft)
     || new Set([...group.expenses, ...group.bankInbox].map(record => record.id)).size !== group.expenses.length + group.bankInbox.length)) return false;
   if (group.bankReceiptIds != null && (!Array.isArray(group.bankReceiptIds) || group.bankReceiptIds.length > 100000 || !group.bankReceiptIds.every(recordId))) return false;
+  if (group.bankLinks != null && (!isPersonalLedger(group) || !object(group.bankLinks) || Object.keys(group.bankLinks).length > 100000
+    || Object.entries(group.bankLinks).some(([id, linked]) => !/^ebank_[A-Za-z0-9_-]+$/.test(id) || typeof linked !== 'string' || !/^eshared_[a-f0-9]{64}$/.test(linked)))) return false;
   if (isPersonalLedger(group) && (!group.security || group.members.length !== 1 || group.transfers.length
     || Object.keys(group.security.users).length !== 1 || Object.keys(group.security.names).length !== 1
     || group.security.users[group.security.ownerUid].name !== group.members[0]
@@ -98,6 +103,7 @@ function validPending(item: any): item is PendingChange {
     case 'bankDraft.put': return validBankDraft(change.draft);
     case 'bankDraft.confirm': return recordId(change.id) && validRecord(change.expense) && 'desc' in change.expense && change.id === change.expense.id;
     case 'bankDraft.remove': return recordId(change.id);
+    case 'bankDraft.link': case 'expense.linkBank': return recordId(change.id) && recordId(change.expenseId) && change.id !== change.expenseId;
     case 'expense.put': return validRecord(change.expense) && 'desc' in change.expense;
     case 'transfer.put': return validRecord(change.transfer) && 'from' in change.transfer;
     case 'expense.remove': case 'transfer.remove': return recordId(change.id);
@@ -152,7 +158,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const current: Group | null = parse(store.getItem(key) || 'null');
     if (current && (ledgerKind(current) !== ledgerKind(imported) || isPersonalLedger(current) && current.security?.ownerUid !== imported.security?.ownerUid)) throw new Error('備份中的帳本類型或個人帳本身分與目前帳本不同，無法合併');
     originals.set(imported.code, current);
-    const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.bankReceiptIds?.includes(record.id));
+    const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.bankReceiptIds?.includes(record.id) && !current?.bankLinks?.[record.id]);
     const missingTransfers = imported.transfers.filter(record => !current?.transfers.some(item => item.id === record.id));
     const missingInbox = (imported.bankInbox || []).filter(record => !current?.bankReceiptIds?.includes(record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
     result.skipped += imported.expenses.length + imported.transfers.length - missingExpenses.length - missingTransfers.length;
@@ -162,6 +168,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const next = current ? { ...current,
       members: [...new Set([...current.members, ...imported.members])],
       expenses: [...current.expenses, ...missingExpenses], transfers: [...current.transfers, ...missingTransfers],
+      ...(imported.bankLinks || current.bankLinks ? { bankLinks: { ...imported.bankLinks, ...current.bankLinks } } : {}),
       ...(imported.bankInbox || current.bankInbox ? { bankInbox: [...current.bankInbox || [], ...missingInbox], bankReceiptIds: [...new Set([...(current.bankReceiptIds || []), ...(imported.bankReceiptIds || [])])] } : {}),
       history: Object.fromEntries(Object.values({ ...imported.history, ...current.history }).sort((a, b) => b.at - a.at).slice(0, 300).map(entry => [entry.id, entry])) } : imported;
     result.entries[key] = JSON.stringify(next);

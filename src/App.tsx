@@ -43,6 +43,9 @@ import { bankInstallationHash } from './lib/bankInstallation';
 import { BankShortcutSettings } from './components/BankShortcutSettings';
 import { AccountSyncSettings } from './components/AccountSyncSettings';
 import { accountSync } from './lib/accountSync';
+import { personalLedgerSync } from './lib/personalLedgerSync';
+import { PersonalLedgerSyncSettings } from './components/PersonalLedgerSyncSettings';
+import { possibleBankMatches } from './lib/sharedExpenses';
 import { DeleteLedgerDialog } from './components/DeleteLedgerDialog';
 import { takeBankRequest, type BankInput } from './lib/bankShortcuts';
 import { fingerprint } from './lib/audit';
@@ -146,6 +149,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   });
 
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+  const [bankMergeId, setBankMergeId] = useState('');
   const [isEditingExpense, setIsEditingExpense] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
   const [isEditingTransfer, setIsEditingTransfer] = useState(false);
@@ -189,6 +193,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   groupCodeRef.current = currentGroup?.code;
   const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
   const personal = isPersonalLedger(currentGroup);
+  const personalSyncState = useSyncExternalStore(personalLedgerSync.subscribe, personalLedgerSync.getSnapshot);
+  const personalLink = personalSyncState.links[currentGroup?.code || ''];
   const inboxBooks = useMemo(() => myGroups.flatMap(book => {
     const cached = storage.getGroup(book.code);
     if (!cached || !isPersonalLedger(cached)) return [];
@@ -214,6 +220,23 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const personalTotal = useMemo(() => (currentGroup?.expenses || []).filter(record => !recordMonth || record.date?.startsWith(recordMonth + '-')).reduce((sum, record) => sum + utils.toCents(record.amount), 0), [currentGroup?.expenses, recordMonth]);
   useEffect(() => { ensureDeviceIdentity().then(setDeviceUid).catch(() => {}); }, []);
   useEffect(() => {
+    void personalLedgerSync.start().catch(() => {});
+    const receive = () => {
+      const code = groupCodeRef.current;
+      const cached = code ? storage.getGroup(code) : null;
+      if (cached) setCurrentGroup(sync.merge(cached));
+      setMyGroups(storage.getMyGroups());
+    };
+    window.addEventListener('personal-ledger-updated', receive);
+    return () => window.removeEventListener('personal-ledger-updated', receive);
+  }, []);
+  useEffect(() => {
+    if (!selectedExpense || !modals.expenseDetail || !currentGroup) return;
+    const live = currentGroup.expenses.find(expense => expense.id === selectedExpense.id);
+    if (live) setSelectedExpense(live);
+    else { setSelectedExpense(null); setModals(previous => ({ ...previous, expenseDetail: false })); }
+  }, [currentGroup?.expenses]);
+  useEffect(() => {
     const receive = () => { setMyGroups(storage.getMyGroups()); setDeviceUid(currentDeviceUid()); };
     window.addEventListener('account-sync-updated', receive);
     void accountSync.start();
@@ -229,6 +252,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
 
   const showExpenseDetail = useCallback((expense: Expense) => {
     setSelectedExpense(expense);
+    setBankMergeId('');
     setFormError('');
     setModals(previous => ({ ...previous, expenseDetail: true }));
   }, []);
@@ -459,6 +483,29 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     if (!data) return;
 
     enterGroup(data, mg.myName);
+  };
+
+  const openSharedSource = async (expense: Expense) => {
+    const source = expense.sharedSource;
+    if (!source) return;
+    setIsSaving(true); setFormError('');
+    try {
+      const group = navigator.onLine ? await fetchGroupOnce(source.groupCode) : storage.getGroup(source.groupCode);
+      if (!group || !group.expenses.some(record => record.id === source.expenseId)) throw new Error('原始分帳已移除，返回帳本後會重新核對');
+      if (group.security && group.security.users[currentDeviceUid()]?.name !== source.memberName) throw new Error('請用原本的帳號開啟共用帳本');
+      const original = group.expenses.find(record => record.id === source.expenseId)!;
+      storage.saveGroup(group.code, group);
+      enterGroup(group, source.memberName, original.date);
+      setSelectedExpense(original); setBankMergeId('');
+    } catch (cause) { setFormError(cause instanceof Error ? cause.message : '暫時無法開啟原始分帳'); }
+    finally { setIsSaving(false); }
+  };
+
+  const mergeBankExpense = async (bankId: string, shared: Expense) => {
+    if (!currentGroup || isSaving) return;
+    setIsSaving(true); setFormError('');
+    const saved = await persistGroupMutation(currentGroup, { type: 'expense.linkBank', id: bankId, expenseId: shared.id }, '已合併銀行入帳，保留你的分攤金額');
+    setIsSaving(false); if (saved) setBankMergeId('');
   };
 
   const goHome = () => {
@@ -1066,6 +1113,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <section>
                   {personal && <div className="personal-overview"><div className="stat-label">{recordMonth === utils.todayStr().slice(0,7) ? '本月支出' : recordMonth ? recordMonth.replace('-',' / ') + ' 支出' : '累計支出'}</div><div className="money stat-total"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(personalTotal))}</div><button type="button" className="btn btn-sm mt-4 w-full" onClick={openBankSettings}><Wallet size={16} aria-hidden="true" />銀行自動記帳設定</button></div>}
                   {personal && <BankInboxCard drafts={currentGroup?.bankInbox || []} onOpen={() => setBankInboxOpen(true)} />}
+                  {!personal && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled ? `我的分攤 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
+                  {personal && currentGroup && currentGroup.expenses.some(expense => possibleBankMatches(expense, currentGroup).length > 0) && <div className="shared-match-notice"><strong>有銀行入帳可能與分帳重複</strong><p>請開啟標示「分攤」的明細核對，可合併並保留你的實際負擔金額。</p><button type="button" className="btn btn-sm" onClick={() => showExpenseDetail(currentGroup.expenses.find(expense => possibleBankMatches(expense, currentGroup).length > 0)!)}>核對可能重複的記錄</button></div>}
                   <div className="records-heading">
                     <h2>明細記錄<span className="record-count">{visibleRecordCount} 筆</span></h2>
                     <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
@@ -1343,6 +1392,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
 
         {modals.groupSettings && (
           <Modal title={personal ? '帳本設定' : '群組設定'} onClose={() => toggleModal('groupSettings', false)}>
+            {!personal && currentGroup && <PersonalLedgerSyncSettings group={currentGroup} myName={myName} books={myGroups} onAccount={() => { toggleModal('groupSettings', false); setAccountSettings(true); }} />}
             <button type="button" className="btn btn-primary w-full mb-4" onClick={openBankSettings}>銀行與卡片設定</button>
             <button type="button" className="btn w-full mb-4" onClick={() => { toggleModal('groupSettings', false); setAccountSettings(true); }}>帳本同步 · 連結 Safari 與桌面 App</button>
             <p className="text-xs text-ink-3 leading-relaxed mb-4">{personal ? '這是只有你能存取的個人帳本，可記錄日常支出並查看分類統計。先開啟「帳本同步」，換到 Safari 或新裝置時登入同一帳號即可存取原本帳本。未連結前請保留此 App 資料。' : currentGroup?.security ? (isOwner ? '你是此群組的群主。成員可記帳與編輯帳目；群組名稱及成員管理限群主。' : '你是群組成員，可記帳與編輯帳目；群組名稱及成員管理限群主。') : '這是舊版群組，尚未啟用身分綁定；現有記帳與邀請碼維持正常。安全升級須由管理者核對群主裝置，不能只用名字認領。'}</p>
@@ -1407,8 +1457,11 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
             </>}
             </div>
             {currentGroup && <HistoryLog group={currentGroup} target={selectedExpense.id} />}
+            {personal && selectedExpense.sharedSource && <div className="shared-source-detail"><strong>來自 {selectedExpense.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(selectedExpense.sharedSource.totalAmount)} · {selectedExpense.sharedSource.payer}先付</p><p>這裡記錄你的分攤；金額、說明與分類跟隨原始分帳更新。</p></div>}
+            {personal && currentGroup && possibleBankMatches(selectedExpense, currentGroup).map(bank => <div className="shared-match-notice" key={bank.id}><strong>這筆銀行入帳可能重複</strong><p>{bank.desc} · {bank.date}<br />已入帳 NT$ {utils.fmt(bank.amount)}，分攤 NT$ {utils.fmt(selectedExpense.amount)}</p>{bankMergeId === bank.id ? <><p>確認是同一筆消費後，銀行全額記錄將合併至分帳，個人支出只計入分攤金額。</p><div className="flex flex-col gap-2"><button type="button" className="btn btn-primary btn-sm" disabled={isSaving} onClick={() => void mergeBankExpense(bank.id, selectedExpense)}>確認同一筆，合併入帳</button><button type="button" className="btn btn-sm" onClick={() => setBankMergeId('')}>保留兩筆</button></div></> : <button type="button" className="btn btn-sm" onClick={() => setBankMergeId(bank.id)}>核對並合併</button>}</div>)}
+            {formError && <p className="form-error" role="alert">{formError}</p>}
             <div className="flex flex-col gap-2 mt-2">
-              <button className="btn btn-primary w-full" onClick={() => openEditExpense(selectedExpense)}>
+              {personal && selectedExpense.sharedSource ? <button type="button" className="btn btn-primary w-full" disabled={isSaving} onClick={() => void openSharedSource(selectedExpense)}>前往原始分帳</button> : <><button className="btn btn-primary w-full" onClick={() => openEditExpense(selectedExpense)}>
                 編輯此筆費用
               </button>
               <button className="btn btn-ghost w-full" onClick={() => duplicateExpense(selectedExpense)}>
@@ -1417,6 +1470,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               <button className="btn btn-danger w-full" onClick={() => removeExpense(selectedExpense.id)}>
                 <Trash2 size={14} className="mr-1.5" /> 刪除此筆費用
               </button>
+              </>}
             </div>
           </Modal>
         )}

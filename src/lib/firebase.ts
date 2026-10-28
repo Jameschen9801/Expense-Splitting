@@ -1,10 +1,12 @@
 import type { Database, Unsubscribe } from 'firebase/database';
-import { Expense, Group, Transfer, type AuditEntry, type BankDraft } from '../types';
+import { Expense, Group, Transfer, type AuditEntry, type BankDraft, type PersonalLedgerLink } from '../types';
 import { withoutUndefined } from './firebaseData';
 import { applyCloudChange, type GroupChange } from './outbox';
 import { RecordConflictError, updatedRecord } from './audit';
 import { isPersonalLedger } from './ledgers';
 import { personalLedgerDeletionUpdate } from './ledgerDeletion';
+import { projectSharedExpenses, sharedExpenseChanges } from './sharedExpenses';
+import { applyChange } from './outbox';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -83,6 +85,12 @@ export const cloudGroup = (group: Group, previous?: any) => {
   if (!group.security) return withoutUndefined(group);
   const records = (rows: (Expense | Transfer)[], old: any) => {
     const deleted = Object.fromEntries(Object.entries(old || {}).filter(([, record]: [string, any]) => record?._deleted));
+    for (const [id, record] of Object.entries(old || {}) as [string, any][]) {
+      if (record._deleted || rows.some(item => item.id === id)) continue;
+      const entry = Object.values(group.history || {}).find(item => item.target === id && ['expense.remove', 'expense.linkBank', 'transfer.remove'].includes(item.action));
+      deleted[id] = { ...record, _deleted: true, ...(entry ? { _lastAudit: entry, lastMutationId: entry.id,
+        updatedAt: entry.at, updatedBy: entry.actor, ...(entry.actorUid ? { updatedByUid: entry.actorUid } : {}) } : {}) };
+    }
     return { ...deleted, ...Object.fromEntries(rows.map(record => [record.id, { ...record,
       ...((group.history?.[record.lastMutationId!] || old?.[record.id]?._lastAudit) ? { _lastAudit: group.history?.[record.lastMutationId!] || old?.[record.id]?._lastAudit } : {}),
     }])) };
@@ -91,7 +99,7 @@ export const cloudGroup = (group: Group, previous?: any) => {
   const bankInbox = records(group.bankInbox || [], previous?.bankInbox);
   for (const [id, draft] of Object.entries(previous?.bankInbox || {}) as [string, any][]) {
     if (!bankReceiptIds?.includes(id) || group.bankInbox?.some(item => item.id === id) || draft._deleted) continue;
-    const entry = Object.values(group.history || {}).find(item => item.target === id && ['bankDraft.confirm','bankDraft.remove'].includes(item.action));
+    const entry = Object.values(group.history || {}).find(item => item.target === id && ['bankDraft.confirm','bankDraft.remove','bankDraft.link'].includes(item.action));
     bankInbox[id] = { ...draft, _deleted: true, ...(entry ? { _lastAudit: entry, lastMutationId: entry.id, updatedAt: entry.at, updatedBy: entry.actor, updatedByUid: entry.actorUid } : {}) };
   }
   return withoutUndefined({ ...visibleGroup, members: Object.fromEntries(group.members.map(name => [name, true])),
@@ -150,7 +158,9 @@ export const deletePersonalLedgerInCloud = async (code: string): Promise<void> =
     if ((await get(markerRef)).val()?.ownerUid === deviceUid) return;
     throw new Error('這本帳本不存在，未執行刪除');
   }
-  const changes = personalLedgerDeletionUpdate(group, deviceUid, serverTimestamp());
+  const changes: Record<string, unknown> = personalLedgerDeletionUpdate(group, deviceUid, serverTimestamp());
+  const links: Record<string, PersonalLedgerLink> = (await get(ref(database, 'personalLedgerLinks/' + deviceUid))).val() || {};
+  for (const [source, link] of Object.entries(links)) if (link.targetCode === code) changes['personalLedgerLinks/' + deviceUid + '/' + source + '/enabled'] = false;
   try { await update(ref(database), changes); }
   catch (error) {
     // An acknowledgement may be lost or another tab may finish the deletion first.
@@ -204,7 +214,7 @@ const updateGroup = async (
 export const applyChangeInCloud = async (groupCode: string, change: GroupChange): Promise<Group> => {
   const group = await fetchGroupOnce(groupCode);
   if (!group) throw new Error('群組不存在');
-  if (group.security && (change.type.startsWith('expense.') || change.type.startsWith('transfer.'))) {
+  if (group.security && change.type !== 'expense.linkBank' && (change.type.startsWith('expense.') || change.type.startsWith('transfer.'))) {
     const user = group.security.users[deviceUid];
     if (!user) throw new Error('permission_denied：此裝置尚未加入群組');
     const meta = { ...change.meta, id: change.meta?.id || crypto.randomUUID(), actor: user.name, actorUid: deviceUid, at: change.meta?.at || Date.now() };
@@ -249,7 +259,7 @@ export const applyChangeInCloud = async (groupCode: string, change: GroupChange)
     if (group.security) {
       const user = group.security.users[deviceUid];
       if (!user) throw new Error('permission_denied：此裝置尚未加入群組');
-      if (change.type.startsWith('bankDraft.')) {
+      if (change.type.startsWith('bankDraft.') || change.type === 'expense.linkBank') {
         if (!isPersonalLedger(group) || user.role !== 'owner') throw new Error('permission_denied：只有個人帳本本人可處理通知');
         change = { ...change, meta: { ...change.meta, id: change.meta?.id || crypto.randomUUID(), actor: user.name, actorUid: deviceUid, at: change.meta?.at || Date.now() } };
       }
@@ -269,6 +279,24 @@ export const applyChangeInCloud = async (groupCode: string, change: GroupChange)
     return result;
   });
 };
+
+// Derived records are reconciled from current cloud data, rather than replaying
+// stale copies from an offline queue. A target transaction preserves manual work.
+export async function reconcilePersonalLedger(sourceCode: string, link: PersonalLedgerLink): Promise<Group | null> {
+  const [source, target] = await Promise.all([link.enabled ? fetchGroupOnce(sourceCode) : Promise.resolve(null), fetchGroupOnce(link.targetCode)]);
+  if (!target || !isPersonalLedger(target) || target.security?.ownerUid !== deviceUid) return null;
+  if (link.enabled && (!source || isPersonalLedger(source) || !source.members.includes(link.memberName)
+    || source.security && source.security.users[deviceUid]?.name !== link.memberName)) throw new Error('無法核對共用帳本身分，已保留個人帳目');
+  const projected = link.enabled && source ? await projectSharedExpenses(source, target.members[0], link.memberName) : [];
+  if (!sharedExpenseChanges(target, sourceCode, projected).length) return target;
+  return updateGroup(link.targetCode, current => {
+    let next = current;
+    for (const change of sharedExpenseChanges(current, sourceCode, projected)) {
+      next = applyChange(next, { ...change, meta: { id: crypto.randomUUID(), actor: current.members[0], actorUid: deviceUid, at: Date.now() } });
+    }
+    return next;
+  });
+}
 
 export const createGroupInCloud = async (groupData: Group): Promise<boolean> => {
   const [database, { ref, runTransaction }] = await Promise.all([

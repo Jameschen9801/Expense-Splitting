@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { ExpenseCategory, Group } from '../types';
 import { Drafts, DraftWriter, type RecordDraft, type ExpenseForm, type TransferForm } from '../lib/drafts';
 import { categories, defaultExpenseCategory } from '../lib/categories';
@@ -8,11 +9,12 @@ import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, draftOwner = myName }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, draftOwner = myName, notice }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
   bankReview?: boolean; draftOwner?: string;
+  notice?: ReactNode;
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -109,6 +111,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
               </button>
             </div>
           }>
+            {notice}
             {(!personal && !isEditingExpense && !isEditingTransfer) && (
               <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">
                 <button 

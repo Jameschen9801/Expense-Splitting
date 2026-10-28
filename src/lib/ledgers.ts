@@ -13,6 +13,7 @@ export function expenseFormForLedger(group: Group, form: ExpenseForm): ExpenseFo
 
 export function assertLedgerChange(group: Group, change: GroupChange) {
   if (change.type.startsWith('bankDraft.') && !isPersonalLedger(group)) throw new Error('手機通知待確認目前供個人帳本使用');
+  if (change.type === 'expense.linkBank' && !isPersonalLedger(group)) throw new Error('請在個人帳本連結銀行通知');
   if (change.type === 'bankDraft.confirm' && change.id !== change.expense.id) throw new Error('待確認通知與入帳編號不一致');
   if (!isPersonalLedger(group)) return;
   if (change.type.startsWith('member.') || change.type.startsWith('transfer.')) throw new Error('個人帳本不提供成員分攤或還款轉帳');
