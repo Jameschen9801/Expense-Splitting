@@ -38,6 +38,8 @@ import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
 import { BankInbox, BankInboxCard } from './components/BankInbox';
 import { BankSetup } from './components/BankSetup';
+import { BankInstallation } from './components/BankInstallation';
+import { bankInstallationHash } from './lib/bankInstallation';
 import { BankShortcutSettings } from './components/BankShortcutSettings';
 import { AccountSyncSettings } from './components/AccountSyncSettings';
 import { accountSync } from './lib/accountSync';
@@ -115,6 +117,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dataSettings, setDataSettings] = useState(false);
   const [bankSettings, setBankSettings] = useState(false);
+  const [bankInstallationOpen, setBankInstallationOpen] = useState(() => location.hash === bankInstallationHash);
   const [bankInboxOpen, setBankInboxOpen] = useState(false);
   const [homeInboxSelect, setHomeInboxSelect] = useState(false);
   const [homeInboxData, setHomeInboxData] = useState<Record<string, Pick<Group,'bankInbox'|'bankReceiptIds'>>>({});
@@ -126,6 +129,11 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const deleteLock = useRef(false);
   const [deviceUid, setDeviceUid] = useState('');
   const updates = useSyncExternalStore(appUpdates.subscribe, appUpdates.getSnapshot);
+  useEffect(() => {
+    const changed = () => setBankInstallationOpen(location.hash === bankInstallationHash);
+    window.addEventListener('hashchange', changed); window.addEventListener('popstate', changed);
+    return () => { window.removeEventListener('hashchange', changed); window.removeEventListener('popstate', changed); };
+  }, []);
 
   // Modals state
   const [modals, setModals] = useState({
@@ -876,9 +884,18 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     }
   };
 
+  const openBankInstallation = () => {
+    toggleModal('groupSettings', false); setBankSettings(false);
+    history.pushState(history.state, '', location.pathname + location.search + bankInstallationHash);
+    setBankInstallationOpen(true);
+  };
+  const closeBankInstallation = () => {
+    if (location.hash === bankInstallationHash) history.replaceState(history.state, '', location.pathname + location.search);
+    setBankInstallationOpen(false);
+  };
   const openBankSettings = () => {
     toggleModal('groupSettings', false);
-    setBankSettings(true);
+    if (personal) openBankInstallation(); else setBankSettings(true);
   };
 
   const balances = useMemo(() => currentGroup ? utils.calcBalances(currentGroup) : {}, [currentGroup]);
@@ -925,6 +942,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const advancedFilterCount = Number(!!recordMonth) + Number(!!recordCategory);
   const bankInputInBackground = bankInboxOpen || homeInboxSelect || Object.values(modals).some(Boolean);
 
+  if (bankInstallationOpen) return <><BankInstallation groups={myGroups} currentGroup={currentGroup} onClose={closeBankInstallation} onCreateLedger={() => { closeBankInstallation(); setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} />{updates.available && <div className="app-update-banner" role="status"><span className="text-xs">有新版可更新，安裝進度會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button></div>}</>;
+
   return (
     <div className={`min-h-[100dvh] flex flex-col font-sans ${toast ? 'has-toast' : ''}`}>
       {currentPage === 'home' ? (
@@ -940,6 +959,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <button className="btn btn-primary" onClick={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }}>＋ 新增帳本</button>
                 <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入共用帳本</button>
               </div>
+              <button type="button" className="bank-install-home" onClick={openBankInstallation}><span>手機自動記帳設定</span><ChevronRight size={17} aria-hidden="true" /></button>
               {inboxBooks.length > 0 && <BankInboxCard drafts={homeBankDrafts} onOpen={() => {
                 if (inboxBooks.length === 1) { enterGroup(inboxBooks[0].group, inboxBooks[0].book.myName); setBankInboxOpen(true); }
                 else setHomeInboxSelect(true);

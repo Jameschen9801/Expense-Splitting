@@ -479,3 +479,57 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* One mobile installation flow: existing app colors, one active step. */
+.bank-install-page { min-height: 100dvh; background: var(--ui-canvas); }
+.bank-install-nav { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px; background: var(--ui-surface); border-bottom: 1px solid var(--ui-line); font-size: 14px; font-weight: 550; }
+.bank-install-count { min-width: 44px; text-align: right; color: var(--ui-subtle); font-size: 12px; font-variant-numeric: tabular-nums; }
+.bank-install-content { width: 100%; max-width: 480px; margin: 0 auto; padding: 26px 20px calc(32px + env(safe-area-inset-bottom, 0px)); }
+.bank-install-intro h1 { margin: 0; font-size: clamp(24px, 6.2vw, 29px); line-height: 1.35; letter-spacing: -.035em; font-weight: 650; }
+.bank-install-intro p { margin-top: 10px; color: var(--ui-secondary); font-size: 14px; line-height: 1.7; }
+.bank-install-progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; padding: 0; margin: 26px 0 24px; }
+.bank-install-progress li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px; color: var(--ui-subtle); font-size: 12px; line-height: 1.5; }
+.bank-install-progress li:not(:last-child)::after { content: ''; position: absolute; height: 1px; background: var(--ui-line); top: 18px; left: calc(50% + 23px); width: calc(100% - 46px); }
+.bank-install-progress li[data-done='true']::after { background: var(--ui-positive); }
+.bank-install-dot { display: inline-flex; align-items: center; justify-content: center; width: 37px; height: 37px; border-radius: 50%; border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-subtle); font-size: 14px; font-weight: 550; }
+.bank-install-progress li[aria-current='step'] { color: var(--ui-text); font-weight: 600; }
+.bank-install-progress li[aria-current='step'] .bank-install-dot { border-color: var(--ui-accent); background: var(--ui-accent-soft); color: var(--ui-accent); }
+.bank-install-progress li[data-done='true'] .bank-install-dot { border-color: var(--ui-positive); color: var(--ui-positive); background: var(--ui-positive-soft); }
+.bank-install-book { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px 18px; }
+.bank-install-book > div { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+.bank-install-book span, .bank-install-book small { color: var(--ui-subtle); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.bank-install-book strong { font-size: 15px; font-weight: 550; overflow-wrap: anywhere; }
+.bank-install-page .btn { min-height: 48px; white-space: normal; text-align: center; font-size: 14px; line-height: 1.5; }
+.bank-install-page .btn-sm { min-height: 44px; font-size: 12px; }
+.bank-install-page input, .bank-install-page select { font-size: 16px; }
+.bank-install-card { padding: 22px 20px; border: 1px solid var(--ui-line); border-radius: 24px; background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+.bank-install-step-label { color: var(--ui-subtle); font-size: 12px; margin-bottom: 10px; }
+.bank-install-card h2, .bank-install-complete h2 { font-size: 22px; line-height: 1.4; font-weight: 600; letter-spacing: -.03em; margin-bottom: 10px; }
+.bank-install-card > p:not(.bank-install-step-label) { color: var(--ui-secondary); font-size: 14px; line-height: 1.75; }
+.bank-install-shortcut { display: flex; align-items: center; gap: 12px; margin: 22px 0 20px; }
+.bank-install-shortcut-icon { width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 14px; background: var(--ui-accent-soft); color: var(--ui-accent); }
+.bank-install-shortcut-icon[data-source] { background: var(--ui-inset); color: var(--ui-secondary); }
+.bank-install-shortcut strong { font-size: 16px; font-weight: 600; }
+.bank-install-shortcut small { display: block; margin-top: 4px; color: var(--ui-subtle); font-size: 12px; }
+.bank-install-card p.bank-install-hint { margin-top: 12px; font-size: 12px; color: var(--ui-subtle); line-height: 1.8; }
+.bank-install-instructions { list-style: decimal; padding-left: 20px; margin: 20px 0; font-size: 14px; color: var(--ui-secondary); line-height: 1.9; }
+.bank-install-instructions li + li { margin-top: 7px; }
+.bank-install-notice { margin-top: 18px; padding: 13px 15px; background: var(--ui-muted); color: var(--ui-secondary); border-radius: 14px; font-size: 13px; line-height: 1.8; }
+.bank-install-waiting { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--ui-line); font-size: 12px; color: var(--ui-subtle); }
+.bank-install-waiting button { margin-left: auto; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; }
+.bank-install-complete { padding: 24px 20px; border: 1px solid var(--ui-line); border-radius: 24px; background: var(--ui-surface); }
+.bank-install-complete > svg { color: var(--ui-positive); margin-bottom: 16px; }
+.bank-install-complete ul { list-style: none; padding: 0; margin: 18px 0 24px; }
+.bank-install-complete li { display: flex; align-items: center; gap: 9px; font-size: 14px; line-height: 1.8; margin-top: 8px; }
+.bank-install-complete li svg { flex-shrink: 0; color: var(--ui-positive); }
+.bank-install-receipt { display: flex; align-items: flex-start; gap: 11px; margin: 24px 2px 0; }
+.bank-install-receipt > svg { color: var(--ui-subtle); flex-shrink: 0; margin-top: 2px; }
+.bank-install-receipt h3 { font-size: 14px; font-weight: 550; }
+.bank-install-receipt p { font-size: 12px; color: var(--ui-subtle); line-height: 1.8; margin-top: 7px; }
+.bank-install-text-button { display: inline-flex; align-items: center; min-height: 44px; font-size: 12px; color: var(--ui-secondary); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
+.bank-install-error { margin-top: 18px; padding: 16px; border: 1px solid var(--ui-danger); background: var(--ui-danger-soft); border-radius: 16px; font-size: 13px; line-height: 1.8; }
+.bank-install-help { margin-top: 20px; color: var(--ui-subtle); font-size: 12px; line-height: 1.8; }
+.bank-install-help summary { min-height: 44px; padding: 11px 0; cursor: pointer; }
+.bank-install-help > div { padding: 8px 0; }
+.bank-install-help p + p { margin-top: 10px; }
+.bank-install-home { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 48px; margin: 8px 0 16px; padding: 8px 4px; color: var(--ui-secondary); font-size: 14px; cursor: pointer; }

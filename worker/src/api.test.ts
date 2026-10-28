@@ -43,7 +43,25 @@ test('真實 HTTP 綁定僅存雜湊，狀態與連線測試不新增帳目', as
   assert.deepEqual((await db.ref('groups/123456').get()).val(), before);
   const status = await manage('status');
   assert.equal(status.body.activeKeys, 1); assert.equal(status.body.currentKeyActive, true); assert.equal(status.body.lastDelivery.status, 'ready');
+  assert.deepEqual(status.body.eligibleGroupCodes, ['123456']);
+  assert.ok(status.body.currentKey.testedAt > 0);
   assert.ok(!JSON.stringify((await db.ref().get()).val()).includes(key));
+});
+test('安裝勾選使用目前裝置憑證的測試，不會誤用同帳號其他裝置的成功結果', async () => {
+  await post('/capture', { mode: 'test' }, { 'X-Expense-Key': key });
+  const first = await manage('status'); assert.ok(first.body.currentKey.testedAt > 0);
+  await db.ref('bankIngressUsers/' + uid + '/lastKeyCreatedAt').set(0);
+  const second = await manage('create'); assert.equal(second.status, 200);
+  const other = await post('/manage', { action: 'status' }, { Authorization: 'Bearer ' + loginToken, 'X-Expense-Key': second.body.token });
+  assert.equal(other.body.lastDelivery.status, 'ready');
+  assert.equal(other.body.currentKey.testedAt, 0);
+  assert.equal(other.body.currentKey.lastMatchedDelivery, null);
+  assert.equal((await capture()).body.status, 'pending');
+  const after = await manage('status');
+  assert.equal(after.body.currentKey.lastMatchedDelivery.groupCode, '123456');
+  assert.equal(after.body.currentKey.lastMatchedDelivery.status, 'pending');
+  const unrelated = await post('/manage', { action: 'status' }, { Authorization: 'Bearer ' + loginToken, 'X-Expense-Key': second.body.token });
+  assert.equal(unrelated.body.currentKey.lastMatchedDelivery, null);
 });
 test('通知先進一筆待確認，沒有正式支出、原始通知或網址洩漏', async () => {
   const result = await capture();

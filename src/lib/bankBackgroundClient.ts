@@ -6,7 +6,8 @@ export { bankBackgroundName, richartBackgroundName, bankBackgroundInstallUrl, ri
 const credentialKey = 'warikan_bank_background_v1';
 const emulator = import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true';
 const endpoint = emulator ? 'http://127.0.0.1:8787' : bankBackgroundEndpoint;
-export type BackgroundStatus = { eligibleRules: number; activeKeys: number; currentKeyActive: boolean; lastDelivery: { at: number; status: 'ready' | 'pending' | 'duplicate' | 'ignored' | 'error'; message: string } | null };
+export type BackgroundDelivery = { at: number; status: 'ready' | 'pending' | 'duplicate' | 'ignored' | 'error'; message: string; groupCode?: string };
+export type BackgroundStatus = { eligibleRules: number; eligibleGroupCodes?: string[]; activeKeys: number; currentKeyActive: boolean; currentKey?: { testedAt: number; lastDelivery: BackgroundDelivery | null; lastMatchedDelivery: BackgroundDelivery | null } | null; lastDelivery: BackgroundDelivery | null };
 type Credential = { uid: string; token: string; createdAt: number };
 function readCredential(uid: string): Credential | null {
   try {

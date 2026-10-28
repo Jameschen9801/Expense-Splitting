@@ -26,10 +26,16 @@ export default {
     const respond = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers });
     let received: { uid: string; digest: string; at: number } | undefined;
     let db: FirebaseRest;
-    const delivery = async (uid: string, digest: string, status: string, message: string, at: number) => {
+    const delivery = async (uid: string, digest: string, status: string, message: string, at: number, groupCode?: string) => {
       try {
-        await db.transaction('bankIngressUsers/' + uid + '/lastDelivery', current => !current || current.at <= at ? { at, status, message } : undefined);
-        await db.patch('bankIngressUsers/' + uid + '/keys/' + digest, { lastUsedAt: at });
+        const entry = { at, status, message, ...(groupCode ? { groupCode } : {}) };
+        await db.transaction('bankIngressUsers/' + uid + '/keys/' + digest, current => current ? {
+          ...current, lastUsedAt: Math.max(current.lastUsedAt || 0, at),
+          ...(status === 'ready' ? { lastTestAt: Math.max(current.lastTestAt || 0, at) } : {}),
+          ...(!current.lastDelivery || current.lastDelivery.at <= at ? { lastDelivery: entry } : {}),
+          ...(groupCode && ['pending', 'duplicate'].includes(status) && (!current.lastMatchedDelivery || current.lastMatchedDelivery.at <= at) ? { lastMatchedDelivery: entry } : {}),
+        } : undefined);
+        await db.transaction('bankIngressUsers/' + uid + '/lastDelivery', current => !current || current.at <= at ? entry : undefined);
       } catch { /* A lost status update must not turn an acknowledged save into an error. */ }
     };
     try {
@@ -60,21 +66,23 @@ export default {
       const eligible = async (uid: string) => {
         const rules = await rulesFor(uid);
         const groups = await Promise.all([...new Set(rules.map(rule => rule.groupCode))].map(async code => ({ code, raw: await metadata(code) })));
-        return rules.filter(rule => groups.some(group => group.code === rule.groupCode && personalBackgroundOwner(group.raw, uid))).length;
+        return groups.filter(group => personalBackgroundOwner(group.raw, uid)).map(group => group.code);
       };
       if (path === '/manage') {
         if (Object.keys(body).some(key => key !== 'action')) fail('invalid_request', '設定資料格式不正確');
         const uid = await identity(request, env), root = 'bankIngressUsers/' + uid;
         if (body.action === 'status') {
           const owner = await db.get(root) || {}, token = request.headers.get('x-expense-key');
-          return respond({ ok: true, eligibleRules: await eligible(uid), activeKeys: Object.values(owner.keys || {}).filter((key: any) => key.enabled).length, currentKeyActive: validKey(token) && owner.keys?.[await hash(token)]?.enabled === true, lastDelivery: owner.lastDelivery || null });
+          const codes = await eligible(uid), current = validKey(token) ? owner.keys?.[await hash(token)] : null;
+          const active = current?.enabled === true;
+          return respond({ ok: true, eligibleRules: codes.length, eligibleGroupCodes: codes, activeKeys: Object.values(owner.keys || {}).filter((key: any) => key.enabled).length, currentKeyActive: active, currentKey: active ? { testedAt: current.lastTestAt || 0, lastDelivery: current.lastDelivery || null, lastMatchedDelivery: current.lastMatchedDelivery || null } : null, lastDelivery: owner.lastDelivery || null });
         }
         if (body.action === 'revoke') {
           await db.transaction(root, owner => ({ ...owner, keys: Object.fromEntries(Object.entries(owner?.keys || {}).map(([id, key]: [string, any]) => [id, { ...key, enabled: false }])), revokedAt: Date.now() }));
           return respond({ ok: true });
         }
         if (body.action !== 'create') fail('invalid_request', '設定操作不正確');
-        if (!await eligible(uid)) fail('rule_required', '請先儲存屬於自己的個人帳本銀行規則', 422);
+        if (!(await eligible(uid)).length) fail('rule_required', '請先儲存屬於自己的個人帳本銀行規則', 422);
         const token = randomKey(), digest = await hash(token), at = Date.now(); let reason = '';
         const result = await db.transaction(root, owner => {
           const current = owner || {};
@@ -96,7 +104,7 @@ export default {
       if ((await db.get('bankIngressUsers/' + uid + '/keys/' + digest))?.enabled !== true) fail('key_invalid', '背景記帳尚未綁定或已停用，請回 App 重新綁定', 401);
       received = { uid, digest, at };
       if (body.mode === 'test') {
-        if (!await eligible(uid)) fail('rule_required', '請先儲存屬於自己的個人帳本銀行規則', 422);
+        if (!(await eligible(uid)).length) fail('rule_required', '請先儲存屬於自己的個人帳本銀行規則', 422);
         await delivery(uid, digest, 'ready', '背景捷徑已連線，測試未新增帳目', at);
         return respond({ ok: true, status: 'ready', message: '背景捷徑已綁定，測試未新增帳目' });
       }
@@ -123,7 +131,7 @@ export default {
         }
       }
       const status = duplicate ? 'duplicate' : 'pending', message = duplicate ? '相同通知已處理，未重複新增' : '已放入手機通知待確認';
-      await delivery(uid, digest, status, message, at);
+      await delivery(uid, digest, status, message, at, matched.rule.groupCode);
       return respond({ ok: true, status, message });
     } catch (error) {
       const known = error instanceof BankBackgroundError ? error : new BankBackgroundError('temporary_failure', '暫時無法保存通知，請稍後重試', 503);
