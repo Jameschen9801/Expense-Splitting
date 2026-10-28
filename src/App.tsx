@@ -24,15 +24,19 @@ import {
   NotebookPen,
   LockKeyhole
 } from 'lucide-react';
-import { Group, MyGroup, Expense, Transfer, Share, Settlement } from './types';
+import { Group, MyGroup, Expense, Income, LedgerRecord, Saving, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
 import { sync } from './lib/sync';
-import type { GroupChange } from './lib/outbox';
+import { changeEntityId, changeRecord, type GroupChange } from './lib/outbox';
 import { Drafts } from './lib/drafts';
 import { RecordsList, type RecordItem } from './components/RecordsList';
 import { Modal } from './components/Modal';
 import { RecordEditor } from './components/RecordEditor';
 import { Statistics } from './components/Statistics';
+import { CashflowEditor, EntryKindTabs } from './components/CashflowEditor';
+import { RecordProvenance } from './components/RecordProvenance';
+import { FinanceTotals } from './components/PersonalStatistics';
+import { cashflowValue, personalPeriodLabel, type CashflowForm, type CashflowKind } from './lib/personalFinance';
 import { HistoryLog } from './components/HistoryLog';
 import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
@@ -150,6 +154,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
 
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [bankMergeId, setBankMergeId] = useState('');
+  const [cashflowEditor,setCashflowEditor]=useState<{kind:CashflowKind;record?:Income|Saving}|null>(null);
+  const [selectedCashflow,setSelectedCashflow]=useState<{kind:CashflowKind;record:Income|Saving}|null>(null);
   const [isEditingExpense, setIsEditingExpense] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
   const [isEditingTransfer, setIsEditingTransfer] = useState(false);
@@ -216,8 +222,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     }
     return () => { disposed = true; stops.forEach(stop => stop()); };
   }, [currentPage, inboxCodes]);
-  const memberMonths = useMemo(() => [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...(currentGroup?.expenses || []), ...(currentGroup?.transfers || [])].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers, personal]);
+  const memberMonths = useMemo(() => [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...(currentGroup?.expenses || []), ...(currentGroup?.transfers || []),...(currentGroup?.incomes || []),...(currentGroup?.savings || [])].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse(), [currentGroup?.expenses, currentGroup?.transfers,currentGroup?.incomes,currentGroup?.savings, personal]);
   const personalTotal = useMemo(() => (currentGroup?.expenses || []).filter(record => !recordMonth || record.date?.startsWith(recordMonth + '-')).reduce((sum, record) => sum + utils.toCents(record.amount), 0), [currentGroup?.expenses, recordMonth]);
+  const personalIncomeTotal=useMemo(()=>(currentGroup?.incomes||[]).filter(record=>!recordMonth||record.date.startsWith(recordMonth+'-')).reduce((sum,record)=>sum+utils.toCents(record.amount),0),[currentGroup?.incomes,recordMonth]);
   useEffect(() => { ensureDeviceIdentity().then(setDeviceUid).catch(() => {}); }, []);
   useEffect(() => {
     void personalLedgerSync.start().catch(() => {});
@@ -261,6 +268,12 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     setFormError('');
     setModals(previous => ({ ...previous, transferDetail: true }));
   }, []);
+  const showCashflowDetail=useCallback((record:Income|Saving,kind:CashflowKind)=>{setSelectedCashflow({record,kind});setFormError('');},[]);
+  useEffect(()=>{
+    if(!selectedCashflow||!currentGroup)return;
+    const live=(selectedCashflow.kind==='income'?currentGroup.incomes:currentGroup.savings)?.find(record=>record.id===selectedCashflow.record.id);
+    if(live)setSelectedCashflow(previous=>previous?{...previous,record:live}:null);else setSelectedCashflow(null);
+  },[currentGroup?.incomes,currentGroup?.savings]);
 
   useEffect(() => {
     let stop: (() => void) | undefined;
@@ -387,9 +400,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   ) => {
     try {
       const base = storage.getGroup(optimisticGroup.code) || currentGroup || optimisticGroup;
-      const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
+      const target = changeEntityId(change);
       const before = change.type.startsWith('expense.') ? (isEditingExpense && selectedExpense?.id === target ? selectedExpense : base.expenses.find(record => record.id === target))
-        : change.type.startsWith('transfer.') ? (isEditingTransfer && selectedTransfer?.id === target ? selectedTransfer : base.transfers.find(record => record.id === target)) : undefined;
+        : change.type.startsWith('transfer.') ? (isEditingTransfer && selectedTransfer?.id === target ? selectedTransfer : base.transfers.find(record => record.id === target))
+        : change.type.startsWith('income.')||change.type.startsWith('saving.') ? cashflowEditor?.record?.id===target ? cashflowEditor.record : change.type.endsWith('.remove')&&selectedCashflow?.record.id===target ? selectedCashflow.record : changeRecord(base,change) : undefined;
       const meta = { id: crypto.randomUUID(), actor: myName, actorUid: currentDeviceUid(), at: Date.now(), ...(target ? { expected: fingerprint(before) } : {}) };
       sync.enqueue(optimisticGroup.code, { ...change, meta });
       const merged = sync.merge(storage.getGroup(optimisticGroup.code) || optimisticGroup);
@@ -694,10 +708,11 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     }
 
     const expense: Expense = {
+      ...(isEditingExpense && selectedExpense ? selectedExpense : {}),
       id: isEditingExpense && selectedExpense ? selectedExpense.id : 'e' + crypto.randomUUID(),
       desc: desc.trim(), amount: utils.fromCents(utils.toCents(amt)), payer, participants, splitMode, shares,
       category: form.category || (isEditingExpense ? 'other' : defaultExpenseCategory),
-      ...(percentages ? { percentages } : {}),
+      percentages,
       date, createdAt: isEditingExpense && selectedExpense ? selectedExpense.createdAt : Date.now()
     };
 
@@ -737,6 +752,32 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       toggleModal('addRecord', false);
     }
     return true;
+  };
+
+  const choosePersonalEntry=(kind:'expense'|CashflowKind)=>{
+    setFormError('');setSelectedCashflow(null);
+    if(kind==='expense'){setCashflowEditor(null);if(!modals.addRecord)toggleModal('addRecord',true);}
+    else{toggleModal('addRecord',false);setCashflowEditor({kind});}
+  };
+  const saveCashflow=async(form:CashflowForm)=>{
+    if(!currentGroup||!personal||!cashflowEditor||isSaving)return false;
+    setFormError('');let value:ReturnType<typeof cashflowValue>;
+    try{value=cashflowValue(form);}catch(cause){setFormError((cause as Error).message);return false;}
+    const original=cashflowEditor.record;
+    const record={...original,...value,id:original?.id||(form.kind==='income'?'i':'s')+crypto.randomUUID(),createdAt:original?.createdAt||Date.now()};
+    setIsSaving(true);
+    const saved=await persistGroupMutation(currentGroup,form.kind==='income'?{type:'income.put',income:record}:{type:'saving.put',saving:record},(original?'已更新':'已新增')+(form.kind==='income'?'收入':'儲蓄'));
+    setIsSaving(false);
+    if(saved){setCashflowEditor(null);setRecordMonth(record.date.slice(0,7));setRecordCategory('');setRecordSearch('');setActiveTab('records');}
+    return saved;
+  };
+  const removeCashflow=async(record:Income|Saving,kind:CashflowKind)=>{
+    if(!currentGroup)return;
+    setSelectedCashflow(null);
+    const change:GroupChange=kind==='income'?{type:'income.remove',id:record.id}:{type:'saving.remove',id:record.id};
+    if(await persistGroupMutation(currentGroup,change))showToast((kind==='income'?'收入':'儲蓄')+'已刪除',{actionLabel:'復原',onAction:async()=>{
+      setToast(null);await persistGroupMutation(currentGroup,kind==='income'?{type:'income.put',income:record}:{type:'saving.put',saving:record},'紀錄已復原');
+    }});
   };
 
   const addTransfer = async (form: TransferForm): Promise<boolean> => {
@@ -905,6 +946,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       setCurrentGroup(null); setMyName(''); setCurrentPage('home');
       setDataSettings(false); setBankSettings(false);
       setBankInboxOpen(false); setHomeInboxSelect(false);
+      setCashflowEditor(null);setSelectedCashflow(null);
       setModals({createGroup:false,joinGroup:false,addRecord:false,groupSettings:false,expenseDetail:false,transferDetail:false});
     }
     showToast(message);
@@ -952,21 +994,23 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     if (!currentGroup) return {};
     const expenses: RecordItem[] = currentGroup.expenses.map(e => ({ ...e, type: 'expense' }));
     const transfers: RecordItem[] = currentGroup.transfers.map(t => ({ ...t, type: 'transfer' }));
+    const cashflows:RecordItem[]=[...(currentGroup.incomes||[]).map(record=>({...record,type:'income' as const})),...(currentGroup.savings||[]).map(record=>({...record,type:'saving' as const}))];
     const query = recordSearch.trim().toLocaleLowerCase('zh-TW');
-    const combined = [...expenses, ...transfers].filter(item => {
+    const combined = [...expenses, ...transfers,...cashflows].filter(item => {
       const isExpense = item.type === 'expense';
+      const isTransfer=item.type==='transfer';
       const isMine = isExpense
         ? item.participants.includes(myName)
-        : item.from === myName || item.to === myName;
-      const isPaidByMe = isExpense ? item.payer === myName : item.from === myName;
+        : isTransfer ? item.from === myName || item.to === myName : true;
+      const isPaidByMe = isExpense ? item.payer === myName : isTransfer ? item.from === myName : true;
       if (recordFilter === 'mine' && !isMine) return false;
       if (recordFilter === 'paid' && !isPaidByMe) return false;
       if (recordMonth && !item.date?.startsWith(recordMonth + '-')) return false;
-      if (recordCategory && (!isExpense || categoryOf(item) !== recordCategory)) return false;
+      if (recordCategory && (isExpense ? categoryOf(item)!==recordCategory : item.type!==recordCategory)) return false;
       if (!query) return true;
       const searchable = isExpense
-        ? [item.desc, item.payer, ...item.participants, categoryLabel(item.category)]
-        : [item.from, item.to, item.note || ''];
+        ? [item.desc, item.payer, ...item.participants, categoryLabel(item.category),item.location||'',item.notes||'',...(item.tags||[])]
+        : isTransfer ? [item.from, item.to, item.note || ''] : [item.desc,item.type==='income'?'收入':'儲蓄',item.location||'',...(item.tags||[])];
       return searchable.some(value => value.toLocaleLowerCase('zh-TW').includes(query));
     }).sort((a, b) => {
       const dateCmp = (b.date || '').localeCompare(a.date || '');
@@ -987,7 +1031,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   }, []);
   const visibleRecordCount = Object.values(groupedRecords as Record<string, RecordItem[]>).reduce((sum, records) => sum + records.length, 0);
   const advancedFilterCount = Number(!!recordMonth) + Number(!!recordCategory);
-  const bankInputInBackground = bankInboxOpen || homeInboxSelect || Object.values(modals).some(Boolean);
+  const bankInputInBackground = bankInboxOpen || homeInboxSelect || !!cashflowEditor || !!selectedCashflow || Object.values(modals).some(Boolean);
 
   if (bankInstallationOpen) return <><BankInstallation groups={myGroups} currentGroup={currentGroup} onClose={closeBankInstallation} onCreateLedger={() => { closeBankInstallation(); setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} />{updates.available && <div className="app-update-banner" role="status"><span className="text-xs">有新版可更新，安裝進度會保留</span><button type="button" className="btn btn-primary btn-sm shrink-0" onClick={() => appUpdates.update()}>更新</button></div>}</>;
 
@@ -1097,9 +1141,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                   <p className="text-xs text-ink-3 leading-relaxed mb-3">另一位成員已更新這筆紀錄。你的變更保留在此裝置，請選擇保留哪個版本；選擇雲端版本會放棄此筆尚未同步的修改。</p>
                   {(() => {
                     const conflict = syncStatus.conflict;
-                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers, ...conflict.cloud.bankInbox || []].find(record => record.id === conflict.targetId);
-                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || [], ...currentGroup?.bankInbox || []].find(record => record.id === conflict.targetId);
-                    const describe = (record?: Expense | Transfer) => record ? ('desc' in record ? record.desc : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
+                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers,...conflict.cloud.incomes||[],...conflict.cloud.savings||[], ...conflict.cloud.bankInbox || []].find(record => record.id === conflict.targetId);
+                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || [],...currentGroup?.incomes||[],...currentGroup?.savings||[], ...currentGroup?.bankInbox || []].find(record => record.id === conflict.targetId);
+                    const describe = (record?: LedgerRecord) => record ? ('desc' in record ? record.desc : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
                     return <div className="text-xs mb-3 space-y-2 break-words"><p>雲端：{describe(cloud)}</p><p>此裝置：{describe(mine)}</p></div>;
                   })()}
                   <div className="flex flex-wrap gap-2">
@@ -1108,10 +1152,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                   </div>
                 </div>}
               </div>}
-              {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} />}
+              {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} onRecords={(category,period)=>{setRecordMonth(period);setRecordCategory(category);setRecordSearch('');setRecordFilter('all');setActiveTab('records');window.scrollTo({top:0,behavior:'instant'});}} />}
               {activeTab === 'records' && (
                 <section>
-                  {personal && <div className="personal-overview"><div className="stat-label">{recordMonth === utils.todayStr().slice(0,7) ? '本月支出' : recordMonth ? recordMonth.replace('-',' / ') + ' 支出' : '累計支出'}</div><div className="money stat-total"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(personalTotal))}</div><button type="button" className="btn btn-sm mt-4 w-full" onClick={openBankSettings}><Wallet size={16} aria-hidden="true" />銀行自動記帳設定</button></div>}
+                  {personal && <div className="personal-overview"><div className="stat-label mb-3">{recordMonth === utils.todayStr().slice(0,7) ? '本月收支' : recordMonth ? personalPeriodLabel(recordMonth)+'收支' : '累計收支'}</div><FinanceTotals incomeCents={personalIncomeTotal} expenseCents={personalTotal} balanceCents={personalIncomeTotal-personalTotal}/><button type="button" className="btn btn-sm mt-4 w-full" onClick={openBankSettings}><Wallet size={16} aria-hidden="true" />銀行自動記帳設定</button></div>}
                   {personal && <BankInboxCard drafts={currentGroup?.bankInbox || []} onOpen={() => setBankInboxOpen(true)} />}
                   {!personal && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled ? `我的分攤 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
                   {personal && currentGroup && currentGroup.expenses.some(expense => possibleBankMatches(expense, currentGroup).length > 0) && <div className="shared-match-notice"><strong>有銀行入帳可能與分帳重複</strong><p>請開啟標示「分攤」的明細核對，可合併並保留你的實際負擔金額。</p><button type="button" className="btn btn-sm" onClick={() => showExpenseDetail(currentGroup.expenses.find(expense => possibleBankMatches(expense, currentGroup).length > 0)!)}>核對可能重複的記錄</button></div>}
@@ -1153,18 +1197,18 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                     </div>}
                     <div className="advanced-filters" id="advanced-record-filters" hidden={!filtersOpen}>
                       <div className="advanced-filter-grid">
-                        <div><label className="field-label" htmlFor="record-month">明細月份</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部月份</option>{memberMonths.map(month => <option key={month} value={month}>{month.replace('-', ' / ')}</option>)}</select></div>
-                        <div><label className="field-label" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">{personal ? '全部分類' : '全部分類／轉帳'}</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
+                        <div><label className="field-label" htmlFor="record-month">明細期間</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部期間</option>{personal&&<optgroup label="全年">{[...new Set(memberMonths.map(month=>month.slice(0,4)))].map(year=><option key={year} value={year}>{year} 全年</option>)}</optgroup>}<optgroup label="月份">{memberMonths.map(month => <option key={month} value={month}>{month.replace('-', ' / ')}</option>)}</optgroup></select></div>
+                        <div><label className="field-label" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">{personal ? '全部分類' : '全部分類／轉帳'}</option>{personal&&<><option value="income">收入</option><option value="saving">儲蓄</option></>}{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
                       </div>
-                      {advancedFilterCount > 0 && <button type="button" className="btn btn-ghost btn-sm w-full mt-3" onClick={() => { setRecordMonth(''); setRecordCategory(''); }}>清除月份與分類</button>}
+                      {advancedFilterCount > 0 && <button type="button" className="btn btn-ghost btn-sm w-full mt-3" onClick={() => { setRecordMonth(''); setRecordCategory(''); }}>清除期間與分類</button>}
                     </div>
                   <RecordsList groups={groupedRecords} myName={myName} personal={personal} filtered={!!recordSearch || recordFilter !== 'all' || !!recordCategory || !!recordMonth && (!personal || !!currentGroup?.expenses.length)}
-                    resetKey={JSON.stringify([currentGroup?.code, myName, recordSearch, recordFilter, recordMonth, recordCategory])} onClear={clearRecordFilters} onExpense={showExpenseDetail} onTransfer={showTransferDetail} />
+                    resetKey={JSON.stringify([currentGroup?.code, myName, recordSearch, recordFilter, recordMonth, recordCategory])} onClear={clearRecordFilters} onExpense={showExpenseDetail} onTransfer={showTransferDetail} onCashflow={showCashflowDetail} />
                   <button
                     type="button"
                     className="mobile-add-button sm:hidden"
                     onClick={() => toggleModal('addRecord', true)}
-                    aria-label={personal ? '新增支出' : '新增費用或轉帳'}
+                    aria-label={personal ? '新增收支或儲蓄' : '新增費用或轉帳'}
                   >
                     <Plus size={22} aria-hidden="true" />
                     新增
@@ -1385,6 +1429,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
 
         {modals.addRecord && currentGroup && (
           <RecordEditor group={currentGroup} myName={myName}
+            notice={personal&&!isEditingExpense?<EntryKindTabs kind="expense" onKind={choosePersonalEntry}/>:undefined}
             initial={{ recordType, expense: expForm, transfer: tfForm, expenseId: isEditingExpense ? selectedExpense?.id : undefined, transferId: isEditingTransfer ? selectedTransfer?.id : undefined }}
             isSaving={isSaving} error={formError} clearError={() => setFormError('')}
             onClose={() => toggleModal('addRecord', false)} onExpense={addExpense} onTransfer={addTransfer} />
@@ -1456,6 +1501,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               </div>
             </>}
             </div>
+            <RecordProvenance record={selectedExpense}/>
             {currentGroup && <HistoryLog group={currentGroup} target={selectedExpense.id} />}
             {personal && selectedExpense.sharedSource && <div className="shared-source-detail"><strong>來自 {selectedExpense.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(selectedExpense.sharedSource.totalAmount)} · {selectedExpense.sharedSource.payer}先付</p><p>這裡記錄你的分攤；金額、說明與分類跟隨原始分帳更新。</p></div>}
             {personal && currentGroup && possibleBankMatches(selectedExpense, currentGroup).map(bank => <div className="shared-match-notice" key={bank.id}><strong>這筆銀行入帳可能重複</strong><p>{bank.desc} · {bank.date}<br />已入帳 NT$ {utils.fmt(bank.amount)}，分攤 NT$ {utils.fmt(selectedExpense.amount)}</p>{bankMergeId === bank.id ? <><p>確認是同一筆消費後，銀行全額記錄將合併至分帳，個人支出只計入分攤金額。</p><div className="flex flex-col gap-2"><button type="button" className="btn btn-primary btn-sm" disabled={isSaving} onClick={() => void mergeBankExpense(bank.id, selectedExpense)}>確認同一筆，合併入帳</button><button type="button" className="btn btn-sm" onClick={() => setBankMergeId('')}>保留兩筆</button></div></> : <button type="button" className="btn btn-sm" onClick={() => setBankMergeId(bank.id)}>核對並合併</button>}</div>)}
@@ -1511,6 +1557,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
           </Modal>
         )}
       </>
+      {cashflowEditor&&currentGroup&&personal&&<React.Fragment key={cashflowEditor.kind+':'+(cashflowEditor.record?.id||'new')}><CashflowEditor code={currentGroup.code} myName={myName} kind={cashflowEditor.kind} record={cashflowEditor.record} busy={isSaving} error={formError} clearError={()=>setFormError('')} onClose={()=>setCashflowEditor(null)} onKind={choosePersonalEntry} onSave={saveCashflow}/></React.Fragment>}
+      {selectedCashflow&&currentGroup&&personal&&<Modal title={selectedCashflow.kind==='income'?'收入詳情':'儲蓄詳情'} onClose={()=>setSelectedCashflow(null)}><h3 className="text-xl font-medium mb-3">{selectedCashflow.record.desc}</h3><div className={`money text-2xl mb-4 ${selectedCashflow.kind==='income'?'finance-income':''}`}>NT$ {utils.fmt(selectedCashflow.record.amount)}</div><p className="text-sm mb-4">{utils.fmtDate(selectedCashflow.record.date)}</p>{selectedCashflow.kind==='saving'&&<p className="text-sm text-ink-2 mb-4">{'direction' in selectedCashflow.record&&selectedCashflow.record.direction==='in'?'從儲蓄轉回':'存入儲蓄'} · 資金移轉，不計入收入或消費支出</p>}<RecordProvenance record={selectedCashflow.record}/><HistoryLog group={currentGroup} target={selectedCashflow.record.id}/><div className="flex flex-col gap-2 mt-4"><button type="button" className="btn btn-primary" onClick={()=>{setCashflowEditor(selectedCashflow);setSelectedCashflow(null);setFormError('');}}>編輯這筆{selectedCashflow.kind==='income'?'收入':'儲蓄'}</button><button type="button" className="btn btn-danger" onClick={()=>void removeCashflow(selectedCashflow.record,selectedCashflow.kind)}>刪除這筆{selectedCashflow.kind==='income'?'收入':'儲蓄'}</button></div></Modal>}
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} onOpenBankInstallation={openBankInstallation} />}
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}

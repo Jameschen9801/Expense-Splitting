@@ -1,18 +1,19 @@
 import { memo, useEffect, useMemo, useState } from 'react';
-import { ArrowLeftRight, ReceiptText, SearchX } from 'lucide-react';
-import type { Expense, Transfer } from '../types';
+import { ArrowLeftRight, PiggyBank, ReceiptText, SearchX, TrendingUp } from 'lucide-react';
+import type { Expense, Income, Saving, Transfer } from '../types';
 import { utils } from '../lib/utils';
 import { categoryLabel } from '../lib/categories';
 import { recordDateLabel } from '../lib/ui';
 import { CategoryIcon } from './CategoryIcon';
 import { memberExpenseAmount } from '../lib/sharedExpenses';
 
-export type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' });
+export type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' }) | (Income & {type:'income'}) | (Saving & {type:'saving'});
 
-export const RecordsList = memo(function RecordsList({ groups, myName, personal = false, filtered, resetKey, onClear, onExpense, onTransfer }: {
+export const RecordsList = memo(function RecordsList({ groups, myName, personal = false, filtered, resetKey, onClear, onExpense, onTransfer, onCashflow }: {
   personal?: boolean;
   groups: Record<string, RecordItem[]>; myName: string; filtered: boolean; resetKey: string; onClear: () => void;
   onExpense: (expense: Expense) => void; onTransfer: (transfer: Transfer) => void;
+  onCashflow?: (record: Income|Saving, kind:'income'|'saving')=>void;
 }) {
   const [limit, setLimit] = useState(50);
   // Cloud updates must not collapse an already expanded list while it is being read.
@@ -31,12 +32,16 @@ export const RecordsList = memo(function RecordsList({ groups, myName, personal 
     {total === 0 ? <div className="empty-state">
       <span className="empty-icon">{filtered ? <SearchX size={28} aria-hidden="true" /> : <ReceiptText size={28} aria-hidden="true" />}</span>
       <h3>{filtered ? '找不到符合條件的記錄' : '尚無任何記錄'}</h3>
-      <p>{filtered ? '換個關鍵字，或清除篩選再看看。' : '按下新增，記錄這個帳本的第一筆花費。'}</p>
+      <p>{filtered ? '換個關鍵字，或清除篩選再看看。' : personal ? '按下新增，記錄第一筆支出、收入或儲蓄。' : '按下新增，記錄這個帳本的第一筆花費。'}</p>
       {filtered && <button type="button" className="btn btn-ghost mt-2" onClick={onClear}>清除搜尋與篩選</button>}
     </div> : visible.map(({ date, items }) => <section className="record-day" key={date} aria-label={date === '未設定日期' ? date : utils.fmtDate(date)}>
       <div className="record-day-heading"><time dateTime={date === '未設定日期' ? undefined : date}>{recordDateLabel(date, utils.todayStr())}</time><span>{groups[date].length} 筆</span></div>
       <div className="day-items">
       {items.map(item => {
+        if(item.type==='income'||item.type==='saving'){
+          const label=item.type==='income'?'收入':item.direction==='in'?'儲蓄轉回':'存入儲蓄';
+          return <button type="button" key={item.id} className="record-row" onClick={()=>onCashflow?.(item,item.type)} aria-label={`${item.desc}，${label} NT$${utils.fmt(item.amount)}`}><span className="record-kind">{item.type==='income'?<TrendingUp size={20}/>:<PiggyBank size={20}/>}</span><div className="min-w-0"><div className="record-name">{item.desc}</div><div className="record-meta">{label}{item.date>utils.todayStr()?' · 預排':''}</div></div><div className="record-amount"><div className="record-amount-label">{label}</div><div className={`money ${item.type==='income'?'finance-income':''}`}><span className="currency">NT$</span>{utils.fmt(item.amount)}</div></div></button>;
+        }
         if (item.type === 'expense') {
           const myCost = memberExpenseAmount(item, myName);
           const showAmount = personal || myCost > 0;
@@ -46,7 +51,7 @@ export const RecordsList = memo(function RecordsList({ groups, myName, personal 
             <span className="record-kind"><CategoryIcon category={item.category} /></span>
             <div className="min-w-0">
               <div className="record-name">{item.desc}</div>
-              <div className="record-meta">{personal ? item.sharedSource ? `分攤 · ${item.sharedSource.groupName}` : categoryLabel(item.category) : item.payer + '先付 NT$' + utils.fmt(item.amount)}</div>
+              <div className="record-meta">{personal ? (item.sharedSource ? `分攤 · ${item.sharedSource.groupName}` : categoryLabel(item.category))+(item.date>utils.todayStr()?' · 預排':'') : item.payer + '先付 NT$' + utils.fmt(item.amount)}</div>
             </div>
             {showAmount && <div className={`record-amount ${!personal ? 'record-own-expense' : ''}`}><div className="record-amount-label">{personal ? '支出' : '你的分攤'}</div>
               <div className={`money ${shownAmount.length > 11 ? 'amount-long' : ''}`}><span className="currency">NT$</span>{shownAmount}</div>

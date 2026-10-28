@@ -52,6 +52,6 @@ test('個人明細與統計直接顯示自己的全額支出，省去分攤文�
   assert.ok(html.includes('100.01')); assert.ok(html.includes('餐飲')); assert.ok(html.includes('支出'));
   assert.equal(html.includes('你的分攤'),false); assert.equal(html.includes('先付'),false);
   const stats=renderToStaticMarkup(createElement(Statistics,{group:{...personal,expenses:[expense]},myName:'我',month:'2026-10',onMonth(){}}));
-  assert.ok(stats.includes('個人支出')); assert.ok(stats.includes('100.01'));
+  assert.ok(stats.includes('收支總覽')); assert.ok(stats.includes('收入')); assert.ok(stats.includes('結餘')); assert.ok(stats.includes('100.01'));
   assert.equal(stats.includes('我的分攤'),false); assert.equal(stats.includes('我先付款'),false);
 });

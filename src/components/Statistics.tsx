@@ -4,11 +4,13 @@ import { summarizeExpenses } from '../lib/categories';
 import { utils } from '../lib/utils';
 import { CategoryIcon } from './CategoryIcon';
 import { isPersonalLedger } from '../lib/ledgers';
+import { PersonalStatistics } from './PersonalStatistics';
 
-export function Statistics({ group, myName, month, onMonth }: { group: Group; myName: string; month: string; onMonth: (month: string) => void }) {
+export function Statistics({ group, myName, month, onMonth, onRecords }: { group: Group; myName: string; month: string; onMonth: (month: string) => void; onRecords?: (category:string,period:string)=>void }) {
   const personal = isPersonalLedger(group);
   const stats = useMemo(() => summarizeExpenses(group.expenses, myName, month), [group.expenses, myName, month]);
   const months = [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...group.expenses, ...group.transfers].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse();
+  if(personal)return <PersonalStatistics group={group} period={month} onPeriod={onMonth} onRecords={onRecords}/>;
   return <div className="panel">
     <div className="panel-header p-4 border-b border-line"><span className="section-label">支出統計</span></div>
     <div className="p-4">

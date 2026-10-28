@@ -1,4 +1,4 @@
-import type { BankDraft, Expense, Group, MyGroup, Transfer } from '../types';
+import type { BankDraft, Expense, Group, Income, LedgerRecord, MyGroup, Saving, Transfer } from '../types';
 import { categories, categoryLabel } from './categories';
 import { changeEntityId, type GroupChange, type PendingChange } from './outbox';
 import { utils } from './utils';
@@ -8,7 +8,7 @@ type Store = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeIte
 export type Backup = { app: 'Expense-Splitting'; version: 1; createdAt: string; entries: Record<string, string> };
 export type RestorePlan = { entries: Record<string, string>; groups: number; records: number; drafts: number; templates: number; pending: number; skipped: number };
 const MAX_BYTES = 8 * 1024 * 1024;
-const allowedKey = (key: string) => /^(warikan_my_groups|warikan_last_group|warikan_outbox_v1|warikan_group_\d{6}|warikan_(draft|templates)_v1_\d{6}_.{1,200})$/.test(key);
+const allowedKey = (key: string) => /^(warikan_my_groups|warikan_last_group|warikan_outbox_v1|warikan_group_\d{6}|warikan_(draft|cashflow_draft|templates)_v1_\d{6}_.{1,200})$/.test(key);
 const text = (value: unknown, max = 200): value is string => typeof value === 'string' && value.length <= max;
 const recordId = (value: unknown): value is string => text(value, 150) && !!value && !/[.#$\[\]/\u0000-\u001f\u007f]/.test(value);
 const code = (value: unknown) => typeof value === 'string' && /^\d{6}$/.test(value);
@@ -26,13 +26,17 @@ function parse(raw: string) {
     return value;
   });
 }
-function validRecord(record: any): record is Expense | Transfer {
+function validRecord(record: any): record is LedgerRecord {
   if (!object(record) || !recordId(record.id) || '_deleted' in record || '_lastAudit' in record || !amount(record.amount) || !date(record.date)
     || typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)) return false;
   if (record.revision != null && (!Number.isInteger(record.revision) || record.revision < 0)) return false;
   if (record.updatedAt != null && (typeof record.updatedAt !== 'number' || !Number.isFinite(record.updatedAt))) return false;
   if (['createdBy','createdByUid','updatedBy','updatedByUid','lastMutationId'].some(key => record[key] != null && !text(record[key], 150))) return false;
-  if ('desc' in record) {
+  if (record.notes != null && !text(record.notes,2000) || record.location != null && !text(record.location,300)
+    || record.tags != null && (!Array.isArray(record.tags) || record.tags.length > 100 || record.tags.some(tag=>!text(tag,60) || !tag) || new Set(record.tags).size !== record.tags.length)
+    || record.importSource != null && (!object(record.importSource) || record.importSource.system !== 'ReceiptBox' || !text(record.importSource.category,60) || Object.keys(record.importSource).some(key=>!['system','category'].includes(key)))) return false;
+  if ('desc' in record && !('payer' in record)) return text(record.desc,200) && !!record.desc && !('from' in record) && (!record.direction || ['out','in'].includes(record.direction));
+  if ('payer' in record) {
     const source = record.sharedSource;
     if (source != null && (!object(source) || !code(source.groupCode) || !text(source.groupName,100) || !recordId(source.expenseId)
       || !text(source.memberName,100) || !source.memberName || !text(source.payer,100) || !amount(source.totalAmount))) return false;
@@ -52,18 +56,24 @@ function validRecord(record: any): record is Expense | Transfer {
   }
   return text(record.from, 100) && text(record.to, 100) && record.from !== record.to && (record.note == null || text(record.note, 1000));
 }
+function validCashflow(record: any, saving = false): record is Income | Saving {
+  return validRecord(record) && 'desc' in record && !('payer' in record) && !('from' in record) && (saving || !('direction' in record));
+}
 function validGroup(group: any): group is Group {
   if (!object(group) || !code(group.code) || !text(group.name) || !names(group.members)
     || group.kind != null && !['personal','shared'].includes(group.kind)
     || !Array.isArray(group.expenses) || !Array.isArray(group.transfers)
     || [...group.expenses, ...group.transfers].length > 50000
-    || !group.expenses.every((record: any) => validRecord(record) && 'desc' in record)
+    || !group.expenses.every((record: any) => validRecord(record) && 'payer' in record)
     || !group.transfers.every((record: any) => validRecord(record) && !('desc' in record) && 'from' in record)
     || typeof group.createdAt !== 'number' || !Number.isFinite(group.createdAt)
-    || new Set([...group.expenses, ...group.transfers].map(record => record.id)).size !== group.expenses.length + group.transfers.length) return false;
+    || group.incomes != null && (!isPersonalLedger(group) || !Array.isArray(group.incomes) || !group.incomes.every(record=>validCashflow(record)))
+    || group.savings != null && (!isPersonalLedger(group) || !Array.isArray(group.savings) || !group.savings.every(record=>validCashflow(record,true)))) return false;
+  const records = [...group.expenses,...group.transfers,...group.incomes || [],...group.savings || []];
+  if (records.length > 50000 || new Set(records.map(record=>record.id)).size !== records.length) return false;
   if (group.history && (!object(group.history) || Object.keys(group.history).length > 300 || Object.entries(group.history).some(([id, entry]: [string, any]) =>
     !object(entry) || entry.id !== id || !text(entry.actor, 100) || !text(entry.target, 200) || !Number.isFinite(entry.at)
-    || !['expense.put','expense.remove','expense.linkBank','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link'].includes(entry.action)
+    || !['expense.put','expense.remove','expense.linkBank','income.put','income.remove','saving.put','saving.remove','import.receiptbox','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link'].includes(entry.action)
     || !Array.isArray(entry.changes) || entry.changes.length > 30 || entry.changes.some((change: any) => !object(change) || !text(change.label, 100) || !text(change.before, 10000) || !text(change.after, 10000))))) return false;
   if (group.security) {
     const security = group.security;
@@ -85,7 +95,7 @@ function validGroup(group: any): group is Group {
     && group.transfers.every((record: Transfer) => group.members.includes(record.from) && group.members.includes(record.to));
 }
 function validBankDraft(record: any): record is BankDraft {
-  return validRecord(record) && 'desc' in record && 'bank' in record && 'last4' in record && text(record.bank,40) && record.bank.length >= 2 && typeof record.last4 === 'string' && /^\d{4}$/.test(record.last4) && categories.some(item => item.id === record.category);
+  return validRecord(record) && 'payer' in record && 'bank' in record && 'last4' in record && text(record.bank,40) && record.bank.length >= 2 && typeof record.last4 === 'string' && /^\d{4}$/.test(record.last4) && categories.some(item => item.id === record.category);
 }
 function validForm(form: any, transfer = false) {
   if (!object(form) || !text(form.amount, 100) || !date(form.date)) return false;
@@ -104,9 +114,11 @@ function validPending(item: any): item is PendingChange {
     case 'bankDraft.confirm': return recordId(change.id) && validRecord(change.expense) && 'desc' in change.expense && change.id === change.expense.id;
     case 'bankDraft.remove': return recordId(change.id);
     case 'bankDraft.link': case 'expense.linkBank': return recordId(change.id) && recordId(change.expenseId) && change.id !== change.expenseId;
-    case 'expense.put': return validRecord(change.expense) && 'desc' in change.expense;
+    case 'expense.put': return validRecord(change.expense) && 'payer' in change.expense;
+    case 'income.put': return validCashflow(change.income);
+    case 'saving.put': return validCashflow(change.saving,true);
     case 'transfer.put': return validRecord(change.transfer) && 'from' in change.transfer;
-    case 'expense.remove': case 'transfer.remove': return recordId(change.id);
+    case 'expense.remove': case 'transfer.remove': case 'income.remove': case 'saving.remove': return recordId(change.id);
     case 'member.add': case 'member.remove': case 'group.rename': return text(change.name, 200) && !!change.name;
     default: return false;
   }
@@ -119,6 +131,7 @@ function validateEntry(key: string, raw: string) {
   if (key === 'warikan_my_groups') valid = Array.isArray(data) && data.length <= 1000 && data.every(item => object(item) && code(item.code) && text(item.name) && text(item.myName, 100) && (item.kind == null || ['personal','shared'].includes(item.kind)));
   else if (key === 'warikan_outbox_v1') valid = Array.isArray(data) && data.length <= 10000 && data.every(validPending) && new Set(data.map(item => item.id)).size === data.length;
   else if (key.startsWith('warikan_group_')) valid = validGroup(data) && key === 'warikan_group_' + data.code;
+  else if (key.startsWith('warikan_cashflow_draft_')) valid = object(data) && ['income','saving'].includes(data.kind) && text(data.amount,100) && text(data.desc,200) && date(data.date) && (!data.id || recordId(data.id)) && ['out','in'].includes(data.direction);
   else if (key.startsWith('warikan_draft_')) valid = object(data) && ['expense', 'transfer'].includes(data.recordType) && validForm(data.expense) && validForm(data.transfer, true)
     && (!data.expenseId || text(data.expenseId, 150)) && (!data.transferId || text(data.transferId, 150));
   else if (key.startsWith('warikan_templates_')) valid = Array.isArray(data) && data.length <= 20 && data.every(item => object(item) && text(item.id, 150) && text(item.name, 100) && validForm({ ...item.form, date: '2026-01-01' }) && Number.isFinite(item.updatedAt));
@@ -150,7 +163,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
   const memberships: MyGroup[] = parse(backup.entries.warikan_my_groups || '[]');
   const pending: PendingChange[] = parse(store.getItem('warikan_outbox_v1') || '[]');
   const restoredPending: PendingChange[] = parse(backup.entries.warikan_outbox_v1 || '[]');
-  const addedRecords: { group: Group; record: Expense | Transfer | BankDraft; type: 'expense'|'transfer'|'bankDraft' }[] = [];
+  const addedRecords: { group: Group; record: LedgerRecord | BankDraft; type: 'expense'|'transfer'|'bankDraft'|'income'|'saving' }[] = [];
   const originals = new Map<string, Group | null>();
   for (const [key, raw] of Object.entries(backup.entries)) {
     if (!key.startsWith('warikan_group_')) continue;
@@ -160,19 +173,25 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     originals.set(imported.code, current);
     const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.bankReceiptIds?.includes(record.id) && !current?.bankLinks?.[record.id]);
     const missingTransfers = imported.transfers.filter(record => !current?.transfers.some(item => item.id === record.id));
+    const missingIncomes = (imported.incomes || []).filter(record=>!current?.incomes?.some(item=>item.id===record.id));
+    const missingSavings = (imported.savings || []).filter(record=>!current?.savings?.some(item=>item.id===record.id));
     const missingInbox = (imported.bankInbox || []).filter(record => !current?.bankReceiptIds?.includes(record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
     result.skipped += imported.expenses.length + imported.transfers.length - missingExpenses.length - missingTransfers.length;
     missingExpenses.forEach(record => addedRecords.push({ group: imported, record, type: 'expense' }));
     missingTransfers.forEach(record => addedRecords.push({ group: imported, record, type: 'transfer' }));
+    missingIncomes.forEach(record=>addedRecords.push({group:imported,record,type:'income'}));
+    missingSavings.forEach(record=>addedRecords.push({group:imported,record,type:'saving'}));
     missingInbox.forEach(record => addedRecords.push({ group: imported, record, type: 'bankDraft' }));
     const next = current ? { ...current,
       members: [...new Set([...current.members, ...imported.members])],
       expenses: [...current.expenses, ...missingExpenses], transfers: [...current.transfers, ...missingTransfers],
+      ...(imported.incomes || current.incomes ? { incomes: [...current.incomes || [],...missingIncomes] } : {}),
+      ...(imported.savings || current.savings ? { savings: [...current.savings || [],...missingSavings] } : {}),
       ...(imported.bankLinks || current.bankLinks ? { bankLinks: { ...imported.bankLinks, ...current.bankLinks } } : {}),
       ...(imported.bankInbox || current.bankInbox ? { bankInbox: [...current.bankInbox || [], ...missingInbox], bankReceiptIds: [...new Set([...(current.bankReceiptIds || []), ...(imported.bankReceiptIds || [])])] } : {}),
       history: Object.fromEntries(Object.values({ ...imported.history, ...current.history }).sort((a, b) => b.at - a.at).slice(0, 300).map(entry => [entry.id, entry])) } : imported;
     result.entries[key] = JSON.stringify(next);
-    result.records += missingExpenses.length + missingTransfers.length;
+    result.records += missingExpenses.length + missingTransfers.length + missingIncomes.length + missingSavings.length;
     result.drafts += missingInbox.length;
     if (!current) result.groups++;
   }
@@ -183,7 +202,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     if (pending.some(current => current.id === item.id)) { result.skipped++; continue; }
     const id = entityId(item.change);
     const current = originals.has(item.groupCode) ? originals.get(item.groupCode) : parse(store.getItem('warikan_group_' + item.groupCode) || 'null');
-    const currentRecord = [...current?.expenses || [], ...current?.transfers || [], ...current?.bankInbox || []].find(record => record.id === id);
+    const currentRecord = [...current?.expenses || [], ...current?.transfers || [], ...current?.incomes || [], ...current?.savings || [], ...current?.bankInbox || []].find(record => record.id === id);
     // Never replay old edits/deletions or management changes over existing local work.
     if (!id || currentRecord || current?.bankReceiptIds?.includes(id) || pending.some(queued => queued.groupCode === item.groupCode && entityId(queued.change) === id)) { result.skipped++; continue; }
     const targetGroup = result.entries['warikan_group_' + item.groupCode] || store.getItem('warikan_group_' + item.groupCode);
@@ -195,14 +214,15 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const key = group.code + ':' + record.id;
     if (restoredEntities.has(key) || pending.some(item => item.groupCode === group.code && entityId(item.change) === record.id)) continue;
     const actor = validMemberships.find(item => item.code === group.code)?.myName || '備份還原';
-    const change: GroupChange = type === 'bankDraft' ? { type: 'bankDraft.put', draft: record as BankDraft } : type === 'expense' ? { type: 'expense.put', expense: record as Expense } : { type: 'transfer.put', transfer: record as Transfer };
+    const change: GroupChange = type === 'bankDraft' ? { type: 'bankDraft.put', draft: record as BankDraft } : type === 'expense' ? { type: 'expense.put', expense: record as Expense }
+      : type === 'income' ? {type:'income.put',income:record as Income} : type === 'saving' ? {type:'saving.put',saving:record as Saving} : { type: 'transfer.put', transfer: record as Transfer };
     change.meta = { id: crypto.randomUUID(), actor, at: Date.now(), expected: null };
     pending.push({ id: crypto.randomUUID(), groupCode: group.code, change });
     result.pending++;
   }
   result.entries.warikan_outbox_v1 = JSON.stringify(pending);
   for (const [key, raw] of Object.entries(backup.entries)) {
-    if (key.startsWith('warikan_draft_')) {
+    if (key.startsWith('warikan_draft_') || key.startsWith('warikan_cashflow_draft_')) {
       if (!store.getItem(key)) { result.entries[key] = raw; result.drafts++; } else result.skipped++;
     } else if (key.startsWith('warikan_templates_')) {
       const items = parse(raw), current = parse(store.getItem(key) || '[]');
@@ -232,10 +252,12 @@ export function groupCsv(group: Group) {
     if (/^[\s\u0000-\u001f]*[=+\-@]/.test(text)) text = "'" + text;
     return '"' + text.replaceAll('"', '""') + '"';
   };
-  const rows: (string | number)[][] = [['群組', '類型', '日期', '說明／備註', '付款人', '收款人', '金額 NT$', '分類', '各人分攤', '紀錄 ID']];
+  const rows: (string | number)[][] = [['群組', '類型', '日期', '說明／備註', '付款人', '收款人', '金額 NT$', '分類', '各人分攤', '紀錄 ID', '標籤', '地點', '原始分類', '補充說明']];
   group.expenses.forEach(record => rows.push([group.name, '費用', record.date, record.desc, record.payer, '', record.amount.toFixed(2), categoryLabel(record.category),
-    (record.splitMode === 'equal' ? utils.equalShares(record.amount, record.participants) : record.shares || []).map(share => share.name + ':' + share.amount.toFixed(2)).join('；'), record.id]));
+    (record.splitMode === 'equal' ? utils.equalShares(record.amount, record.participants) : record.shares || []).map(share => share.name + ':' + share.amount.toFixed(2)).join('；'), record.id, (record.tags || []).join('；'), record.location || '', record.importSource?.category || '', record.notes || '']));
   group.transfers.forEach(record => rows.push([group.name, '轉帳', record.date, record.note || '', record.from, record.to, record.amount.toFixed(2), '', '', record.id]));
+  (group.incomes || []).forEach(record=>rows.push([group.name,'收入',record.date,record.desc,'','',record.amount.toFixed(2),'收入','',record.id,(record.tags||[]).join('；'),record.location||'',record.importSource?.category||'',record.notes||'']));
+  (group.savings || []).forEach(record=>rows.push([group.name,'儲蓄',record.date,record.desc,'','',record.amount.toFixed(2),record.direction==='in'?'儲蓄轉回':'存入儲蓄','',record.id,(record.tags||[]).join('；'),record.location||'',record.importSource?.category||'',record.notes||'']));
   return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
 }
 export function downloadFile(contents: string, name: string, type: string) {

@@ -149,7 +149,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-description">說明</label>
-                  <input id="expense-description" data-autofocus={bankReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={30} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
+                  <input id="expense-description" data-autofocus={bankReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
                 </div>
                 {!personal && <><div className="field">
                   <label className="field-label" htmlFor="expense-payer">誰先付款</label>

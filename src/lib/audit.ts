@@ -1,8 +1,8 @@
-import type { AuditEntry, Expense, Group, MutationMeta, RecordMetadata, Transfer } from '../types';
+import type { AuditEntry, Expense, Group, LedgerRecord, MutationMeta, RecordMetadata } from '../types';
 import { categoryLabel } from './categories';
 
 // Stable content, rather than only a revision, also detects edits made by older clients.
-export function fingerprint(record: Expense | Transfer | undefined): string | null {
+export function fingerprint(record: LedgerRecord | undefined): string | null {
   if (!record) return null;
   const canonical = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(canonical);
@@ -12,11 +12,11 @@ export function fingerprint(record: Expense | Transfer | undefined): string | nu
   };
   // The combined record list adds a display-only type discriminator. It is not
   // persisted in Firebase and must not make an unchanged record look different.
-  const { type: _displayType, ...persisted } = record as (Expense | Transfer) & { type?: string };
+  const { type: _displayType, ...persisted } = record as LedgerRecord & { type?: string };
   const normalized = { ...persisted,
     revision: record.revision || 0, createdBy: record.createdBy || '', createdByUid: record.createdByUid || '',
     updatedAt: record.updatedAt || 0, updatedBy: record.updatedBy || '', updatedByUid: record.updatedByUid || '', lastMutationId: record.lastMutationId || '',
-    ...('desc' in record ? { shares: record.shares || [], percentages: record.percentages || [], category: record.category || 'other' } : { note: record.note || '' }),
+    ...('payer' in record ? { shares: record.shares || [], percentages: record.percentages || [], category: record.category || 'other' } : 'from' in record ? { note: record.note || '' } : {}),
   };
   return JSON.stringify(canonical(normalized));
 }
@@ -25,8 +25,9 @@ export class RecordConflictError extends Error {
   constructor(public cloud: Group, public targetId: string) { super('這筆紀錄已被其他裝置修改，請選擇要保留的版本'); this.name = 'RecordConflictError'; }
 }
 
-export function updatedRecord<T extends Expense | Transfer>(record: T, before: T | undefined, meta?: MutationMeta): T {
-  if (!meta) return record;
+export function updatedRecord<T extends LedgerRecord>(record: T, before: T | undefined, meta?: MutationMeta): T {
+  const {type:_displayType,...persisted}=record as T & {type?:string};
+  if (!meta) return persisted as T;
   const metadata: RecordMetadata = {
     revision: (before?.revision || 0) + 1,
     createdBy: before?.createdBy || record.createdBy || meta.actor,
@@ -34,14 +35,16 @@ export function updatedRecord<T extends Expense | Transfer>(record: T, before: T
     ...(before?.createdByUid || record.createdByUid || meta.actorUid ? { createdByUid: before?.createdByUid || record.createdByUid || meta.actorUid } : {}),
     ...(meta.actorUid ? { updatedByUid: meta.actorUid } : {}),
   };
-  return { ...record, ...metadata };
+  return { ...persisted, ...metadata } as T;
 }
 
-export function auditEntry(action: string, target: string, before: Expense | Transfer | string | undefined, after: Expense | Transfer | string | undefined, meta: MutationMeta): AuditEntry {
+export function auditEntry(action: string, target: string, before: LedgerRecord | string | undefined, after: LedgerRecord | string | undefined, meta: MutationMeta): AuditEntry {
   const fields = [
     ['desc', '說明'], ['amount', '金額'], ['payer', '付款人'], ['participants', '分攤對象'],
     ['splitMode', '分攤方式'], ['shares', '分攤金額'], ['percentages', '分攤比例'], ['category', '分類'],
     ['date', '日期'], ['from', '付款人'], ['to', '收款人'], ['note', '備註'],
+    ['notes', '補充說明'], ['location', '地點'], ['tags', '標籤'],
+    ['direction', '儲蓄方向'],
   ];
   const display = (value: unknown, field: string) => {
     if (field === 'category') return categoryLabel(value as Expense['category']);
@@ -66,4 +69,6 @@ export const actionLabel = (action: string) => ({
   'transfer.remove': '刪除轉帳', 'member.add': '新增成員', 'member.remove': '移除成員', 'group.rename': '修改群組名稱',
   'bankDraft.put': '收到手機通知', 'bankDraft.confirm': '確認通知並入帳', 'bankDraft.remove': '忽略手機通知',
   'bankDraft.link': '通知連結分帳', 'expense.linkBank': '銀行入帳合併至分帳',
+  'income.put': '新增／修改收入', 'income.remove': '刪除收入',
+  'saving.put': '新增／修改儲蓄', 'saving.remove': '刪除儲蓄', 'import.receiptbox': '匯入 ReceiptBox 帳目',
 } as Record<string, string>)[action] || action;

@@ -142,6 +142,30 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('個人收入與儲蓄僅本人可讀寫，共用帳本與背景服務不能存取',async()=>{
+  await privateRef().set(cloud(personal));
+  const income={id:'i1',desc:'薪資',amount:10000,date:'2026-10-28',createdAt:2};
+  const saving={id:'s1',desc:'預備金',amount:1000,date:'2026-10-28',createdAt:3,direction:'out' as const};
+  const next=applyChange(applyChange(personal,{type:'income.put',income,meta:{id:'im1',actor:'A',actorUid:'owner',at:4}}),{type:'saving.put',saving,meta:{id:'sm1',actor:'A',actorUid:'owner',at:5}});
+  await assertSucceeds(privateRef().set(cloud(next)));
+  await assertSucceeds(privateRef().child('incomes/i1/amount').set(12000));
+  for(const uid of ['member','stranger'])for(const path of ['incomes/i1','savings/s1']){
+    await assertFails(privateRef(uid).child(path).get());await assertFails(privateRef(uid).child(path).set(income));
+  }
+  await assertFails(owner().child('incomes/i1').set(income));await assertFails(owner().child('savings/s1').set(saving));
+  await assertFails(privateRef().child('incomes/i1/amount').set(-1));await assertFails(privateRef().child('savings/s1/direction').set('invalid'));
+  const removed=applyChange(next,{type:'income.remove',id:'i1',meta:{id:'im2',actor:'A',actorUid:'owner',at:6}});
+  await assertSucceeds(privateRef().set(cloudGroup(removed,cloud(next))));
+});
+test('核准的新分類及匯入地點標籤可保存，未知欄位或過長資料不能寫入收入',async()=>{
+  await privateRef().set(cloud(personal));
+  await assertSucceeds(privateRef().child('expenses/education').set({...personalExpense,id:'education',category:'education',importSource:{system:'ReceiptBox',category:'教育'},location:'教室',tags:['現金']}));
+  await assertSucceeds(privateRef().child('expenses/haircut').set({...personalExpense,id:'haircut',category:'haircut'}));
+  const income={id:'i1',desc:'收入',amount:100,date:'2026-10-28',createdAt:2,importSource:{system:'ReceiptBox',category:'收入'}};
+  await assertSucceeds(privateRef().child('incomes/i1').set(income));
+  await assertFails(privateRef().child('incomes/i1').set({...income,location:'x'.repeat(301)}));
+  await assertFails(privateRef().child('incomes/i1').set({...income,unknown:'unexpected'}));
+});
 test('分攤同步設定只由本人存取，只能連結自己的個人帳本與正確的共用身分', async () => {
   await privateRef().set(cloud(personal));
   const own = env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456');
@@ -201,6 +225,7 @@ test('背景服務只能讀取所需路徑，不能列出帳號、讀同步憑�
   for (const path of ['accountSync/owner/bank/rules', 'groups/654321/security', 'groups/654321/expenses', 'groups/654321/bankInbox', 'groups/654321/history']) await assertSucceeds(serviceRef(path).get());
   for (const path of ['', 'groups', 'groups/654321', 'groups/123456/security', 'accountSync', 'accountSync/owner', 'accountSync/owner/bank/bridge', 'accountSync/owner/books', 'bankBackgroundServices/bank-service']) await assertFails(serviceRef(path).get());
   await assertFails(serviceRef('personalLedgerLinks/owner').get());
+  for(const path of ['groups/654321/incomes','groups/654321/savings']){await assertFails(serviceRef(path).get());await assertFails(serviceRef(path+'/fake').set({id:'fake',desc:'不允許',amount:1,date:'2026-10-28',createdAt:1}));}
   await assertFails(serviceRef('personalLedgerLinks/bank-service/123456').set({targetCode:'654321',memberName:'A',enabled:true}));
   await assertFails(serviceRef('accountSync/owner/bank/rules').set('[]'));
   await assertFails(serviceRef('groups/654321/name').set('不能改名'));

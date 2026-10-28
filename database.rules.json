@@ -116,6 +116,23 @@
               "$index": {
                 ".validate": "newData.parent().parent().parent().parent().child('kind').val() != 'personal' || ($index == '0' && newData.val() == newData.parent().parent().parent().parent().child('security/users').child(newData.parent().parent().parent().parent().child('security/ownerUid').val()).child('name').val())"
               }
+            },
+            "notes": {
+              ".validate": "newData.isString() && newData.val().length <= 2000"
+            },
+            "location": {
+              ".validate": "newData.isString() && newData.val().length <= 300"
+            },
+            "tags": {
+              "$index": {
+                ".validate": "$index.matches(/^(0|[1-9][0-9]?)$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+              }
+            },
+            "importSource": {
+              ".validate": "newData.hasChildren(['system','category']) && newData.child('system').val() == 'ReceiptBox' && newData.child('category').isString() && newData.child('category').val().length <= 60",
+              "$other": {
+                ".validate": "$other == 'system' || $other == 'category'"
+              }
             }
           },
           ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
@@ -142,7 +159,7 @@
         "bankInbox": {
           ".validate": "newData.parent().child('kind').val() == 'personal'",
           "$id": {
-            ".validate": "(newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode','bank','last4','category'])) && (newData.child('id').val() == $id) && (newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000) && (newData.child('createdAt').isNumber() && newData.child('createdAt').val() > 0) && (newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)) && (newData.child('desc').isString() && newData.child('desc').val().length <= 200) && (newData.child('bank').isString() && newData.child('bank').val().length >= 2 && newData.child('bank').val().length <= 40) && (newData.child('last4').isString() && newData.child('last4').val().matches(/^\\d{4}$/)) && (newData.child('category').isString() && newData.child('category').val().matches(/^(other|food|transport|stay|shopping|entertainment|bills|health|social|insurance|travel)$/)) && (newData.child('splitMode').val() == 'equal') && (newData.child('payer').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val()) && (newData.child('participants/0').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val()) && ((!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists()))) && ((!data.child('_deleted').exists() || newData.child('_deleted').val() == true))",
+            ".validate": "(newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode','bank','last4','category'])) && (newData.child('id').val() == $id) && (newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000) && (newData.child('createdAt').isNumber() && newData.child('createdAt').val() > 0) && (newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)) && (newData.child('desc').isString() && newData.child('desc').val().length <= 200) && (newData.child('bank').isString() && newData.child('bank').val().length >= 2 && newData.child('bank').val().length <= 40) && (newData.child('last4').isString() && newData.child('last4').val().matches(/^\\d{4}$/)) && (newData.child('category').isString() && newData.child('category').val().matches(/^(other|food|transport|stay|shopping|entertainment|bills|health|social|insurance|travel|education|haircut)$/)) && (newData.child('splitMode').val() == 'equal') && (newData.child('payer').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val()) && (newData.child('participants/0').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val()) && ((!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists()))) && ((!data.child('_deleted').exists() || newData.child('_deleted').val() == true))",
             "participants": {
               "$index": {
                 ".validate": "$index == '0'"
@@ -154,6 +171,63 @@
             ".write": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal' && !data.exists() && newData.exists() && !root.child('deletedPersonalLedgers').child($code).exists() && $id.matches(/^ebank_[a-f0-9]{64}$/) && newData.child('revision').val() == 1 && newData.child('category').val() == 'other' && newData.child('createdByUid').val() == newData.parent().parent().child('security/ownerUid').val() && newData.child('updatedByUid').val() == newData.parent().parent().child('security/ownerUid').val() && newData.child('lastMutationId').val() == 'm' + $id && newData.child('createdAt').val() <= now + 60000 && newData.child('_lastAudit/id').val() == 'm' + $id && newData.child('_lastAudit/action').val() == 'bankDraft.put' && newData.child('_lastAudit/target').val() == $id && newData.child('_lastAudit/actorUid').val() == newData.parent().parent().child('security/ownerUid').val()"
           },
           ".read": "auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true && root.child('groups').child($code).child('kind').val() == 'personal'"
+        },
+        "incomes": {
+          ".validate": "newData.parent().child('kind').val() == 'personal'",
+          "$id": {
+            ".write": "auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() && root.child('bankBackgroundServices').child(auth.uid).val() != true && newData.exists()",
+            ".validate": "newData.hasChildren(['id','desc','amount','date','createdAt']) && newData.child('id').val() == $id && newData.child('desc').isString() && newData.child('desc').val().length > 0 && newData.child('desc').val().length <= 200 && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.child('createdAt').isNumber() && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists()))",
+            "$other": {
+              ".validate": "$other == 'id' || $other == 'desc' || $other == 'amount' || $other == 'date' || $other == 'createdAt' || $other == 'notes' || $other == 'location' || $other == 'tags' || $other == 'importSource' || $other == 'revision' || $other == 'createdBy' || $other == 'createdByUid' || $other == 'updatedAt' || $other == 'updatedBy' || $other == 'updatedByUid' || $other == 'lastMutationId' || $other == '_lastAudit' || $other == '_deleted'"
+            },
+            "notes": {
+              ".validate": "newData.isString() && newData.val().length <= 2000"
+            },
+            "location": {
+              ".validate": "newData.isString() && newData.val().length <= 300"
+            },
+            "tags": {
+              "$index": {
+                ".validate": "$index.matches(/^(0|[1-9][0-9]?)$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+              }
+            },
+            "importSource": {
+              ".validate": "newData.hasChildren(['system','category']) && newData.child('system').val() == 'ReceiptBox' && newData.child('category').isString() && newData.child('category').val().length <= 60",
+              "$other": {
+                ".validate": "$other == 'system' || $other == 'category'"
+              }
+            }
+          }
+        },
+        "savings": {
+          ".validate": "newData.parent().child('kind').val() == 'personal'",
+          "$id": {
+            ".write": "auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() && root.child('bankBackgroundServices').child(auth.uid).val() != true && newData.exists()",
+            ".validate": "newData.hasChildren(['id','desc','amount','date','createdAt']) && newData.child('id').val() == $id && newData.child('desc').isString() && newData.child('desc').val().length > 0 && newData.child('desc').val().length <= 200 && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && newData.child('createdAt').isNumber() && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists()))",
+            "direction": {
+              ".validate": "newData.val() == 'out' || newData.val() == 'in'"
+            },
+            "$other": {
+              ".validate": "$other == 'id' || $other == 'desc' || $other == 'amount' || $other == 'date' || $other == 'createdAt' || $other == 'notes' || $other == 'location' || $other == 'tags' || $other == 'importSource' || $other == 'revision' || $other == 'createdBy' || $other == 'createdByUid' || $other == 'updatedAt' || $other == 'updatedBy' || $other == 'updatedByUid' || $other == 'lastMutationId' || $other == '_lastAudit' || $other == '_deleted' || $other == 'direction'"
+            },
+            "notes": {
+              ".validate": "newData.isString() && newData.val().length <= 2000"
+            },
+            "location": {
+              ".validate": "newData.isString() && newData.val().length <= 300"
+            },
+            "tags": {
+              "$index": {
+                ".validate": "$index.matches(/^(0|[1-9][0-9]?)$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 60"
+              }
+            },
+            "importSource": {
+              ".validate": "newData.hasChildren(['system','category']) && newData.child('system').val() == 'ReceiptBox' && newData.child('category').isString() && newData.child('category').val().length <= 60",
+              "$other": {
+                ".validate": "$other == 'system' || $other == 'category'"
+              }
+            }
+          }
         }
       }
     },

@@ -1,5 +1,5 @@
 import type { Database, Unsubscribe } from 'firebase/database';
-import { Expense, Group, Transfer, type AuditEntry, type BankDraft, type PersonalLedgerLink } from '../types';
+import { Expense, Group, Transfer, type AuditEntry, type BankDraft, type LedgerRecord, type PersonalLedgerLink } from '../types';
 import { withoutUndefined } from './firebaseData';
 import { applyCloudChange, type GroupChange } from './outbox';
 import { RecordConflictError, updatedRecord } from './audit';
@@ -65,7 +65,7 @@ const getDatabaseInstance = () => {
 };
 
 // 即時監聽群組雲端資料
-const publicRecord = <T extends Expense | Transfer>(record: T & { _deleted?: boolean; _lastAudit?: AuditEntry }): T => {
+const publicRecord = <T extends LedgerRecord>(record: T & { _deleted?: boolean; _lastAudit?: AuditEntry }): T => {
   const { _deleted, _lastAudit, ...visible } = record;
   return visible as T;
 };
@@ -77,17 +77,20 @@ export const normalizeGroup = (data: any): Group => {
     .sort(([, a]: [string, any], [, b]: [string, any]) => b.at - a.at).slice(0, 300)
     .map(([id, entry]: [string, any]) => [id, { ...entry, changes: Object.values(entry.changes || {}) }]));
   return { ...data, expenses: rows(data.expenses), transfers: rows(data.transfers),
+    ...(data.incomes ? { incomes: rows(data.incomes) } : {}), ...(data.savings ? { savings: rows(data.savings) } : {}),
     ...(data.bankInbox ? { bankInbox: rows(data.bankInbox) as BankDraft[], bankReceiptIds: Object.keys(data.bankInbox) } : {}),
     ...(data.history ? { history } : {}),
     members: ownerName && members.includes(ownerName) ? [ownerName, ...members.filter(name => name !== ownerName)] : members };
 };
 export const cloudGroup = (group: Group, previous?: any) => {
   if (!group.security) return withoutUndefined(group);
-  const records = (rows: (Expense | Transfer)[], old: any) => {
+  const records = (rows: LedgerRecord[], old: any) => {
+    const present = new Set(rows.map(row => row.id));
+    const removals = new Map(Object.values(group.history || {}).filter(entry => ['expense.remove', 'expense.linkBank', 'transfer.remove', 'income.remove', 'saving.remove'].includes(entry.action)).map(entry => [entry.target, entry]));
     const deleted = Object.fromEntries(Object.entries(old || {}).filter(([, record]: [string, any]) => record?._deleted));
     for (const [id, record] of Object.entries(old || {}) as [string, any][]) {
-      if (record._deleted || rows.some(item => item.id === id)) continue;
-      const entry = Object.values(group.history || {}).find(item => item.target === id && ['expense.remove', 'expense.linkBank', 'transfer.remove'].includes(item.action));
+      if (record._deleted || present.has(id)) continue;
+      const entry = removals.get(id);
       deleted[id] = { ...record, _deleted: true, ...(entry ? { _lastAudit: entry, lastMutationId: entry.id,
         updatedAt: entry.at, updatedBy: entry.actor, ...(entry.actorUid ? { updatedByUid: entry.actorUid } : {}) } : {}) };
     }
@@ -104,6 +107,8 @@ export const cloudGroup = (group: Group, previous?: any) => {
   }
   return withoutUndefined({ ...visibleGroup, members: Object.fromEntries(group.members.map(name => [name, true])),
     ...(group.bankInbox || previous?.bankInbox ? { bankInbox } : {}),
+    ...(group.incomes || previous?.incomes ? { incomes: records(group.incomes || [], previous?.incomes) } : {}),
+    ...(group.savings || previous?.savings ? { savings: records(group.savings || [], previous?.savings) } : {}),
     expenses: records(group.expenses, previous?.expenses), transfers: records(group.transfers, previous?.transfers) });
 };
 
@@ -214,30 +219,28 @@ const updateGroup = async (
 export const applyChangeInCloud = async (groupCode: string, change: GroupChange): Promise<Group> => {
   const group = await fetchGroupOnce(groupCode);
   if (!group) throw new Error('群組不存在');
-  if (group.security && change.type !== 'expense.linkBank' && (change.type.startsWith('expense.') || change.type.startsWith('transfer.'))) {
+  if (group.security && change.type !== 'expense.linkBank' && ['expense.', 'transfer.', 'income.', 'saving.'].some(prefix => change.type.startsWith(prefix))) {
     const user = group.security.users[deviceUid];
     if (!user) throw new Error('permission_denied：此裝置尚未加入群組');
     const meta = { ...change.meta, id: change.meta?.id || crypto.randomUUID(), actor: user.name, actorUid: deviceUid, at: change.meta?.at || Date.now() };
     change = { ...change, meta };
     if (Object.hasOwn(group.history || {}, meta.id)) return group;
-    const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
-    const expenseChange = change.type.startsWith('expense.');
+    const target = change.type === 'expense.put' ? change.expense.id : change.type === 'transfer.put' ? change.transfer.id : change.type === 'income.put' ? change.income.id : change.type === 'saving.put' ? change.saving.id : 'id' in change ? change.id : '';
+    const collection = change.type.startsWith('expense.') ? 'expenses' : change.type.startsWith('income.') ? 'incomes' : change.type.startsWith('saving.') ? 'savings' : 'transfers';
     const [database, { ref, get, runTransaction }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
-    const recordRef = ref(database, 'groups/' + groupCode + '/' + (expenseChange ? 'expenses/' : 'transfers/') + target);
+    const recordRef = ref(database, 'groups/' + groupCode + '/' + collection + '/' + target);
     await get(recordRef);
     let entry: AuditEntry | undefined;
     try {
       await runTransaction(recordRef, current => {
         if (current?.lastMutationId === meta.id) { entry = current._lastAudit; return; }
         const before = current && !current._deleted ? publicRecord(current) : undefined;
-        const live = { ...group,
-          expenses: expenseChange ? [...group.expenses.filter(record => record.id !== target), ...(before ? [before as Expense] : [])] : group.expenses,
-          transfers: !expenseChange ? [...group.transfers.filter(record => record.id !== target), ...(before ? [before as Transfer] : [])] : group.transfers };
+        const live = { ...group, [collection]: [...(group[collection] || []).filter(record => record.id !== target), ...(before ? [before] : [])] };
         const next = applyCloudChange(live, change);
         entry = next.history?.[meta.id];
         if (!entry) return; // Identical record from a backup is already present.
-        const record = (expenseChange ? next.expenses : next.transfers).find(record => record.id === target);
-        if (record) return withoutUndefined({ ...updatedRecord(record, current ? publicRecord(current) : undefined, meta), _lastAudit: entry });
+        const record = next[collection]?.find(record => record.id === target);
+        if (record) return withoutUndefined({ ...updatedRecord(record, before, meta), _lastAudit: entry });
         // Keep a tombstone so an acknowledgement lost after deletion can be retried safely.
         if (!current) return; // An old pre-versioning deletion is already absent.
         return withoutUndefined({ ...current, _deleted: true, lastMutationId: meta.id, updatedAt: meta.at, updatedBy: user.name, updatedByUid: deviceUid, _lastAudit: entry });

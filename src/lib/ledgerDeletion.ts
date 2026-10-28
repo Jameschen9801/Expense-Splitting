@@ -27,7 +27,7 @@ export function cleanupDeletedLedger(store: Store, code: string) {
   if (store.getItem('warikan_last_group') === code) updates.set('warikan_last_group', null);
   const keys = Array.from({length:store.length}, (_, index) => store.key(index)).filter((key): key is string => !!key);
   for (const key of keys) {
-    if (key.startsWith(`warikan_draft_v1_${code}_`) || key.startsWith(`warikan_templates_v1_${code}_`) || key === `warikan_recovery_v2_${code}`) updates.set(key, null);
+    if (key.startsWith(`warikan_draft_v1_${code}_`) || key.startsWith(`warikan_cashflow_draft_v1_${code}_`) || key.startsWith(`warikan_templates_v1_${code}_`) || key === `warikan_recovery_v2_${code}`) updates.set(key, null);
   }
   const originals = new Map([...updates.keys()].map(key => [key, store.getItem(key)]));
   const changed: string[] = [];

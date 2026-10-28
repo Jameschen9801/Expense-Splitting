@@ -71,7 +71,7 @@ export function DataSettings({ group, onClose, onOpenBankInstallation }: { group
     </section>
     <section className="border-t border-line pt-4">
       <h3 className="settings-heading">資料備份</h3>
-      <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的群組、帳目、手機通知待確認、草稿與待同步資料，保留舊版備份相容性；不包含登入憑證與銀行捷徑識別碼。檔案含私人帳目，請妥善保管；新裝置請登入同一個同步帳號，備份本身不會授予帳本權限。</p>
+      <p className="text-xs text-ink-3 leading-relaxed mb-3">JSON 包含此裝置保存的帳本、支出、收入、儲蓄、手機通知待確認、草稿與待同步資料，保留舊版備份相容性；不包含登入憑證與銀行捷徑識別碼。檔案含私人帳目，請妥善保管；新裝置請登入同一個同步帳號，備份本身不會授予帳本權限。</p>
       <div className="flex flex-col gap-2">
         <button type="button" className="btn btn-primary w-full" onClick={exportBackup}>匯出完整 JSON 備份</button>
         {group && <button type="button" className="btn w-full" onClick={() => exportFile(groupCsv(group), '分帳明細-' + group.code + '-' + utils.todayStr() + '.csv', 'text/csv;charset=utf-8')}>匯出此帳本全部明細 CSV</button>}

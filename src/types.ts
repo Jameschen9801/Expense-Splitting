@@ -4,6 +4,8 @@ export interface Group {
   name: string;
   members: string[];
   expenses: Expense[];
+  incomes?: Income[];
+  savings?: Saving[];
   transfers: Transfer[];
   createdAt: number;
   history?: Record<string, AuditEntry>;
@@ -13,7 +15,7 @@ export interface Group {
   security?: GroupSecurity;
 }
 
-export type ExpenseCategory = 'other' | 'food' | 'transport' | 'stay' | 'shopping' | 'entertainment' | 'bills' | 'health' | 'social' | 'insurance' | 'travel';
+export type ExpenseCategory = 'other' | 'food' | 'transport' | 'stay' | 'shopping' | 'entertainment' | 'bills' | 'health' | 'social' | 'insurance' | 'travel' | 'education' | 'haircut';
 export type MutationMeta = { id: string; actor: string; actorUid?: string; at: number; expected?: string | null };
 export type AuditEntry = {
   id: string; actor: string; actorUid?: string; at: number; action: string; target: string;
@@ -29,7 +31,18 @@ export type RecordMetadata = {
   updatedAt?: number; updatedBy?: string; updatedByUid?: string; lastMutationId?: string;
 };
 
-export interface Expense extends RecordMetadata {
+export type RecordDetails = {
+  notes?: string;
+  location?: string;
+  tags?: string[];
+  importSource?: { system: 'ReceiptBox'; category: string };
+};
+export interface Income extends RecordMetadata, RecordDetails {
+  id: string; desc: string; amount: number; date: string; createdAt: number;
+}
+export interface Saving extends Income { direction?: 'out' | 'in' }
+
+export interface Expense extends RecordMetadata, RecordDetails {
   id: string;
   desc: string;
   amount: number;
@@ -72,6 +85,8 @@ export interface Transfer extends RecordMetadata {
   date: string;
   createdAt: number;
 }
+
+export type LedgerRecord = Expense | Income | Saving | Transfer;
 
 export interface MyGroup {
   kind?: Group['kind'];

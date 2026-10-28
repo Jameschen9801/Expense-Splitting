@@ -387,6 +387,60 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .record-amount .money { font-size: 18px; }
 .record-amount .amount-long { font-size: 14px; }
 .record-own-expense .money { color: var(--ui-danger); }
+.finance-income { color: var(--ui-positive); }
+.finance-negative { color: var(--ui-danger); }
+.finance-totals { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.finance-totals > div { min-width: 0; }
+.finance-totals .money { margin-top: 7px; font-size: clamp(12px,3.85vw,21px); letter-spacing: -0.5px; line-height: 1.4; }
+.finance-totals .currency { display: block; font-size: 10px; margin-bottom: 2px; color: var(--ui-subtle); }
+.entry-kind-tabs, .report-mode { display: grid; padding: 4px; gap: 4px; background: var(--ui-inset); border-radius: 999px; }
+.entry-kind-tabs { grid-template-columns: repeat(3,minmax(0,1fr)); margin-bottom: 22px; }
+.report-mode { grid-template-columns: repeat(2,minmax(0,1fr)); max-width: 320px; margin: 0 auto 12px; }
+.entry-kind-tabs button, .report-mode button { min-height: 44px; padding: 8px; border: 0; border-radius: 999px; color: var(--ui-secondary); font-size: 14px; }
+.entry-kind-tabs button[aria-pressed="true"], .report-mode button[aria-pressed="true"] { background: var(--ui-accent); color: var(--ui-on-accent); }
+.report-period { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 18px; }
+.report-period > div { display: flex; gap: 2px; min-width: 0; }
+.report-period select { width: auto; min-width: 0; border: 0; background-color: transparent; box-shadow: none; font-size: 17px; font-weight: 600; padding-left: 8px; }
+.report-card { padding: 18px; margin-bottom: 16px; border: 1px solid var(--ui-line); background: var(--ui-surface); border-radius: 24px; }
+.report-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; }
+.report-card-heading h3 { font-size: 15px; font-weight: 600; }
+.report-card-heading > span { font-size: 12px; color: var(--ui-subtle); }
+.report-caption { font-size: 12px; color: var(--ui-subtle); line-height: 1.7; margin: 12px 0 0; }
+.report-metric { display: flex; padding: 3px; background: var(--ui-inset); border-radius: 999px; }
+.report-metric button { min-width: 49px; min-height: 38px; border-radius: 999px; font-size: 12px; color: var(--ui-secondary); }
+.report-metric button[aria-pressed="true"] { color: var(--ui-text); background: var(--ui-surface); }
+.report-chart-summary { display: flex; gap: 8px; justify-content: space-between; font-size: 11px; color: var(--ui-subtle); margin-bottom: 10px; }
+.report-bars { display: block; width: 100%; overflow: visible; }
+.report-grid-line { stroke: var(--ui-line); stroke-dasharray: 4 5; }
+.report-bars text { fill: var(--ui-subtle); font-size: 22px; }
+.report-bars g[role="button"] { cursor: pointer; }
+.report-bar { fill: var(--ui-accent); }
+.report-bar.selected { fill: var(--ui-positive); stroke: var(--ui-text); stroke-width: 2; }
+.report-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; line-height: 1.8; margin-top: 10px; }
+.report-donut { position: relative; max-width: 290px; margin: 8px auto 20px; }
+.report-donut svg { display: block; width: 100%; }
+.report-donut circle { cursor: pointer; transition: stroke-width .15s ease; }
+.report-donut-center { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+.report-donut-center strong { max-width: 48%; text-align: center; font-size: 17px; }
+.report-donut-center span { font-size: 12px; color: var(--ui-subtle); }
+.report-category-row { display: grid; grid-template-columns: 7px 19px minmax(0,1fr) auto 14px; gap: 9px; align-items: center; width: 100%; padding: 15px 0; border-top: 1px solid var(--ui-line); text-align: left; }
+.report-category-dot { width: 7px; height: 28px; border-radius: 9px; }
+.report-category-row strong, .report-income-row strong { font-size: 13px; font-weight: 550; }
+.report-category-row p, .report-income-row p { font-size: 11px; color: var(--ui-subtle); margin-top: 5px; line-height: 1.6; }
+.report-category-row .money, .report-income-row .money { font-size: 13px; white-space: nowrap; }
+.report-category-row > svg, .report-income-row > svg { color: var(--ui-subtle); }
+.report-income-row { display: grid; grid-template-columns: 21px minmax(0,1fr) auto 16px; width: 100%; gap: 10px; padding: 15px 0; align-items: center; text-align: left; }
+.report-income-row + .report-income-row { border-top: 1px solid var(--ui-line); }
+.report-tag-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 13px 0; font-size: 13px; }
+.report-tag-row + .report-tag-row { border-top: 1px solid var(--ui-line); }
+.report-tag-row small { display: block; font-size: 11px; color: var(--ui-subtle); margin-top: 5px; }
+.report-tag-row > div { text-align: right; }
+.report-empty { padding: 28px 0; text-align: center; font-size: 13px; color: var(--ui-subtle); }
+.record-provenance { padding: 15px; background: var(--ui-muted); border-radius: 16px; margin: 16px 0; font-size: 12px; color: var(--ui-secondary); line-height: 1.8; overflow-wrap: anywhere; }
+.record-provenance p + p { margin-top: 6px; }
+.record-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.record-tags span { padding: 3px 9px; border: 1px solid var(--ui-line); background: var(--ui-surface); border-radius: 999px; }
+@media (max-width:360px) { .report-card { padding: 15px; }.report-category-row { grid-template-columns: 19px minmax(0,1fr) auto 14px;gap:7px; }.report-category-dot { display:none; }.report-category-row .money { font-size:12px; } }
 .personal-sync-settings { padding: 18px; margin-bottom: 22px; border: 1px solid var(--ui-line); border-radius: 20px; background: var(--ui-muted); }
 .personal-sync-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .personal-sync-title > svg { color: var(--ui-accent); }
