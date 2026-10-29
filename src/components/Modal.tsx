@@ -47,10 +47,13 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
     const content = contentRef.current;
     if (!content?.contains(field)) return;
     const area = content.getBoundingClientRect(), bounds = field.getBoundingClientRect();
-    content.scrollTop = inputScrollTop(content.scrollTop, bounds.top, bounds.bottom, area.top, area.bottom);
+    const next = inputScrollTop(content.scrollTop, bounds.top, bounds.bottom, area.top, area.bottom);
+    // Reassigning even an unchanged scroll offset can interrupt iOS momentum scrolling.
+    if (Math.abs(next - content.scrollTop) > 1) content.scrollTop = next;
   };
 
   useEffect(() => {
+    if (!keyboardError) return;
     const frame = requestAnimationFrame(() => {
       if (document.activeElement instanceof HTMLElement) revealField(document.activeElement);
     });
@@ -105,19 +108,30 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
 
     const viewport = window.visualViewport;
     let frame = 0;
+    let revealTimer = 0;
+    let revealAfterResize = false;
     const resize = (event?: Event) => {
+      if (event?.type === 'resize') {
+        revealAfterResize = true;
+        window.clearTimeout(revealTimer);
+      }
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (viewportRef.current) {
           const layoutHeight = viewportRef.current.parentElement?.clientHeight || window.innerHeight;
           const area = modalViewport(layoutHeight, viewport);
-          viewportRef.current.style.height = `${area.height}px`;
-          viewportRef.current.style.top = `${area.top}px`;
+          if (viewportRef.current.style.height !== `${area.height}px`) viewportRef.current.style.height = `${area.height}px`;
+          if (viewportRef.current.style.top !== `${area.top}px`) viewportRef.current.style.top = `${area.top}px`;
           viewportRef.current.dataset.keyboardOpen = String(area.keyboardOpen);
         }
-        const focused = document.activeElement;
-        if (event?.type !== 'scroll' && focused instanceof HTMLElement && contentRef.current?.contains(focused)) {
-          revealField(focused);
+        if (revealAfterResize) {
+          revealAfterResize = false;
+          // Follow the keyboard's size while it animates, then reveal the field once.
+          // Repeated scroll corrections during that animation make the form jump.
+          revealTimer = window.setTimeout(() => {
+            const focused = document.activeElement;
+            if (focused instanceof HTMLElement && contentRef.current?.contains(focused)) revealField(focused);
+          }, 120);
         }
       });
     };
@@ -164,6 +178,7 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
       viewport?.removeEventListener('scroll', resize);
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(frame);
+      window.clearTimeout(revealTimer);
       body.style.position = previousBodyStyles.position;
       body.style.top = previousBodyStyles.top;
       body.style.left = previousBodyStyles.left;
@@ -227,10 +242,10 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
           }}>
           {children}
         </div>
-        {activeField ? <div className="keyboard-input-surface shrink-0 border-t border-line">
-          <KeyboardInputBar nextLabel={nextField?.label} error={keyboardError}
-            onNext={() => { if (nextField) activateField(nextField.id); }} onDone={finishInput} />
-        </div> : footer && <div className="modal-footer shrink-0 border-t border-line px-5 pt-3">{footer}</div>}
+        {(activeField || footer) && <div className="modal-footer shrink-0 border-t border-line px-5 pt-3">
+          {activeField ? <KeyboardInputBar nextLabel={nextField?.label} error={keyboardError}
+            onNext={() => { if (nextField) activateField(nextField.id); }} onDone={finishInput} /> : footer}
+        </div>}
       </div>
       </div>
     </div>

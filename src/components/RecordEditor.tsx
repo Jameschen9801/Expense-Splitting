@@ -97,13 +97,13 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   }, [recordType, expForm.splitMode, expForm.participants]);
   return (
           <Modal layout="editor" title={bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
-            <div className="grid grid-cols-2 sm:flex sm:justify-end gap-2">
+            <div className="record-editor-actions">
               <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>取消</button>
               {recordType === 'expense' && !isEditingExpense && (
                 <button className="btn btn-ghost btn-sm" onClick={() => submit(true)} disabled={isSaving}>{isSaving ? '儲存中…' : '儲存並繼續'}</button>
               )}
               <button
-                className={`btn btn-primary btn-sm sm:col-span-1 ${recordType === 'expense' && !isEditingExpense ? 'col-span-2' : 'col-span-1'}`}
+                className="btn btn-primary btn-sm"
                 onClick={() => submit(false)}
                 disabled={isSaving}
               >
@@ -148,8 +148,19 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   />
                 </div>
                 <div className="field">
+                  <label className="field-label" htmlFor="expense-category">分類</label>
+                  <select id="expense-category" value={expForm.category || (bankReview ? '' : defaultExpenseCategory)} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
+                    {bankReview && <option value="" disabled>請選擇分類</option>}
+                    {categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}
+                  </select>
+                </div>
+                <div className="field">
                   <label className="field-label" htmlFor="expense-description">說明</label>
                   <input id="expense-description" data-autofocus={bankReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="expense-date">日期</label>
+                  <input id="expense-date" type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
                 </div>
                 {!personal && <><div className="field">
                   <label className="field-label" htmlFor="expense-payer">誰先付款</label>
@@ -279,20 +290,6 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   })()}
                 </div>
                 </>}
-                <div className="field">
-                  <label className="field-label" htmlFor="expense-category">分類</label>
-              <select id="expense-category" value={expForm.category || (bankReview ? '' : defaultExpenseCategory)} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
-                {bankReview && <option value="" disabled>請選擇分類</option>}
-                    {categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}
-                  </select>
-                </div>
-                <details className="expense-more" open={isEditingExpense}>
-                  <summary>日期設定</summary>
-                  <div className="field mt-4 mb-1">
-                    <label className="field-label" htmlFor="expense-date">日期</label>
-                    <input id="expense-date" type="date" value={expForm.date} onChange={e => setExpForm({ ...expForm, date: e.target.value })} />
-                  </div>
-                </details>
               </>
             ) : (
               <>
