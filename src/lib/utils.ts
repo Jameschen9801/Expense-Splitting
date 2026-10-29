@@ -3,6 +3,7 @@ import { Group, MyGroup, Settlement, Expense, Share } from '../types';
 const MY_GROUPS_KEY = 'warikan_my_groups';
 const GROUP_PREFIX = 'warikan_group_';
 const LAST_GROUP_KEY = 'warikan_last_group';
+const moneyFormatter = new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const storage = {
   getMyGroups: (): MyGroup[] => {
@@ -44,7 +45,7 @@ export const utils = {
   round2: (n: number) => Math.round(n * 100) / 100,
   toCents: (n: number) => Math.round(n * 100),
   fromCents: (n: number) => n / 100,
-  fmt: (n: number) => Number(n).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  fmt: (n: number) => moneyFormatter.format(Number(n)).replace(/\.00$/, ''),
   fmtDate: (dateStr: string) => {
     if (!dateStr) return '未設定日期';
     const [y, m, d] = dateStr.split('-');

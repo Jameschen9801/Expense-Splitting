@@ -8,7 +8,9 @@ import { CategoryIcon } from './CategoryIcon';
 const colors:Record<ExpenseCategory,string>={food:'#c46b45',shopping:'#4679b8',transport:'#74965f',stay:'#7767a6',bills:'#bf954d',health:'#4b9a98',entertainment:'#b86d91',social:'#bf6d71',insurance:'#64879f',travel:'#598aa9',education:'#9c8d55',haircut:'#8c7a70',other:'#8c9292'};
 export const moneyFromCents=(value:number)=>utils.fmt(utils.fromCents(value));
 export function FinanceTotals({incomeCents,expenseCents,balanceCents}:{incomeCents:number;expenseCents:number;balanceCents:number}) {
-  return <div className="finance-totals">{([{label:'收入',value:incomeCents,className:'finance-income'},{label:'支出',value:expenseCents,className:''},{label:'結餘',value:balanceCents,className:balanceCents<0?'finance-negative':''}]).map(item=><div key={item.label}><div className="stat-label">{item.label}</div><div className={`money ${item.className}`}><span className="currency">NT$</span>{moneyFromCents(item.value)}</div></div>)}</div>;
+  const totals=[{label:'收入',value:incomeCents,className:'finance-income'},{label:'支出',value:expenseCents,className:''},{label:'結餘',value:balanceCents,className:balanceCents<0?'finance-negative':''}];
+  const stacked=totals.slice(0,2).some(item=>moneyFromCents(item.value).length>9);
+  return <div className="finance-totals" data-stacked={stacked}>{totals.map(item=><div key={item.label}><div className="stat-label">{item.label}</div><div className={`money ${item.className}`}><span className="currency">NT$</span>{moneyFromCents(item.value)}</div></div>)}</div>;
 }
 export function PersonalStatistics({group,period:requested,onPeriod,onRecords}:{group:Group;period:string;onPeriod:(period:string)=>void;onRecords?:(category:string,period:string,tag?:string)=>void}) {
   const period=/^\d{4}(?:-\d{2})?$/.test(requested)?requested:utils.todayStr().slice(0,7);

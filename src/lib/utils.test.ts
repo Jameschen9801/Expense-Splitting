@@ -4,6 +4,18 @@ import { Group } from '../types';
 import { utils } from './utils';
 import { withoutUndefined } from './firebaseData';
 
+test('金額顯示省略整數的 .00，保留實際小數與原本的四捨五入', () => {
+  assert.equal(utils.fmt(58638), '58,638');
+  assert.equal(utils.fmt(0), '0');
+  assert.equal(utils.fmt(-24345), '-24,345');
+  assert.equal(utils.fmt(82983.97), '82,983.97');
+  assert.equal(utils.fmt(1234.5), '1,234.50');
+  assert.equal(utils.fmt(0.01), '0.01');
+  assert.equal(utils.fmt(-24345.97), '-24,345.97');
+  assert.equal(utils.fmt(99.999), '100');
+  assert.equal(utils.fmt(1.005), '1.01');
+});
+
 test('平均分攤會保留每一分錢', () => {
   const shares = utils.equalShares(100, ['A', 'B', 'C']);
   assert.deepEqual(shares, [
