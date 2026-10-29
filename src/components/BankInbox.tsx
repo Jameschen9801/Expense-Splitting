@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Inbox, ChevronRight } from 'lucide-react';
-import type { BankDraft, Expense, Group } from '../types';
+import type { BankDraft, Expense, Group, SharedDraft } from '../types';
 import { possibleSharedMatches } from '../lib/sharedExpenses';
 import { bankDraftExpense, bankDraftOwner, pendingDescription } from '../lib/bankInbox';
 import { Drafts, type ExpenseForm, type RecordDraft } from '../lib/drafts';
@@ -11,17 +11,18 @@ import { storage, utils } from '../lib/utils';
 import { Modal } from './Modal';
 import { RecordEditor } from './RecordEditor';
 
-export function BankInboxCard({ drafts, onOpen }: { drafts: BankDraft[]; onOpen: () => void }) {
-  const latest = [...drafts].sort((a,b) => b.createdAt - a.createdAt)[0];
+export function BankInboxCard({ drafts, sharedDrafts = [], onOpen }: { drafts: BankDraft[]; sharedDrafts?: SharedDraft[]; onOpen: () => void }) {
+  const latest = [...drafts, ...sharedDrafts].sort((a,b) => b.createdAt - a.createdAt)[0];
+  const count = drafts.length + sharedDrafts.length;
   return <section className="bank-inbox-card">
-    <div className="bank-inbox-label"><Inbox size={19} aria-hidden="true" /><span>手機通知待確認</span></div>
-    <div className="bank-inbox-count"><strong>{drafts.length}</strong><span>筆等你確認</span></div>
-    <p>{latest ? `最近一則 ${new Date(latest.createdAt).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false})} · ${latest.bank}` : '收到的銀行通知會先放在這裡'}</p>
-    <div className="bank-inbox-footer"><span>確認後才計入帳本與統計</span><button type="button" className="btn btn-primary btn-sm" onClick={onOpen}>{drafts.length ? '繼續確認' : '查看待確認'}<ChevronRight size={16} aria-hidden="true" /></button></div>
+    <div className="bank-inbox-label"><Inbox size={19} aria-hidden="true" /><span>待確認記帳</span></div>
+    <div className="bank-inbox-count"><strong>{count}</strong><span>筆等你確認</span></div>
+    <p>{latest ? 'bank' in latest ? `${drafts.length} 筆銀行通知 · ${sharedDrafts.length} 筆共用分攤` : `來自 ${latest.sharedSource.groupName} · 共用分攤` : '銀行通知與共用分攤會先放在這裡'}</p>
+    <div className="bank-inbox-footer"><span>確認後才計入帳本與統計</span><button type="button" className="btn btn-primary btn-sm" onClick={onOpen}>{count ? '繼續確認' : '查看待確認'}<ChevronRight size={16} aria-hidden="true" /></button></div>
   </section>;
 }
 
-export function BankInbox({ group, myName, onClose, onSaved }: { group: Group; myName: string; onClose: () => void; onSaved: (message: string, date?: string) => void }) {
+export function BankInbox({ group, myName, onClose, onSaved, navigation }: { group: Group; myName: string; onClose: () => void; onSaved: (message: string, date?: string) => void; navigation?: ReactNode }) {
   const drafts = [...(group.bankInbox || [])].sort((a,b) => a.createdAt - b.createdAt);
   const [editing, setEditing] = useState<{ draft: BankDraft; initial: RecordDraft } | null>(null);
   const [ignoring, setIgnoring] = useState<BankDraft | null>(null);
@@ -85,6 +86,7 @@ export function BankInbox({ group, myName, onClose, onSaved }: { group: Group; m
   if (linking) return <Modal title="連結這筆分帳？" onClose={() => setLinking(null)}><div className="shared-match-notice"><strong>{linking.expense.desc}</strong><p>{linking.expense.sharedSource?.groupName} · {linking.expense.date}</p><p>銀行刷卡全額 NT$ {utils.fmt(linking.draft.amount)}</p><p>你的實際分攤 NT$ {utils.fmt(linking.expense.amount)}</p></div><p className="text-sm leading-relaxed">確認是同一筆消費後，通知會移出待確認，個人帳本只保留你的分攤金額。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex flex-col gap-2 mt-5"><button type="button" className="btn btn-primary" disabled={saving} onClick={link}>確認是同一筆，連結分帳</button><button type="button" className="btn" onClick={() => setLinking(null)}>返回核對</button></div></Modal>;
   if (ignoring) return <Modal title="忽略這則通知？" onClose={() => setIgnoring(null)}><p className="text-sm leading-relaxed">{ignoring.bank} · NT$ {utils.fmt(ignoring.amount)} · {ignoring.date}</p><p className="text-sm text-ink-2 leading-relaxed mt-3">這則通知會移出待確認，同一通知重送也不會再次新增。不影響已確認的帳目。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex gap-2 mt-5"><button type="button" className="btn flex-1" onClick={() => setIgnoring(null)}>保留通知</button><button type="button" className="btn btn-danger flex-1" onClick={ignore}>確認忽略</button></div></Modal>;
   return <Modal title="手機通知待確認" onClose={onClose}>
+    {navigation}
     <div className="bank-inbox-intro"><strong>{drafts.length}</strong><div><h3>筆等你補資料</h3><p>{group.name} · 尚未計入支出與統計</p></div></div>
     {error && <p role="status" className="form-error mb-4">{error}</p>}
     {drafts.length > 0 && <button type="button" className="btn btn-primary w-full mb-4" onClick={() => open(drafts[0])}>繼續確認最早一筆</button>}

@@ -1,7 +1,8 @@
 import type { Group, PersonalLedgerLink } from '../types';
-import { currentDeviceUid, firebaseSession, reconcilePersonalLedger, subscribeToGroup } from './firebase';
+import { currentDeviceUid, fetchGroupOnce, firebaseSession, reconcilePersonalLedger, subscribeToGroup } from './firebase';
 import { sync } from './sync';
 import { storage } from './utils';
+import { excludedOnTargetChange, reviewLink, validSyncDate } from './sharedInbox';
 
 type State = { uid: string; ready: boolean; links: Record<string, PersonalLedgerLink>; errors: Record<string, string>; busy: string[] };
 let state: State = { uid: '', ready: false, links: {}, errors: {}, busy: [] };
@@ -43,6 +44,7 @@ async function run(code: string) {
     while (epoch === generation && dirty.delete(code)) {
       const link = state.links[code];
       if (!link) break;
+      if (!reviewLink(link)) break;
       attemptedLink = JSON.stringify(link);
       const group = await reconcilePersonalLedger(code, link);
       if (epoch !== generation) return;
@@ -63,14 +65,14 @@ async function run(code: string) {
 async function watchGroups() {
   const epoch = ++watchGeneration;
   stopGroups.forEach(stop => stop()); stopGroups = [];
-  const targets = new Set(Object.values(state.links).map(link => link.targetCode));
+  const targets = new Set(Object.values(state.links).flatMap(link => [link.targetCode, ...Object.keys(link.formerTargets || {})]));
   const sources = new Set(Object.entries(state.links).filter(([, link]) => link.enabled).map(([code]) => code));
   for (const code of new Set([...targets, ...sources])) {
     try {
       const stop = await subscribeToGroup(code, group => {
         if (epoch !== watchGeneration) return;
         if (group && targets.has(code)) { try { cache(group); } catch { /* A failed cache must not stop cloud reconciliation. */ } }
-        for (const [sourceCode, link] of Object.entries(state.links)) if (sourceCode === code || link.targetCode === code) queue(sourceCode);
+        for (const [sourceCode, link] of Object.entries(state.links)) if (sourceCode === code || link.targetCode === code || link.formerTargets?.[code]) queue(sourceCode);
       }, cause => {
         if (epoch !== watchGeneration) return;
         for (const [sourceCode, link] of Object.entries(state.links)) if (sourceCode === code || link.targetCode === code) {
@@ -118,7 +120,8 @@ export const personalLedgerSync = {
     }, cause => notify({ ready: false, errors: { settings: errorText(cause) } }));
   },
   retry(code: string) { queue(code); },
-  async configure(sourceCode: string, memberName: string, targetCode: string, enabled: boolean) {
+  async configure(sourceCode: string, memberName: string, targetCode: string, enabled: boolean, since: string, cleanupLegacy = true) {
+    if (!validSyncDate(since)) throw new Error('請選擇有效的起始日期');
     if (!navigator.onLine || !sync.getStatus('').connected) throw new Error('請連線後再設定，原有帳目會保留');
     await personalLedgerSync.start();
     const { database } = await firebaseSession();
@@ -126,11 +129,16 @@ export const personalLedgerSync = {
     const { ref, get, runTransaction } = await import('firebase/database');
     const linkRef = ref(database, 'personalLedgerLinks/' + uid + '/' + sourceCode);
     const previous: PersonalLedgerLink | null = (await get(linkRef)).val();
+    let excludedIds = previous?.excludedIds || {};
+    const formerTargets = { ...previous?.formerTargets };
     if (previous && previous.targetCode !== targetCode) {
-      if (previous.enabled) throw new Error('請先關閉原本的同步，再更換個人帳本');
-      await reconcilePersonalLedger(sourceCode, { ...previous, enabled: false });
+      const oldTarget = await fetchGroupOnce(previous.targetCode);
+      if (oldTarget) excludedIds = excludedOnTargetChange({ ...previous, cleanupLegacy }, oldTarget);
+      formerTargets[previous.targetCode] = true;
     }
-    const next: PersonalLedgerLink = { targetCode, memberName, enabled };
+    delete formerTargets[targetCode];
+    const next: PersonalLedgerLink = { targetCode, memberName, enabled, mode: 'review', since, cleanupLegacy,
+      ...(Object.keys(formerTargets).length ? { formerTargets } : {}), ...(Object.keys(excludedIds).length ? { excludedIds } : {}) };
     const result = await runTransaction(linkRef, current => JSON.stringify(current) === JSON.stringify(previous) ? next : undefined, { applyLocally: false });
     if (!result.committed) throw new Error('另一個畫面剛修改設定，請重新確認');
     notify({ links: { ...state.links, [sourceCode]: next } });

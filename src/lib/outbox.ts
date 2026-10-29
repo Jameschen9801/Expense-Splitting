@@ -1,7 +1,7 @@
-import type { BankDraft, Expense, Group, Income, MutationMeta, Saving, Transfer } from '../types';
+import type { BankDraft, Expense, Group, Income, MutationMeta, Saving, SharedDraft, Transfer } from '../types';
 import { auditEntry, fingerprint, RecordConflictError, updatedRecord } from './audit';
 import { assertLedgerChange } from './ledgers';
-import { possibleSharedMatches } from './sharedExpenses';
+import { possibleBankMatches, possibleSharedMatches } from './sharedExpenses';
 
 export type GroupChange = (
   | { type: 'expense.put'; expense: Expense }
@@ -16,15 +16,19 @@ export type GroupChange = (
   | { type: 'bankDraft.confirm'; id: string; expense: Expense }
   | { type: 'bankDraft.remove'; id: string }
   | { type: 'bankDraft.link'; id: string; expenseId: string }
+  | { type: 'sharedDraft.put'; draft: SharedDraft }
+  | { type: 'sharedDraft.confirm'; id: string; expense: Expense; expectedExpense: string | null; bankExpenseId?: string; expectedBank?: string | null }
+  | { type: 'sharedDraft.remove' | 'sharedDraft.withdraw'; id: string }
   | { type: 'expense.linkBank'; id: string; expenseId: string }
   | { type: 'member.add'; name: string }
   | { type: 'member.remove'; name: string }
   | { type: 'group.rename'; name: string }) & { meta?: MutationMeta };
 
 export type PendingChange = { id: string; groupCode: string; change: GroupChange };
-export const changeEntityId = (change: GroupChange) => change.type === 'bankDraft.put' ? change.draft.id
+export const changeEntityId = (change: GroupChange) => change.type === 'bankDraft.put' || change.type === 'sharedDraft.put' ? change.draft.id
   : change.type === 'expense.put' ? change.expense.id : change.type === 'income.put' ? change.income.id : change.type === 'saving.put' ? change.saving.id : change.type === 'transfer.put' ? change.transfer.id : 'id' in change ? change.id : '';
 export const changeRecord = (group: Group, change: GroupChange) => (change.type.startsWith('bankDraft.') ? group.bankInbox || []
+  : change.type.startsWith('sharedDraft.') ? group.sharedInbox || []
   : change.type.startsWith('expense.') ? group.expenses : change.type.startsWith('income.') ? group.incomes || [] : change.type.startsWith('saving.') ? group.savings || [] : group.transfers).find(record => record.id === changeEntityId(change));
 
 // Applying a queued operation more than once must never duplicate a record.
@@ -32,7 +36,7 @@ export function applyChange(group: Group, change: GroupChange): Group {
   assertLedgerChange(group, change);
   if (change.meta && Object.hasOwn(group.history || {}, change.meta.id)) return group;
   const target = changeEntityId(change) || ('name' in change ? change.name : group.code);
-  const before = change.type.startsWith('bankDraft.') ? changeRecord(group, change)
+  const before = change.type.startsWith('bankDraft.') || change.type.startsWith('sharedDraft.') ? changeRecord(group, change)
     : change.type.startsWith('expense.') ? group.expenses.find(record => record.id === target)
     : change.type.startsWith('income.') ? group.incomes?.find(record => record.id === target)
     : change.type.startsWith('saving.') ? group.savings?.find(record => record.id === target)
@@ -43,6 +47,32 @@ export function applyChange(group: Group, change: GroupChange): Group {
   if (change.meta && before && typeof before === 'object' && before.lastMutationId === change.meta.id) return group;
   let next: Group;
   switch (change.type) {
+    case 'sharedDraft.put': {
+      if (group.sharedHandled?.[target]?.status === 'ignored' || group.sharedHandled?.[target] && !group.expenses.some(record => record.id === target)) return group;
+      next = { ...group, sharedInbox: [...(group.sharedInbox || []).filter(record => record.id !== target), updatedRecord(change.draft, before as SharedDraft | undefined, change.meta)] };
+      break;
+    }
+    case 'sharedDraft.confirm': {
+      const pending = group.sharedInbox?.find(record => record.id === target);
+      if (!pending) return group;
+      const existing = group.expenses.find(record => record.id === target);
+      if (fingerprint(existing) !== change.expectedExpense) return group;
+      if (change.bankExpenseId && !possibleBankMatches(pending, group).some(record => record.id === change.bankExpenseId && fingerprint(record) === change.expectedBank)) return group;
+      next = { ...group, sharedInbox: group.sharedInbox!.filter(record => record.id !== target),
+        sharedHandled: { ...group.sharedHandled, [target]: { status: 'confirmed', version: pending.sharedSource.sourceVersion } },
+        expenses: [...group.expenses.filter(record => record.id !== target && record.id !== change.bankExpenseId), updatedRecord(change.expense, existing || pending, change.meta)],
+        ...(change.bankExpenseId ? { bankLinks: { ...group.bankLinks, [change.bankExpenseId]: target } } : {}),
+      };
+      break;
+    }
+    case 'sharedDraft.remove': case 'sharedDraft.withdraw': {
+      const pending = group.sharedInbox?.find(record => record.id === target);
+      if (!pending) return group;
+      next = { ...group, sharedInbox: group.sharedInbox!.filter(record => record.id !== target),
+        ...(change.type === 'sharedDraft.remove' ? { sharedHandled: { ...group.sharedHandled, [target]: { status: 'ignored', version: pending.sharedSource.sourceVersion } } } : {}),
+      };
+      break;
+    }
     case 'bankDraft.put': {
       if (group.expenses.some(record => record.id === target) || group.bankReceiptIds?.includes(target)) return group;
       next = { ...group, bankInbox: [...group.bankInbox || [], updatedRecord(change.draft, undefined, change.meta)], bankReceiptIds: [...new Set([...(group.bankReceiptIds || []), target])] };
@@ -79,12 +109,13 @@ export function applyChange(group: Group, change: GroupChange): Group {
     case 'group.rename': next = { ...group, name: change.name }; break;
   }
   if (change.meta) {
-    const after = change.type === 'bankDraft.put' ? change.draft : change.type === 'bankDraft.confirm' ? change.expense : change.type === 'expense.put' ? change.expense : change.type === 'transfer.put' ? change.transfer
+    const after = change.type === 'bankDraft.put' || change.type === 'sharedDraft.put' ? change.draft : change.type === 'bankDraft.confirm' || change.type === 'sharedDraft.confirm' ? change.expense : change.type === 'expense.put' ? change.expense : change.type === 'transfer.put' ? change.transfer
       : change.type === 'income.put' ? change.income
       : change.type === 'saving.put' ? change.saving
       : change.type === 'bankDraft.link' || change.type === 'expense.linkBank' ? group.expenses.find(record => record.id === change.expenseId)
       : change.type === 'group.rename' || change.type === 'member.add' ? change.name : undefined;
-    const entry = auditEntry(change.type, target, before, after, change.meta);
+    const action = change.type === 'expense.remove' && before && typeof before === 'object' && (before as Expense).sharedSource?.confirmedAt ? 'sharedExpense.remove' : change.type;
+    const entry = auditEntry(action, target, before, after, change.meta);
     next.history = Object.fromEntries(Object.values({ ...group.history, [entry.id]: entry })
       .sort((a, b) => b.at - a.at).slice(0, 300).map(entry => [entry.id, entry]));
   }
@@ -94,6 +125,12 @@ export function applyChange(group: Group, change: GroupChange): Group {
 export function applyCloudChange(group: Group, change: GroupChange): Group {
   if (change.meta && Object.hasOwn(group.history || {}, change.meta.id)) return group;
   const target = changeEntityId(change);
+  if (change.type === 'sharedDraft.confirm') {
+    if (!group.sharedInbox?.some(record => record.id === target) && group.sharedHandled?.[target]) return group;
+    if (fingerprint(group.expenses.find(record => record.id === target)) !== change.expectedExpense) throw new RecordConflictError(group, target);
+    if (change.bankExpenseId && !possibleBankMatches(change.expense, group).some(record => record.id === change.bankExpenseId && fingerprint(record) === change.expectedBank)) throw new RecordConflictError(group, target);
+  }
+  if (change.type === 'sharedDraft.remove' && !group.sharedInbox?.some(record => record.id === target) && group.sharedHandled?.[target]) return group;
   if (change.type === 'bankDraft.link' || change.type === 'expense.linkBank') {
     if (group.bankLinks?.[change.id] === change.expenseId) return group;
     const bank = changeRecord(group, change), linked = group.expenses.find(expense => expense.id === change.expenseId);
@@ -107,7 +144,7 @@ export function applyCloudChange(group: Group, change: GroupChange): Group {
     if ((change.type === 'bankDraft.link' || change.type === 'expense.linkBank') && group.bankLinks?.[change.id] === change.expenseId) return group;
     const current = changeRecord(group, change);
     if (current?.lastMutationId === change.meta.id) return group;
-    const restored = change.type === 'bankDraft.put' ? change.draft : change.type === 'expense.put' ? change.expense : change.type === 'income.put' ? change.income : change.type === 'saving.put' ? change.saving : change.type === 'transfer.put' ? change.transfer : undefined;
+    const restored = change.type === 'bankDraft.put' || change.type === 'sharedDraft.put' ? change.draft : change.type === 'expense.put' ? change.expense : change.type === 'income.put' ? change.income : change.type === 'saving.put' ? change.saving : change.type === 'transfer.put' ? change.transfer : undefined;
     if (change.meta.expected === null && restored && fingerprint(current) === fingerprint(restored)) return group;
     if (fingerprint(current) !== change.meta.expected) throw new RecordConflictError(group, target);
   }

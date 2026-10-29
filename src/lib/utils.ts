@@ -22,7 +22,7 @@ export const storage = {
       const group = JSON.parse(localStorage.getItem(GROUP_PREFIX + code) || 'null');
       // Older app versions preserve unknown cloud nodes as objects. Normalize
       // those caches before the upgraded UI starts iterating income/savings.
-      for (const key of ['incomes','savings']) if (group?.[key] && !Array.isArray(group[key])) {
+      for (const key of ['incomes','savings','sharedInbox']) if (group?.[key] && !Array.isArray(group[key])) {
         group[key] = Object.values(group[key]).filter((row:any)=>row&&!row._deleted).map((row:any)=>{
           const {_deleted,_lastAudit,...record}=row;return record;
         });

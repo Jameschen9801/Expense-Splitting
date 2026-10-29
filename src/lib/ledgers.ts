@@ -14,12 +14,14 @@ export function expenseFormForLedger(group: Group, form: ExpenseForm): ExpenseFo
 export function assertLedgerChange(group: Group, change: GroupChange) {
   if ((change.type.startsWith('income.') || change.type.startsWith('saving.')) && !isPersonalLedger(group)) throw new Error('收入與儲蓄請記在個人帳本，共用帳本用於費用分攤');
   if (change.type.startsWith('bankDraft.') && !isPersonalLedger(group)) throw new Error('手機通知待確認目前供個人帳本使用');
+  if (change.type.startsWith('sharedDraft.') && !isPersonalLedger(group)) throw new Error('分攤待確認僅供個人帳本使用');
+  if (change.type === 'sharedDraft.confirm' && (change.expense.id !== change.id || !change.expense.sharedSource?.confirmedAt || change.expense.sharedSource.sourceVersion !== group.sharedInbox?.find(record => record.id === change.id)?.sharedSource.sourceVersion && group.sharedInbox?.some(record => record.id === change.id))) throw new Error('分攤內容已變更，請重新確認');
   if (change.type === 'expense.linkBank' && !isPersonalLedger(group)) throw new Error('請在個人帳本連結銀行通知');
   if (change.type === 'bankDraft.confirm' && change.id !== change.expense.id) throw new Error('待確認通知與入帳編號不一致');
   if (!isPersonalLedger(group)) return;
   if (change.type.startsWith('member.') || change.type.startsWith('transfer.')) throw new Error('個人帳本不提供成員分攤或還款轉帳');
-  if (change.type === 'expense.put' || change.type === 'bankDraft.put' || change.type === 'bankDraft.confirm') {
-    const expense = change.type === 'bankDraft.put' ? change.draft : change.expense, name = group.members[0];
+  if (change.type === 'expense.put' || change.type === 'bankDraft.put' || change.type === 'bankDraft.confirm' || change.type === 'sharedDraft.put' || change.type === 'sharedDraft.confirm') {
+    const expense = change.type === 'bankDraft.put' || change.type === 'sharedDraft.put' ? change.draft : change.expense, name = group.members[0];
     if (expense.payer !== name || expense.participants.length !== 1 || expense.participants[0] !== name || expense.splitMode !== 'equal') throw new Error('個人帳本只能記錄自己的支出');
   }
 }

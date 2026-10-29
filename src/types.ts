@@ -12,6 +12,8 @@ export interface Group {
   bankInbox?: BankDraft[];
   bankReceiptIds?: string[];
   bankLinks?: Record<string, string>;
+  sharedInbox?: SharedDraft[];
+  sharedHandled?: Record<string, { status: 'confirmed' | 'ignored'; version: string }>;
   security?: GroupSecurity;
 }
 
@@ -61,10 +63,17 @@ export interface Expense extends RecordMetadata, RecordDetails {
     memberName: string;
     totalAmount: number;
     payer: string;
+    sourceVersion?: string;
+    confirmedAt?: number;
   };
 }
 
-export type PersonalLedgerLink = { targetCode: string; memberName: string; enabled: boolean };
+export interface SharedDraft extends Expense { sharedSource: NonNullable<Expense['sharedSource']> & { sourceVersion: string } }
+export type PersonalLedgerLink = {
+  targetCode: string; memberName: string; enabled: boolean;
+  mode?: 'review'; since?: string; cleanupLegacy?: boolean;
+  formerTargets?: Record<string, true>; excludedIds?: Record<string, true>;
+};
 
 export interface BankDraft extends Expense {
   bank: string;

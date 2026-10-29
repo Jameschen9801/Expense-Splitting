@@ -58,6 +58,7 @@ export function createSyncEngine(dependencies: {
       if (!conflict) return;
       const entityId = changeEntityId;
       const latest = outbox().list().filter(item => item.groupCode === code && entityId(item.change) === conflict.targetId).at(-1)?.change || conflict.change;
+      if (keep === 'mine' && latest.type === 'sharedDraft.confirm') throw new Error('請先保留雲端版本，再到待確認核對最新分攤金額');
       const entries = outbox().list().filter(item => item.groupCode !== code || entityId(item.change) !== conflict.targetId);
       if (keep === 'mine') {
         const record = changeRecord(conflict.cloud, latest);

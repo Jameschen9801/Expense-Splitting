@@ -5,8 +5,8 @@ import { applyCloudChange, type GroupChange } from './outbox';
 import { RecordConflictError, updatedRecord } from './audit';
 import { isPersonalLedger } from './ledgers';
 import { personalLedgerDeletionUpdate } from './ledgerDeletion';
-import { projectSharedExpenses, sharedExpenseChanges } from './sharedExpenses';
 import { applyChange } from './outbox';
+import { excludedOnTargetChange, projectSharedDrafts, reviewLink, sharedReviewChanges } from './sharedInbox';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -79,6 +79,7 @@ export const normalizeGroup = (data: any): Group => {
   return { ...data, expenses: rows(data.expenses), transfers: rows(data.transfers),
     ...(data.incomes ? { incomes: rows(data.incomes) } : {}), ...(data.savings ? { savings: rows(data.savings) } : {}),
     ...(data.bankInbox ? { bankInbox: rows(data.bankInbox) as BankDraft[], bankReceiptIds: Object.keys(data.bankInbox) } : {}),
+    ...(data.sharedInbox ? { sharedInbox: rows(data.sharedInbox) } : {}),
     ...(data.history ? { history } : {}),
     members: ownerName && members.includes(ownerName) ? [ownerName, ...members.filter(name => name !== ownerName)] : members };
 };
@@ -86,7 +87,7 @@ export const cloudGroup = (group: Group, previous?: any) => {
   if (!group.security) return withoutUndefined(group);
   const records = (rows: LedgerRecord[], old: any) => {
     const present = new Set(rows.map(row => row.id));
-    const removals = new Map(Object.values(group.history || {}).filter(entry => ['expense.remove', 'expense.linkBank', 'transfer.remove', 'income.remove', 'saving.remove'].includes(entry.action)).map(entry => [entry.target, entry]));
+    const removals = new Map(Object.values(group.history || {}).filter(entry => ['expense.remove', 'sharedExpense.remove', 'expense.linkBank', 'transfer.remove', 'income.remove', 'saving.remove', 'sharedDraft.confirm', 'sharedDraft.remove', 'sharedDraft.withdraw'].includes(entry.action)).reverse().map(entry => [entry.target, entry]));
     const deleted = Object.fromEntries(Object.entries(old || {}).filter(([, record]: [string, any]) => record?._deleted));
     for (const [id, record] of Object.entries(old || {}) as [string, any][]) {
       if (record._deleted || present.has(id)) continue;
@@ -109,6 +110,7 @@ export const cloudGroup = (group: Group, previous?: any) => {
     ...(group.bankInbox || previous?.bankInbox ? { bankInbox } : {}),
     ...(group.incomes || previous?.incomes ? { incomes: records(group.incomes || [], previous?.incomes) } : {}),
     ...(group.savings || previous?.savings ? { savings: records(group.savings || [], previous?.savings) } : {}),
+    ...(group.sharedInbox || previous?.sharedInbox ? { sharedInbox: records(group.sharedInbox || [], previous?.sharedInbox) } : {}),
     expenses: records(group.expenses, previous?.expenses), transfers: records(group.transfers, previous?.transfers) });
 };
 
@@ -117,16 +119,20 @@ export const subscribeToConnection = async (onChange: (connected: boolean) => vo
   return onValue(ref(database, '.info/connected'), snapshot => onChange(snapshot.val() === true), () => onChange(false));
 };
 
-export const subscribeToBankInbox = async (code: string, onUpdate: (data: Pick<Group,'bankInbox'|'bankReceiptIds'>) => void, onExpenseCount?: (count: number) => void): Promise<Unsubscribe> => {
+export const subscribeToBankInbox = async (code: string, onUpdate: (data: Pick<Group,'bankInbox'|'bankReceiptIds'|'sharedInbox'>) => void, onExpenseCount?: (count: number) => void): Promise<Unsubscribe> => {
   const [database, { ref, onValue }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
+  let current: Pick<Group,'bankInbox'|'bankReceiptIds'|'sharedInbox'> = {};
   const stopInbox = onValue(ref(database, 'groups/' + code + '/bankInbox'), snapshot => {
     const rows = snapshot.val() || {};
-    onUpdate({ bankInbox: Object.values(rows).filter((row: any) => row && !row._deleted).map((row: any) => publicRecord(row)) as BankDraft[], bankReceiptIds: Object.keys(rows) });
+    current = { ...current, bankInbox: Object.values(rows).filter((row: any) => row && !row._deleted).map((row: any) => publicRecord(row)) as BankDraft[], bankReceiptIds: Object.keys(rows) }; onUpdate(current);
+  });
+  const stopShared = onValue(ref(database, 'groups/' + code + '/sharedInbox'), snapshot => {
+    current = { ...current, sharedInbox: Object.values(snapshot.val() || {}).filter((row: any) => row && !row._deleted).map((row: any) => publicRecord(row)) as Group['sharedInbox'] }; onUpdate(current);
   });
   const stopExpenses = onExpenseCount ? onValue(ref(database, 'groups/' + code + '/expenses'), snapshot => {
     onExpenseCount(Object.values(snapshot.val() || {}).filter((row: any) => row && !row._deleted).length);
   }) : undefined;
-  return () => { stopInbox(); stopExpenses?.(); };
+  return () => { stopInbox(); stopShared(); stopExpenses?.(); };
 };
 
 export const subscribeToGroup = (
@@ -286,15 +292,36 @@ export const applyChangeInCloud = async (groupCode: string, change: GroupChange)
 // Derived records are reconciled from current cloud data, rather than replaying
 // stale copies from an offline queue. A target transaction preserves manual work.
 export async function reconcilePersonalLedger(sourceCode: string, link: PersonalLedgerLink): Promise<Group | null> {
+  // Old clients imported the entire history directly. Do not replay that policy.
+  if (!reviewLink(link)) return null;
   const [source, target] = await Promise.all([link.enabled ? fetchGroupOnce(sourceCode) : Promise.resolve(null), fetchGroupOnce(link.targetCode)]);
   if (!target || !isPersonalLedger(target) || target.security?.ownerUid !== deviceUid) return null;
   if (link.enabled && (!source || isPersonalLedger(source) || !source.members.includes(link.memberName)
     || source.security && source.security.users[deviceUid]?.name !== link.memberName)) throw new Error('無法核對共用帳本身分，已保留個人帳目');
-  const projected = link.enabled && source ? await projectSharedExpenses(source, target.members[0], link.memberName) : [];
-  if (!sharedExpenseChanges(target, sourceCode, projected).length) return target;
+  if (!link.enabled || !source) return target;
+  let excludedIds = link.excludedIds || {};
+  for (const code of Object.keys(link.formerTargets || {})) {
+    if (code === link.targetCode) continue;
+    const previous = await fetchGroupOnce(code).catch(() => null);
+    if (!previous || !isPersonalLedger(previous) || previous.security?.ownerUid !== deviceUid) continue;
+    // A confirmation may have completed just before the destination changed.
+    // Read former targets after that change so those receipts cannot be copied again.
+    excludedIds = excludedOnTargetChange({ ...link, excludedIds }, previous);
+    if (!sharedReviewChanges(previous, sourceCode, [], { cleanupLegacy: link.cleanupLegacy }).length) continue;
+    await updateGroup(code, current => sharedReviewChanges(current, sourceCode, [], { cleanupLegacy: link.cleanupLegacy }).reduce((next, change) => applyChange(next, { ...change, meta: { id: crypto.randomUUID(), actor: current.members[0], actorUid: deviceUid, at: Date.now() } }), current));
+  }
+  if (Object.keys(excludedIds).some(id => !link.excludedIds?.[id])) {
+    const [database, { ref, get, runTransaction }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
+    const linkRef = ref(database, 'personalLedgerLinks/' + deviceUid + '/' + sourceCode); await get(linkRef);
+    const result = await runTransaction(linkRef, (current: PersonalLedgerLink | null) => current?.targetCode === link.targetCode && reviewLink(current) ? { ...current, excludedIds: { ...current.excludedIds, ...excludedIds } } : undefined, { applyLocally: false });
+    if (!result.committed) throw new Error('同步目標已變更，會依最新設定重新核對');
+  }
+  const projected = await projectSharedDrafts(source, target.members[0], link.memberName, link.since!);
+  const options = { ...link, excludedIds };
+  if (!sharedReviewChanges(target, sourceCode, projected, options).length) return target;
   return updateGroup(link.targetCode, current => {
     let next = current;
-    for (const change of sharedExpenseChanges(current, sourceCode, projected)) {
+    for (const change of sharedReviewChanges(current, sourceCode, projected, options)) {
       next = applyChange(next, { ...change, meta: { id: crypto.randomUUID(), actor: current.members[0], actorUid: deviceUid, at: Date.now() } });
     }
     return next;

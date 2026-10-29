@@ -228,7 +228,7 @@ export function Modal({ title, children, onClose, footer, keyboardFields = [], k
           onFocusCapture={event => {
             if (!mobile || layout !== 'editor') return;
             const input = event.target;
-            const editable = input instanceof HTMLInputElement && input.id && (input.type === 'text' || input.type === 'number');
+            const editable = input instanceof HTMLInputElement && !input.readOnly && input.id && (input.type === 'text' || input.type === 'number');
             setActiveFieldId(editable ? input.id : null);
             if (editable) requestAnimationFrame(() => { if (document.activeElement === input) revealField(input); });
           }}

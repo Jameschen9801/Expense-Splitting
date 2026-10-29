@@ -40,7 +40,8 @@ import { cashflowValue, personalPeriodLabel, type CashflowForm, type CashflowKin
 import { HistoryLog } from './components/HistoryLog';
 import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
-import { BankInbox, BankInboxCard } from './components/BankInbox';
+import { BankInboxCard } from './components/BankInbox';
+import { PendingInbox } from './components/SharedInbox';
 import { BankSetup } from './components/BankSetup';
 import { BankInstallation } from './components/BankInstallation';
 import { bankInstallationHash } from './lib/bankInstallation';
@@ -127,7 +128,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [bankInstallationOpen, setBankInstallationOpen] = useState(() => location.hash === bankInstallationHash);
   const [bankInboxOpen, setBankInboxOpen] = useState(false);
   const [homeInboxSelect, setHomeInboxSelect] = useState(false);
-  const [homeInboxData, setHomeInboxData] = useState<Record<string, Pick<Group,'bankInbox'|'bankReceiptIds'>>>({});
+  const [homeInboxData, setHomeInboxData] = useState<Record<string, Pick<Group,'bankInbox'|'bankReceiptIds'|'sharedInbox'>>>({});
   const [homeExpenseCounts, setHomeExpenseCounts] = useState<Record<string, number>>({});
   const [accountSettings, setAccountSettings] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
@@ -207,6 +208,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     return [{ book, group: sync.merge({ ...cached, ...(currentPage === 'home' ? homeInboxData[book.code] : {}) }) }];
   }), [myGroups, homeInboxData, syncVersion, currentPage]);
   const homeBankDrafts = inboxBooks.flatMap(item => item.group.bankInbox || []);
+  const homeSharedDrafts = inboxBooks.flatMap(item => item.group.sharedInbox || []);
   const inboxCodes = myGroups.filter(book => isPersonalLedger(storage.getGroup(book.code) || book)).map(book => book.code).join(',');
   useEffect(() => {
     if (currentPage !== 'home') return;
@@ -426,6 +428,20 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     if (!syncStatus.connected) { showToast('目前離線，已保存的紀錄會在連線恢復後自動同步'); return; }
     const success = await sync.flush(currentGroup.code);
     showToast(success ? '所有待同步變更已上傳' : '仍有待同步紀錄，會保留在此裝置');
+  };
+
+  const resolveRecordConflict = (choice: 'cloud' | 'mine') => {
+    if (!currentGroup) return;
+    try {
+      const conflict = syncStatus.conflict, change = conflict?.change;
+      if (choice === 'cloud' && change?.type === 'sharedDraft.confirm' && conflict) {
+        const pending = conflict.cloud.sharedInbox?.find(record => record.id === change.id);
+        if (pending) new Drafts(localStorage).save(currentGroup.code, myName + ':shared:' + change.id, { recordType: 'expense', expenseId: change.id,
+          expense: { desc: change.expense.desc, amount: String(pending.amount), date: change.expense.date, category: change.expense.category, payer: myName, participants: [myName], splitMode: 'equal', customShares: {} },
+          transfer: { from: myName, to: '', amount: '', date: pending.date, note: '' } }, true);
+      }
+      sync.resolveConflict(currentGroup.code, choice);
+    } catch (cause) { showToast(cause instanceof Error ? cause.message : '處理未完成，原有變更仍保留'); }
   };
 
   const toggleModal = (key: keyof typeof modals, open: boolean) => {
@@ -1051,7 +1067,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <button className="btn" onClick={() => toggleModal('joinGroup', true)}>加入共用帳本</button>
               </div>
               <button type="button" className="bank-install-home" onClick={openBankInstallation}><span>手機自動記帳設定</span><ChevronRight size={17} aria-hidden="true" /></button>
-              {inboxBooks.length > 0 && <BankInboxCard drafts={homeBankDrafts} onOpen={() => {
+              {inboxBooks.length > 0 && <BankInboxCard drafts={homeBankDrafts} sharedDrafts={homeSharedDrafts} onOpen={() => {
                 if (inboxBooks.length === 1) { enterGroup(inboxBooks[0].group, inboxBooks[0].book.myName); setBankInboxOpen(true); }
                 else setHomeInboxSelect(true);
               }} />}
@@ -1141,23 +1157,24 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                   <p className="text-xs text-ink-3 leading-relaxed mb-3">另一位成員已更新這筆紀錄。你的變更保留在此裝置，請選擇保留哪個版本；選擇雲端版本會放棄此筆尚未同步的修改。</p>
                   {(() => {
                     const conflict = syncStatus.conflict;
-                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers,...conflict.cloud.incomes||[],...conflict.cloud.savings||[], ...conflict.cloud.bankInbox || []].find(record => record.id === conflict.targetId);
-                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || [],...currentGroup?.incomes||[],...currentGroup?.savings||[], ...currentGroup?.bankInbox || []].find(record => record.id === conflict.targetId);
+                    const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers,...conflict.cloud.incomes||[],...conflict.cloud.savings||[], ...conflict.cloud.bankInbox || [], ...conflict.cloud.sharedInbox || []].find(record => record.id === conflict.targetId);
+                    const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || [],...currentGroup?.incomes||[],...currentGroup?.savings||[], ...currentGroup?.bankInbox || [], ...currentGroup?.sharedInbox || []].find(record => record.id === conflict.targetId);
                     const describe = (record?: LedgerRecord) => record ? ('desc' in record ? record.desc : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
                     return <div className="text-xs mb-3 space-y-2 break-words"><p>雲端：{describe(cloud)}</p><p>此裝置：{describe(mine)}</p></div>;
                   })()}
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn btn-sm" onClick={() => { try { sync.resolveConflict(currentGroup!.code, 'cloud'); } catch { showToast('儲存空間不足，尚未變更任何待同步紀錄'); } }}>保留雲端版本</button>
-                    <button type="button" className="btn btn-primary btn-sm" onClick={() => { try { sync.resolveConflict(currentGroup!.code, 'mine'); } catch { showToast('儲存空間不足，尚未變更任何待同步紀錄'); } }}>使用此裝置版本</button>
+                    <button type="button" className="btn btn-sm" onClick={() => resolveRecordConflict('cloud')}>保留雲端版本</button>
+                    {syncStatus.conflict.change.type !== 'sharedDraft.confirm' && <button type="button" className="btn btn-primary btn-sm" onClick={() => resolveRecordConflict('mine')}>使用此裝置版本</button>}
                   </div>
+                  {syncStatus.conflict.change.type === 'sharedDraft.confirm' && <p className="text-sm mt-3">分攤已更新，請保留雲端版本，再到待確認重新核對金額；你填的說明與分類會保留。</p>}
                 </div>}
               </div>}
               {activeTab === 'stats' && currentGroup && <Statistics group={currentGroup} myName={myName} month={recordMonth} onMonth={setRecordMonth} onRecords={(category,period)=>{setRecordMonth(period);setRecordCategory(category);setRecordSearch('');setRecordFilter('all');setActiveTab('records');window.scrollTo({top:0,behavior:'instant'});}} />}
               {activeTab === 'records' && (
                 <section>
                   {personal && <div className="personal-overview"><div className="stat-label mb-3">{recordMonth === utils.todayStr().slice(0,7) ? '本月收支' : recordMonth ? personalPeriodLabel(recordMonth)+'收支' : '累計收支'}</div><FinanceTotals incomeCents={personalIncomeTotal} expenseCents={personalTotal} balanceCents={personalIncomeTotal-personalTotal}/><button type="button" className="btn btn-sm mt-4 w-full" onClick={openBankSettings}><Wallet size={16} aria-hidden="true" />銀行自動記帳設定</button></div>}
-                  {personal && <BankInboxCard drafts={currentGroup?.bankInbox || []} onOpen={() => setBankInboxOpen(true)} />}
-                  {!personal && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled ? `我的分攤 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
+                  {personal && <BankInboxCard drafts={currentGroup?.bankInbox || []} sharedDrafts={currentGroup?.sharedInbox || []} onOpen={() => setBankInboxOpen(true)} />}
+                  {!personal && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled && personalLink.mode === 'review' ? `我的分攤待確認 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
                   {personal && currentGroup && currentGroup.expenses.some(expense => possibleBankMatches(expense, currentGroup).length > 0) && <div className="shared-match-notice"><strong>有銀行入帳可能與分帳重複</strong><p>請開啟標示「分攤」的明細核對，可合併並保留你的實際負擔金額。</p><button type="button" className="btn btn-sm" onClick={() => showExpenseDetail(currentGroup.expenses.find(expense => possibleBankMatches(expense, currentGroup).length > 0)!)}>核對可能重複的記錄</button></div>}
                   <div className="records-heading">
                     <h2>明細記錄<span className="record-count">{visibleRecordCount} 筆</span></h2>
@@ -1503,11 +1520,11 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
             </div>
             <RecordProvenance record={selectedExpense}/>
             {currentGroup && <HistoryLog group={currentGroup} target={selectedExpense.id} />}
-            {personal && selectedExpense.sharedSource && <div className="shared-source-detail"><strong>來自 {selectedExpense.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(selectedExpense.sharedSource.totalAmount)} · {selectedExpense.sharedSource.payer}先付</p><p>這裡記錄你的分攤；金額、說明與分類跟隨原始分帳更新。</p></div>}
+            {personal && selectedExpense.sharedSource && <div className="shared-source-detail"><strong>來自 {selectedExpense.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(selectedExpense.sharedSource.totalAmount)} · {selectedExpense.sharedSource.payer}先付</p><p>{selectedExpense.sharedSource.confirmedAt ? '已確認入帳；你填的說明與分類會保留，來源更新時再送待確認。' : '舊版同步副本，可到共用帳本調整同步起始日期。'}</p></div>}
             {personal && currentGroup && possibleBankMatches(selectedExpense, currentGroup).map(bank => <div className="shared-match-notice" key={bank.id}><strong>這筆銀行入帳可能重複</strong><p>{bank.desc} · {bank.date}<br />已入帳 NT$ {utils.fmt(bank.amount)}，分攤 NT$ {utils.fmt(selectedExpense.amount)}</p>{bankMergeId === bank.id ? <><p>確認是同一筆消費後，銀行全額記錄將合併至分帳，個人支出只計入分攤金額。</p><div className="flex flex-col gap-2"><button type="button" className="btn btn-primary btn-sm" disabled={isSaving} onClick={() => void mergeBankExpense(bank.id, selectedExpense)}>確認同一筆，合併入帳</button><button type="button" className="btn btn-sm" onClick={() => setBankMergeId('')}>保留兩筆</button></div></> : <button type="button" className="btn btn-sm" onClick={() => setBankMergeId(bank.id)}>核對並合併</button>}</div>)}
             {formError && <p className="form-error" role="alert">{formError}</p>}
             <div className="flex flex-col gap-2 mt-2">
-              {personal && selectedExpense.sharedSource ? <button type="button" className="btn btn-primary w-full" disabled={isSaving} onClick={() => void openSharedSource(selectedExpense)}>前往原始分帳</button> : <><button className="btn btn-primary w-full" onClick={() => openEditExpense(selectedExpense)}>
+              {personal && selectedExpense.sharedSource && !selectedExpense.sharedSource.confirmedAt ? <button type="button" className="btn btn-primary w-full" disabled={isSaving} onClick={() => void openSharedSource(selectedExpense)}>前往原始分帳</button> : <><button className="btn btn-primary w-full" onClick={() => openEditExpense(selectedExpense)}>
                 編輯此筆費用
               </button>
               <button className="btn btn-ghost w-full" onClick={() => duplicateExpense(selectedExpense)}>
@@ -1517,6 +1534,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <Trash2 size={14} className="mr-1.5" /> 刪除此筆費用
               </button>
               </>}
+              {personal && selectedExpense.sharedSource?.confirmedAt && <button type="button" className="btn w-full" disabled={isSaving} onClick={() => void openSharedSource(selectedExpense)}>查看原始分帳</button>}
             </div>
           </Modal>
         )}
@@ -1562,8 +1580,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} onOpenBankInstallation={openBankInstallation} />}
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
-      {homeInboxSelect && <Modal title="選擇待確認帳本" onClose={() => setHomeInboxSelect(false)}><div className="space-y-3">{inboxBooks.map(item => <button type="button" className="btn w-full justify-between" key={item.book.code} onClick={() => { enterGroup(item.group, item.book.myName); setHomeInboxSelect(false); setBankInboxOpen(true); }}><span>{item.group.name}</span><span>{item.group.bankInbox?.length || 0} 筆待確認</span></button>)}</div></Modal>}
-      {bankInboxOpen && currentGroup && <BankInbox group={currentGroup} myName={myName} onClose={() => setBankInboxOpen(false)} onSaved={(message, date) => { if (date) setRecordMonth(date.slice(0,7)); showToast(message); }} />}
+      {homeInboxSelect && <Modal title="選擇待確認帳本" onClose={() => setHomeInboxSelect(false)}><div className="space-y-3">{inboxBooks.map(item => <button type="button" className="btn w-full justify-between" key={item.book.code} onClick={() => { enterGroup(item.group, item.book.myName); setHomeInboxSelect(false); setBankInboxOpen(true); }}><span>{item.group.name}</span><span>{(item.group.bankInbox?.length || 0) + (item.group.sharedInbox?.length || 0)} 筆待確認</span></button>)}</div></Modal>}
+      {bankInboxOpen && currentGroup && <PendingInbox group={currentGroup} myName={myName} onClose={() => setBankInboxOpen(false)} onSaved={(message, date) => { if (date) setRecordMonth(date.slice(0,7)); showToast(message); }} />}
       {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
       {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && (!bankInputs[0].setup || !bankInputInBackground) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} background={bankInputInBackground} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={(group, name, date) => { if (!bankInputInBackground) enterGroup(group, name, date); }} onSaved={showToast} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">

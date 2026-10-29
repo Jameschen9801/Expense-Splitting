@@ -9,11 +9,12 @@ import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, draftOwner = myName, notice }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
   bankReview?: boolean; draftOwner?: string;
+  sharedReview?: boolean;
   notice?: ReactNode;
 }) {
   const personal = isPersonalLedger(group);
@@ -82,6 +83,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     }
   };
   const keyboardFields = useMemo<KeyboardField[]>(() => {
+    if (sharedReview) return [{ id: 'expense-description', label: '說明' }];
     if (recordType === 'transfer') return [
       { id: 'transfer-amount', label: '轉帳金額 (NT$)' },
       { id: 'transfer-note', label: '轉帳備註' },
@@ -94,9 +96,9 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
         label: `${name} ${expForm.splitMode === 'custom' ? '分攤金額 (NT$)' : '分攤比例 (%)'}`,
       }))),
     ];
-  }, [recordType, expForm.splitMode, expForm.participants]);
+  }, [recordType, expForm.splitMode, expForm.participants, sharedReview]);
   return (
-          <Modal layout="editor" title={bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
+          <Modal layout="editor" title={sharedReview ? '確認分攤記帳' : bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
             <div className="record-editor-actions">
               <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>取消</button>
               {recordType === 'expense' && !isEditingExpense && (
@@ -107,7 +109,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 onClick={() => submit(false)}
                 disabled={isSaving}
               >
-                {isSaving ? '儲存中…' : bankReview ? '確認加入帳本' : '儲存'}
+                {isSaving ? '儲存中…' : bankReview || sharedReview ? '確認加入帳本' : '儲存'}
               </button>
             </div>
           }>
@@ -135,7 +137,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   <label className="field-label" htmlFor="expense-amount">金額 (NT$)</label>
                   <input
                     id="expense-amount"
-                    data-autofocus={bankReview ? undefined : true}
+                    data-autofocus={bankReview || sharedReview ? undefined : true}
                     type="number"
                     inputMode="decimal"
                     enterKeyHint="next"
@@ -144,6 +146,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                     placeholder="0"
                     step="0.01"
                     min="0"
+                    readOnly={sharedReview}
                     className="expense-amount-input"
                   />
                 </div>
@@ -156,7 +159,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-description">說明</label>
-                  <input id="expense-description" data-autofocus={bankReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
+                  <input id="expense-description" data-autofocus={bankReview || sharedReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-date">日期</label>

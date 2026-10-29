@@ -452,6 +452,10 @@ input.record-search { padding-left: 42px; border-radius: 16px; }
 .personal-sync-title > svg { color: var(--ui-accent); }
 .personal-sync-title h3 { font-size: 15px; font-weight: 600; flex: 1; }
 .personal-sync-title > span { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--ui-accent); }
+.personal-sync-title { flex-wrap: wrap; }
+.shared-sync-cleanup { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; font-size: 13px; line-height: 1.7; }
+.shared-sync-cleanup input { margin-top: 4px; flex-shrink: 0; }
+.shared-sync-cleanup small { display: block; font-size: 12px; color: var(--ui-subtle); margin-top: 4px; }
 .personal-sync-settings p, .shared-match-notice p, .shared-source-detail p { font-size: 13px; line-height: 1.8; color: var(--ui-secondary); margin: 8px 0 14px; overflow-wrap: anywhere; }
 .personal-sync-settings .personal-sync-note { font-size: 12px; margin: 10px 0 0; color: var(--ui-subtle); }
 .personal-sync-confirm { margin-top: 14px; }

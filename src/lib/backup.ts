@@ -1,4 +1,4 @@
-import type { BankDraft, Expense, Group, Income, LedgerRecord, MyGroup, Saving, Transfer } from '../types';
+import type { BankDraft, Expense, Group, Income, LedgerRecord, MyGroup, Saving, SharedDraft, Transfer } from '../types';
 import { categories, categoryLabel } from './categories';
 import { changeEntityId, type GroupChange, type PendingChange } from './outbox';
 import { utils } from './utils';
@@ -39,7 +39,9 @@ function validRecord(record: any): record is LedgerRecord {
   if ('payer' in record) {
     const source = record.sharedSource;
     if (source != null && (!object(source) || !code(source.groupCode) || !text(source.groupName,100) || !recordId(source.expenseId)
-      || !text(source.memberName,100) || !source.memberName || !text(source.payer,100) || !amount(source.totalAmount))) return false;
+      || !text(source.memberName,100) || !source.memberName || !text(source.payer,100) || !amount(source.totalAmount)
+      || source.sourceVersion != null && (typeof source.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(source.sourceVersion))
+      || source.confirmedAt != null && (!Number.isFinite(source.confirmedAt) || source.confirmedAt <= 0))) return false;
     if (!text(record.desc, 200) || !text(record.payer, 100) || !names(record.participants) || !record.participants.length
       || !['equal', 'custom', 'percent'].includes(record.splitMode)
       || record.category && !categories.some(category => category.id === record.category)) return false;
@@ -73,7 +75,7 @@ function validGroup(group: any): group is Group {
   if (records.length > 50000 || new Set(records.map(record=>record.id)).size !== records.length) return false;
   if (group.history && (!object(group.history) || Object.keys(group.history).length > 300 || Object.entries(group.history).some(([id, entry]: [string, any]) =>
     !object(entry) || entry.id !== id || !text(entry.actor, 100) || !text(entry.target, 200) || !Number.isFinite(entry.at)
-    || !['expense.put','expense.remove','expense.linkBank','income.put','income.remove','saving.put','saving.remove','import.receiptbox','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link'].includes(entry.action)
+    || !['expense.put','expense.remove','sharedExpense.remove','expense.linkBank','income.put','income.remove','saving.put','saving.remove','import.receiptbox','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link','sharedDraft.put','sharedDraft.confirm','sharedDraft.remove','sharedDraft.withdraw'].includes(entry.action)
     || !Array.isArray(entry.changes) || entry.changes.length > 30 || entry.changes.some((change: any) => !object(change) || !text(change.label, 100) || !text(change.before, 10000) || !text(change.after, 10000))))) return false;
   if (group.security) {
     const security = group.security;
@@ -85,17 +87,22 @@ function validGroup(group: any): group is Group {
   if (group.bankInbox != null && (!isPersonalLedger(group) || !Array.isArray(group.bankInbox) || group.bankInbox.length > 50000 || !group.bankInbox.every(validBankDraft)
     || new Set([...group.expenses, ...group.bankInbox].map(record => record.id)).size !== group.expenses.length + group.bankInbox.length)) return false;
   if (group.bankReceiptIds != null && (!Array.isArray(group.bankReceiptIds) || group.bankReceiptIds.length > 100000 || !group.bankReceiptIds.every(recordId))) return false;
+  if (group.sharedInbox != null && (!isPersonalLedger(group) || !Array.isArray(group.sharedInbox) || group.sharedInbox.length > 50000 || !group.sharedInbox.every(validSharedDraft) || new Set(group.sharedInbox.map(record => record.id)).size !== group.sharedInbox.length)) return false;
+  if (group.sharedHandled != null && (!isPersonalLedger(group) || !object(group.sharedHandled) || Object.keys(group.sharedHandled).length > 100000 || Object.entries(group.sharedHandled).some(([id, value]: [string, any]) => !/^eshared_[a-f0-9]{64}$/.test(id) || !object(value) || !['confirmed','ignored'].includes(value.status) || typeof value.version !== 'string' || !/^[a-f0-9]{64}$/.test(value.version)))) return false;
   if (group.bankLinks != null && (!isPersonalLedger(group) || !object(group.bankLinks) || Object.keys(group.bankLinks).length > 100000
     || Object.entries(group.bankLinks).some(([id, linked]) => !/^ebank_[A-Za-z0-9_-]+$/.test(id) || typeof linked !== 'string' || !/^eshared_[a-f0-9]{64}$/.test(linked)))) return false;
   if (isPersonalLedger(group) && (!group.security || group.members.length !== 1 || group.transfers.length
     || Object.keys(group.security.users).length !== 1 || Object.keys(group.security.names).length !== 1
     || group.security.users[group.security.ownerUid].name !== group.members[0]
-    || [...group.expenses, ...group.bankInbox || []].some((record: Expense) => record.payer !== group.members[0] || record.participants.length !== 1 || record.participants[0] !== group.members[0] || record.splitMode !== 'equal'))) return false;
+    || [...group.expenses, ...group.bankInbox || [], ...group.sharedInbox || []].some((record: Expense) => record.payer !== group.members[0] || record.participants.length !== 1 || record.participants[0] !== group.members[0] || record.splitMode !== 'equal'))) return false;
   return group.expenses.every((record: Expense) => group.members.includes(record.payer) && record.participants.every(name => group.members.includes(name)))
     && group.transfers.every((record: Transfer) => group.members.includes(record.from) && group.members.includes(record.to));
 }
 function validBankDraft(record: any): record is BankDraft {
   return validRecord(record) && 'payer' in record && 'bank' in record && 'last4' in record && text(record.bank,40) && record.bank.length >= 2 && typeof record.last4 === 'string' && /^\d{4}$/.test(record.last4) && categories.some(item => item.id === record.category);
+}
+function validSharedDraft(record: any): record is SharedDraft {
+  return validRecord(record) && 'payer' in record && !!record.sharedSource?.sourceVersion && !record.sharedSource.confirmedAt && /^eshared_[a-f0-9]{64}$/.test(record.id);
 }
 function validForm(form: any, transfer = false) {
   if (!object(form) || !text(form.amount, 100) || !date(form.date)) return false;
@@ -111,6 +118,9 @@ function validPending(item: any): item is PendingChange {
     || !Number.isFinite(change.meta.at) || (change.meta.expected != null && !text(change.meta.expected, 100000)))) return false;
   switch (change.type) {
     case 'bankDraft.put': return validBankDraft(change.draft);
+    case 'sharedDraft.put': return validSharedDraft(change.draft);
+    case 'sharedDraft.confirm': return recordId(change.id) && validRecord(change.expense) && 'payer' in change.expense && !!change.expense.sharedSource?.confirmedAt && change.id === change.expense.id && (change.expectedExpense === null || text(change.expectedExpense,100000)) && (!change.bankExpenseId || recordId(change.bankExpenseId) && text(change.expectedBank,100000));
+    case 'sharedDraft.remove': case 'sharedDraft.withdraw': return recordId(change.id);
     case 'bankDraft.confirm': return recordId(change.id) && validRecord(change.expense) && 'desc' in change.expense && change.id === change.expense.id;
     case 'bankDraft.remove': return recordId(change.id);
     case 'bankDraft.link': case 'expense.linkBank': return recordId(change.id) && recordId(change.expenseId) && change.id !== change.expenseId;
@@ -163,7 +173,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
   const memberships: MyGroup[] = parse(backup.entries.warikan_my_groups || '[]');
   const pending: PendingChange[] = parse(store.getItem('warikan_outbox_v1') || '[]');
   const restoredPending: PendingChange[] = parse(backup.entries.warikan_outbox_v1 || '[]');
-  const addedRecords: { group: Group; record: LedgerRecord | BankDraft; type: 'expense'|'transfer'|'bankDraft'|'income'|'saving' }[] = [];
+  const addedRecords: { group: Group; record: LedgerRecord | BankDraft | SharedDraft; type: 'expense'|'transfer'|'bankDraft'|'sharedDraft'|'income'|'saving' }[] = [];
   const originals = new Map<string, Group | null>();
   for (const [key, raw] of Object.entries(backup.entries)) {
     if (!key.startsWith('warikan_group_')) continue;
@@ -171,17 +181,19 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const current: Group | null = parse(store.getItem(key) || 'null');
     if (current && (ledgerKind(current) !== ledgerKind(imported) || isPersonalLedger(current) && current.security?.ownerUid !== imported.security?.ownerUid)) throw new Error('備份中的帳本類型或個人帳本身分與目前帳本不同，無法合併');
     originals.set(imported.code, current);
-    const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.bankReceiptIds?.includes(record.id) && !current?.bankLinks?.[record.id]);
+    const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.sharedInbox?.some(item => item.id === record.id) && !current?.sharedHandled?.[record.id] && !current?.bankReceiptIds?.includes(record.id) && !current?.bankLinks?.[record.id]);
     const missingTransfers = imported.transfers.filter(record => !current?.transfers.some(item => item.id === record.id));
     const missingIncomes = (imported.incomes || []).filter(record=>!current?.incomes?.some(item=>item.id===record.id));
     const missingSavings = (imported.savings || []).filter(record=>!current?.savings?.some(item=>item.id===record.id));
     const missingInbox = (imported.bankInbox || []).filter(record => !current?.bankReceiptIds?.includes(record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
+    const missingShared = (imported.sharedInbox || []).filter(record => !current?.sharedHandled?.[record.id] && !current?.sharedInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
     result.skipped += imported.expenses.length + imported.transfers.length - missingExpenses.length - missingTransfers.length;
     missingExpenses.forEach(record => addedRecords.push({ group: imported, record, type: 'expense' }));
     missingTransfers.forEach(record => addedRecords.push({ group: imported, record, type: 'transfer' }));
     missingIncomes.forEach(record=>addedRecords.push({group:imported,record,type:'income'}));
     missingSavings.forEach(record=>addedRecords.push({group:imported,record,type:'saving'}));
     missingInbox.forEach(record => addedRecords.push({ group: imported, record, type: 'bankDraft' }));
+    missingShared.forEach(record => addedRecords.push({ group: imported, record, type: 'sharedDraft' }));
     const next = current ? { ...current,
       members: [...new Set([...current.members, ...imported.members])],
       expenses: [...current.expenses, ...missingExpenses], transfers: [...current.transfers, ...missingTransfers],
@@ -189,10 +201,12 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
       ...(imported.savings || current.savings ? { savings: [...current.savings || [],...missingSavings] } : {}),
       ...(imported.bankLinks || current.bankLinks ? { bankLinks: { ...imported.bankLinks, ...current.bankLinks } } : {}),
       ...(imported.bankInbox || current.bankInbox ? { bankInbox: [...current.bankInbox || [], ...missingInbox], bankReceiptIds: [...new Set([...(current.bankReceiptIds || []), ...(imported.bankReceiptIds || [])])] } : {}),
+      ...(imported.sharedInbox || current.sharedInbox ? { sharedInbox: [...current.sharedInbox || [], ...missingShared] } : {}),
+      ...(imported.sharedHandled || current.sharedHandled ? { sharedHandled: { ...imported.sharedHandled, ...current.sharedHandled } } : {}),
       history: Object.fromEntries(Object.values({ ...imported.history, ...current.history }).sort((a, b) => b.at - a.at).slice(0, 300).map(entry => [entry.id, entry])) } : imported;
     result.entries[key] = JSON.stringify(next);
     result.records += missingExpenses.length + missingTransfers.length + missingIncomes.length + missingSavings.length;
-    result.drafts += missingInbox.length;
+    result.drafts += missingInbox.length + missingShared.length;
     if (!current) result.groups++;
   }
   const validMemberships = memberships.filter(item => result.entries['warikan_group_' + item.code] || store.getItem('warikan_group_' + item.code));
@@ -202,9 +216,9 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     if (pending.some(current => current.id === item.id)) { result.skipped++; continue; }
     const id = entityId(item.change);
     const current = originals.has(item.groupCode) ? originals.get(item.groupCode) : parse(store.getItem('warikan_group_' + item.groupCode) || 'null');
-    const currentRecord = [...current?.expenses || [], ...current?.transfers || [], ...current?.incomes || [], ...current?.savings || [], ...current?.bankInbox || []].find(record => record.id === id);
+    const currentRecord = [...current?.expenses || [], ...current?.transfers || [], ...current?.incomes || [], ...current?.savings || [], ...current?.bankInbox || [], ...current?.sharedInbox || []].find(record => record.id === id);
     // Never replay old edits/deletions or management changes over existing local work.
-    if (!id || currentRecord || current?.bankReceiptIds?.includes(id) || pending.some(queued => queued.groupCode === item.groupCode && entityId(queued.change) === id)) { result.skipped++; continue; }
+    if (!id || currentRecord || current?.bankReceiptIds?.includes(id) || current?.sharedHandled?.[id] || pending.some(queued => queued.groupCode === item.groupCode && entityId(queued.change) === id)) { result.skipped++; continue; }
     const targetGroup = result.entries['warikan_group_' + item.groupCode] || store.getItem('warikan_group_' + item.groupCode);
     if (!targetGroup) { result.skipped++; continue; }
     assertLedgerChange(parse(targetGroup), item.change);
@@ -214,7 +228,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const key = group.code + ':' + record.id;
     if (restoredEntities.has(key) || pending.some(item => item.groupCode === group.code && entityId(item.change) === record.id)) continue;
     const actor = validMemberships.find(item => item.code === group.code)?.myName || '備份還原';
-    const change: GroupChange = type === 'bankDraft' ? { type: 'bankDraft.put', draft: record as BankDraft } : type === 'expense' ? { type: 'expense.put', expense: record as Expense }
+    const change: GroupChange = type === 'bankDraft' ? { type: 'bankDraft.put', draft: record as BankDraft } : type === 'sharedDraft' ? { type: 'sharedDraft.put', draft: record as SharedDraft } : type === 'expense' ? { type: 'expense.put', expense: record as Expense }
       : type === 'income' ? {type:'income.put',income:record as Income} : type === 'saving' ? {type:'saving.put',saving:record as Saving} : { type: 'transfer.put', transfer: record as Transfer };
     change.meta = { id: crypto.randomUUID(), actor, at: Date.now(), expected: null };
     pending.push({ id: crypto.randomUUID(), groupCode: group.code, change });

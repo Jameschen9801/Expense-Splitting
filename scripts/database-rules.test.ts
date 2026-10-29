@@ -4,9 +4,10 @@ import { initializeTestEnvironment, assertFails, assertSucceeds, type RulesTestE
 import type { Group } from '../src/types';
 import { applyChange } from '../src/lib/outbox';
 import { fingerprint } from '../src/lib/audit';
-import { cloudGroup } from '../src/lib/firebase';
+import { cloudGroup, normalizeGroup as normalizeGroupForTest } from '../src/lib/firebase';
 import { personalLedgerDeletionUpdate } from '../src/lib/ledgerDeletion';
 import { projectSharedExpenses } from '../src/lib/sharedExpenses';
+import { projectSharedDrafts, sharedDraftExpense } from '../src/lib/sharedInbox';
 const cloud = (group: Group) => cloudGroup(group) as any;
 
 let env: RulesTestEnvironment;
@@ -169,7 +170,7 @@ test('核准的新分類及匯入地點標籤可保存，未知欄位或過長�
 test('分攤同步設定只由本人存取，只能連結自己的個人帳本與正確的共用身分', async () => {
   await privateRef().set(cloud(personal));
   const own = env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456');
-  const link = {targetCode:'654321',memberName:'A',enabled:true};
+  const link = {targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'};
   await assertSucceeds(own.set(link)); await assertSucceeds(own.get());
   await assertFails(env.authenticatedContext('member').database().ref('personalLedgerLinks/owner').get());
   await assertFails(env.authenticatedContext('member').database().ref('personalLedgerLinks/owner/123456').set(link));
@@ -185,16 +186,17 @@ test('舊版共用帳本也能設定分攤同步，個人帳本不能當來源',
   const {security,...legacy}=group;
   await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456').set(legacy));
   const links=env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner');
-  await assertSucceeds(links.child('123456').set({targetCode:'654321',memberName:'A',enabled:true}));
-  await assertFails(links.child('654321').set({targetCode:'654321',memberName:'A',enabled:true}));
+  await assertSucceeds(links.child('123456').set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'}));
+  await assertFails(links.child('654321').set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'}));
 });
 test('同步分攤與通知連結可原子儲存，其他成員不能讀寫個人記錄', async () => {
   const expense={...personalExpense,id:'shared',amount:2000,payer:'A',participants:['A','B']};
-  const [copy]=await projectSharedExpenses({...group,expenses:[expense]},'A','A');
+  const [legacyCopy]=await projectSharedExpenses({...group,expenses:[expense]},'A','A');
+  const copy={...legacyCopy,sharedSource:{...legacyCopy.sharedSource!,sourceVersion:'a'.repeat(64),confirmedAt:2}};
   const draft={...personalExpense,id:'ebank_notice',amount:2000,bank:'Richart',last4:'0123',category:'other' as const};
   const initial={...personal,expenses:[copy],bankInbox:[draft],bankReceiptIds:[draft.id]};
   await assertSucceeds(privateRef().set(cloud(personal)));
-  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456').set({targetCode:'654321',memberName:'A',enabled:true});
+  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456').set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'});
   await assertSucceeds(privateRef().set(cloud(initial)));
   const {sharedSource,...detached}=cloud(initial).expenses[copy.id];
   await assertFails(privateRef().child('expenses/'+copy.id).set(detached));
@@ -206,6 +208,84 @@ test('同步分攤與通知連結可原子儲存，其他成員不能讀寫個�
   const removed=applyChange(linked,{type:'expense.remove',id:copy.id,meta:{id:'unlink',actor:'A',actorUid:'owner',at:4}});
   await assertSucceeds(privateRef().set(cloudGroup(removed,cloudGroup(linked,cloud(initial)))));
   await assertFails(privateRef().child('expenses/'+copy.id).set(cloud(initial).expenses[copy.id]));
+});
+test('分攤待確認只能本人存取，起始日以前及舊版直接入帳被拒絕', async () => {
+  await privateRef().set(cloud(personal));
+  const link={targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'};
+  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456').set(link);
+  const original={...personalExpense,id:'r1',amount:2000,date:'2026-10-29',participants:['A','B']};
+  const [draft]=await projectSharedDrafts({...group,expenses:[original]},'A','A','2026-10-29');
+  const waiting=applyChange(personal,{type:'sharedDraft.put',draft,meta:{id:'sp1',actor:'A',actorUid:'owner',at:3}});
+  await assertSucceeds(privateRef().set(cloud(waiting)));
+  await assertFails(privateRef('member').child('sharedInbox/'+draft.id).get());
+  await assertFails(privateRef('member').child('sharedInbox/'+draft.id).set(draft));
+  const [legacy]=await projectSharedExpenses({...group,expenses:[original]},'A','A');
+  await assertFails(privateRef().child('expenses/'+legacy.id).set(legacy));
+  const [old]=await projectSharedDrafts({...group,expenses:[{...original,id:'old',date:'2026-10-28'}]},'A','A','2026-10-28');
+  await assertFails(privateRef().child('sharedInbox/'+old.id).set(old));
+  const form={desc:'自己確認的說明',amount:String(draft.amount),date:draft.date,category:'shopping' as const,payer:'A',participants:['A'],splitMode:'equal' as const,customShares:{}};
+  const confirmed=applyChange(waiting,{type:'sharedDraft.confirm',id:draft.id,expense:sharedDraftExpense(draft,form,5),expectedExpense:null,meta:{id:'sc1',actor:'A',actorUid:'owner',at:5,expected:fingerprint(waiting.sharedInbox![0])}});
+  await assertSucceeds(privateRef().set(cloudGroup(confirmed,cloud(waiting))));
+  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456/enabled').set(false);
+  await assertSucceeds(privateRef().child('expenses/'+draft.id+'/desc').set('確認後自行修改'));
+  const raw=(await privateRef().get()).val();
+  await assertFails(privateRef().child('expenses/'+draft.id).set({...raw.expenses[draft.id],_deleted:true,_lastAudit:{...raw.expenses[draft.id]._lastAudit,action:'expense.remove'}}));
+  const current=normalizeGroupForTest(raw);
+  const removed=applyChange(current,{type:'expense.remove',id:draft.id,meta:{id:'sd1',actor:'A',actorUid:'owner',at:6}});
+  await assertSucceeds(privateRef().set(cloudGroup(removed,raw)));
+});
+test('更換目標後舊目標不能再收新分攤，忽略標記不能被重送繞過', async () => {
+  const other={...personal,code:'654322',name:'第二本'};
+  await privateRef().set(cloud(personal));await env.authenticatedContext('owner').database().ref('groups/654322').set(cloud(other));
+  const link=env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456');
+  await link.set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'});
+  const [draft]=await projectSharedDrafts({...group,expenses:[{...personalExpense,id:'move',amount:2000,date:'2026-10-29',participants:['A','B']}]},'A','A','2026-10-29');
+  await link.set({targetCode:'654322',memberName:'A',enabled:true,mode:'review',since:'2026-10-29',formerTargets:{'654321':true}});
+  await assertFails(privateRef().child('sharedInbox/'+draft.id).set(draft));
+  const newRef=env.authenticatedContext('owner').database().ref('groups/654322');
+  const pending=applyChange(other,{type:'sharedDraft.put',draft,meta:{id:'new1',actor:'A',actorUid:'owner',at:3}});
+  await assertSucceeds(newRef.set(cloud(pending)));
+  const ignored=applyChange(pending,{type:'sharedDraft.remove',id:draft.id,meta:{id:'ignore1',actor:'A',actorUid:'owner',at:4}});
+  await assertSucceeds(newRef.set(cloudGroup(ignored,cloud(pending))));
+  await assertFails(newRef.child('sharedInbox/'+draft.id).set(draft));
+  await assertFails(env.authenticatedContext('member').database().ref('groups/654322/sharedHandled').get());
+});
+test('暫停後可確認已收到的分攤，不能再建立新的待確認', async () => {
+  await privateRef().set(cloud(personal));
+  const link=env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456');
+  await link.set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'});
+  const [draft]=await projectSharedDrafts({...group,expenses:[{...personalExpense,id:'pause',date:'2026-10-29'}]},'A','A','2026-10-29');
+  const pending=applyChange(personal,{type:'sharedDraft.put',draft,meta:{id:'p1',actor:'A',actorUid:'owner',at:3}});
+  await privateRef().set(cloud(pending));await link.child('enabled').set(false);
+  await assertSucceeds(privateRef().child('name').set('暫停仍可記帳'));
+  const form={desc:'確認',amount:String(draft.amount),date:draft.date,category:'food' as const,payer:'A',participants:['A'],splitMode:'equal' as const,customShares:{}};
+  const confirmed=applyChange(pending,{type:'sharedDraft.confirm',id:draft.id,expense:sharedDraftExpense(draft,form,5),expectedExpense:null,meta:{id:'p2',actor:'A',actorUid:'owner',at:5}});
+  await assertSucceeds(privateRef().set(cloudGroup(confirmed,cloud(pending))));
+  const [newDraft]=await projectSharedDrafts({...group,expenses:[{...personalExpense,id:'pause-new',date:'2026-10-29'}]},'A','A','2026-10-29');
+  await assertFails(privateRef().child('sharedInbox/'+newDraft.id).set(newDraft));
+});
+test('銀行背景服務不能存取共用分攤待確認與處理標記', async () => {
+  await seedBankService();
+  for(const path of ['sharedInbox','sharedHandled']){
+    await assertFails(serviceRef('groups/654321/'+path).get());
+    await assertFails(serviceRef('groups/654321/'+path+'/fake').set({status:'ignored',version:'a'.repeat(64)}));
+  }
+});
+test('舊版副本先移到待確認後能首次確認，原始墓碑不會阻止新流程', async () => {
+  const original={...personalExpense,id:'legacy-migrate',amount:2000,date:'2026-10-29',participants:['A','B']};
+  const source={...group,expenses:[original]};
+  const [legacy]=await projectSharedExpenses(source,'A','A');
+  const before={...personal,expenses:[legacy]};
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/654321').set(cloud(before)));
+  await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456').set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29',cleanupLegacy:true});
+  const [draft]=await projectSharedDrafts(source,'A','A','2026-10-29');
+  const removed=applyChange(before,{type:'expense.remove',id:legacy.id,meta:{id:'legacy-remove',actor:'A',actorUid:'owner',at:3}});
+  const pending=applyChange(removed,{type:'sharedDraft.put',draft,meta:{id:'legacy-review',actor:'A',actorUid:'owner',at:4}});
+  const pendingRaw=cloudGroup(pending,cloud(before));
+  await assertSucceeds(privateRef().set(pendingRaw));
+  const form={desc:'確認後的說明',amount:String(draft.amount),date:draft.date,category:'food' as const,payer:'A',participants:['A'],splitMode:'equal' as const,customShares:{}};
+  const confirmed=applyChange(pending,{type:'sharedDraft.confirm',id:draft.id,expense:sharedDraftExpense(draft,form,5),expectedExpense:null,meta:{id:'legacy-confirm',actor:'A',actorUid:'owner',at:5}});
+  await assertSucceeds(privateRef().set(cloudGroup(confirmed,pendingRaw)));
 });
 const serviceRef = (path = '') => env.authenticatedContext('bank-service').database().ref(path || undefined);
 async function seedBankService() {
@@ -226,7 +306,7 @@ test('背景服務只能讀取所需路徑，不能列出帳號、讀同步憑�
   for (const path of ['', 'groups', 'groups/654321', 'groups/123456/security', 'accountSync', 'accountSync/owner', 'accountSync/owner/bank/bridge', 'accountSync/owner/books', 'bankBackgroundServices/bank-service']) await assertFails(serviceRef(path).get());
   await assertFails(serviceRef('personalLedgerLinks/owner').get());
   for(const path of ['groups/654321/incomes','groups/654321/savings']){await assertFails(serviceRef(path).get());await assertFails(serviceRef(path+'/fake').set({id:'fake',desc:'不允許',amount:1,date:'2026-10-28',createdAt:1}));}
-  await assertFails(serviceRef('personalLedgerLinks/bank-service/123456').set({targetCode:'654321',memberName:'A',enabled:true}));
+  await assertFails(serviceRef('personalLedgerLinks/bank-service/123456').set({targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'}));
   await assertFails(serviceRef('accountSync/owner/bank/rules').set('[]'));
   await assertFails(serviceRef('groups/654321/name').set('不能改名'));
   await assertFails(serviceRef('groups/654321/security/ownerUid').set('bank-service'));
