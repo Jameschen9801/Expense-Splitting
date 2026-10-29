@@ -11,9 +11,10 @@ import { storage, utils } from '../lib/utils';
 import { Modal } from './Modal';
 import { RecordEditor } from './RecordEditor';
 
-export function BankInboxCard({ drafts, sharedDrafts = [], onOpen }: { drafts: BankDraft[]; sharedDrafts?: SharedDraft[]; onOpen: () => void }) {
+export function BankInboxCard({ drafts, sharedDrafts = [], onOpen, compact = false }: { drafts: BankDraft[]; sharedDrafts?: SharedDraft[]; onOpen: () => void; compact?: boolean }) {
   const latest = [...drafts, ...sharedDrafts].sort((a,b) => b.createdAt - a.createdAt)[0];
   const count = drafts.length + sharedDrafts.length;
+  if (compact) return <button type="button" className="pending-inbox-compact" onClick={onOpen} aria-label={count ? `繼續確認 ${count} 筆記帳` : '查看待確認記帳'}><Inbox size={20} aria-hidden="true"/><span><strong>待確認記帳{count > 0 && <b>{count}</b>}</strong><small>{count ? '銀行通知與共用分攤，確認後才入帳' : '目前已全部處理完成'}</small></span><ChevronRight size={17} aria-hidden="true"/></button>;
   return <section className="bank-inbox-card">
     <div className="bank-inbox-label"><Inbox size={19} aria-hidden="true" /><span>待確認記帳</span></div>
     <div className="bank-inbox-count"><strong>{count}</strong><span>筆等你確認</span></div>

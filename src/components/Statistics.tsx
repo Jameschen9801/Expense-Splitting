@@ -6,7 +6,7 @@ import { CategoryIcon } from './CategoryIcon';
 import { isPersonalLedger } from '../lib/ledgers';
 import { PersonalStatistics } from './PersonalStatistics';
 
-export function Statistics({ group, myName, month, onMonth, onRecords }: { group: Group; myName: string; month: string; onMonth: (month: string) => void; onRecords?: (category:string,period:string)=>void }) {
+export function Statistics({ group, myName, month, onMonth, onRecords }: { group: Group; myName: string; month: string; onMonth: (month: string) => void; onRecords?: (category:string,period:string,tag?:string)=>void }) {
   const personal = isPersonalLedger(group);
   const stats = useMemo(() => summarizeExpenses(group.expenses, myName, month), [group.expenses, myName, month]);
   const months = [...new Set([...(personal ? [utils.todayStr().slice(0,7)] : []), ...[...group.expenses, ...group.transfers].map(record => record.date?.slice(0, 7)).filter(Boolean)])].sort().reverse();
@@ -28,7 +28,7 @@ export function Statistics({ group, myName, month, onMonth, onRecords }: { group
       </div>
       <h3 className="settings-heading mt-6 mb-0">分類花費</h3>
       {stats.categories.filter(category => category.count > 0).map(category => <div className="mb-5" key={category.id}>
-        <div className="category-summary"><span className="record-kind"><CategoryIcon category={category.id} size={18} /></span><div><div className="text-sm font-medium">{category.label}</div><div className="text-xs text-ink-3 mt-1">{category.count} 筆</div></div><div className="money text-sm">NT$ {utils.fmt(category.total)}</div></div>
+        <button type="button" className="category-summary" onClick={()=>onRecords?.(category.id,month)}><span className="record-kind"><CategoryIcon category={category.id} size={18} /></span><div><div className="text-sm font-medium">{category.label}</div><div className="text-xs text-ink-3 mt-1">{category.count} 筆</div></div><div className="money text-sm">NT$ {utils.fmt(category.total)}</div></button>
         <div className="category-bar" aria-hidden="true"><div style={{ width: (stats.total > 0 ? category.total / stats.total * 100 : 0) + '%' }} /></div>
         {!personal && <div className="text-xs text-ink-3 mt-2">我的分攤 NT$ {utils.fmt(category.mine)}</div>}
       </div>)}

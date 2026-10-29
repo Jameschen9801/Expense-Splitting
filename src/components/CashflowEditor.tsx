@@ -8,14 +8,15 @@ import { Modal } from './Modal';
 export function EntryKindTabs({kind,onKind}:{kind:'expense'|CashflowKind;onKind:(kind:'expense'|CashflowKind)=>void}) {
   return <div className="entry-kind-tabs" role="group" aria-label="記帳類型">{([{id:'expense',label:'支出'},{id:'income',label:'收入'},{id:'saving',label:'儲蓄'}] as const).map(option=><button type="button" key={option.id} aria-pressed={kind===option.id} onClick={()=>onKind(option.id)}>{option.label}</button>)}</div>;
 }
-export function CashflowEditor({code,myName,kind,record,busy,error,onClose,onSave,onKind,clearError}:{
+export function CashflowEditor({code,myName,kind,record,busy,error,onClose,onSave,onKind,clearError,entryDate=utils.todayStr()}:{
   code:string;myName:string;kind:CashflowKind;record?:Income|Saving;busy:boolean;error:string;
   onClose:()=>void;onSave:(form:CashflowForm)=>Promise<boolean>;onKind:(kind:'expense'|CashflowKind)=>void;
   clearError:()=>void;
+  entryDate?:string;
 }) {
   const key=cashflowDraftKey(code,myName,kind);
   const [form,setForm]=useState<CashflowForm>(()=>{
-    const initial:CashflowForm={kind,id:record?.id,desc:record?.desc||'',amount:record?String(record.amount):'',date:record?.date||utils.todayStr(),direction:record&&'direction' in record?record.direction||'out':'out'};
+    const initial:CashflowForm={kind,id:record?.id,desc:record?.desc||'',amount:record?String(record.amount):'',date:record?.date||entryDate,direction:record&&'direction' in record?record.direction||'out':'out'};
     try{const saved=JSON.parse(localStorage.getItem(key)||'null');return saved?.kind===kind && saved?.id===record?.id?{...initial,...saved}:initial;}catch{return initial;}
   });
   const [localError,setLocalError]=useState('');

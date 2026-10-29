@@ -6,14 +6,16 @@ import { categoryLabel } from '../lib/categories';
 import { recordDateLabel } from '../lib/ui';
 import { CategoryIcon } from './CategoryIcon';
 import { memberExpenseAmount } from '../lib/sharedExpenses';
+import { recordTotals, type RecordItem } from '../lib/recordViews';
 
-export type RecordItem = (Expense & { type: 'expense' }) | (Transfer & { type: 'transfer' }) | (Income & {type:'income'}) | (Saving & {type:'saving'});
+export type { RecordItem } from '../lib/recordViews';
 
-export const RecordsList = memo(function RecordsList({ groups, myName, personal = false, filtered, resetKey, onClear, onExpense, onTransfer, onCashflow }: {
+export const RecordsList = memo(function RecordsList({ groups, myName, personal = false, filtered, resetKey, onClear, onExpense, onTransfer, onCashflow, showDayHeadings = true, dailyLabel, emptyTitle }: {
   personal?: boolean;
   groups: Record<string, RecordItem[]>; myName: string; filtered: boolean; resetKey: string; onClear: () => void;
   onExpense: (expense: Expense) => void; onTransfer: (transfer: Transfer) => void;
   onCashflow?: (record: Income|Saving, kind:'income'|'saving')=>void;
+  showDayHeadings?: boolean; dailyLabel?: string; emptyTitle?: string;
 }) {
   const [limit, setLimit] = useState(50);
   // Cloud updates must not collapse an already expanded list while it is being read.
@@ -31,11 +33,16 @@ export const RecordsList = memo(function RecordsList({ groups, myName, personal 
   return <div className="records-list">
     {total === 0 ? <div className="empty-state">
       <span className="empty-icon">{filtered ? <SearchX size={28} aria-hidden="true" /> : <ReceiptText size={28} aria-hidden="true" />}</span>
-      <h3>{filtered ? '找不到符合條件的記錄' : '尚無任何記錄'}</h3>
+      <h3>{filtered ? '找不到符合條件的記錄' : emptyTitle || '尚無任何記錄'}</h3>
       <p>{filtered ? '換個關鍵字，或清除篩選再看看。' : personal ? '按下新增，記錄第一筆支出、收入或儲蓄。' : '按下新增，記錄這個帳本的第一筆花費。'}</p>
       {filtered && <button type="button" className="btn btn-ghost mt-2" onClick={onClear}>清除搜尋與篩選</button>}
     </div> : visible.map(({ date, items }) => <section className="record-day" key={date} aria-label={date === '未設定日期' ? date : utils.fmtDate(date)}>
-      <div className="record-day-heading"><time dateTime={date === '未設定日期' ? undefined : date}>{recordDateLabel(date, utils.todayStr())}</time><span>{groups[date].length} 筆</span></div>
+      {showDayHeadings && <div className="record-day-heading"><div className="record-day-date"><time dateTime={date === '未設定日期' ? undefined : date}>{recordDateLabel(date, utils.todayStr())}</time><span>{groups[date].length} 筆</span></div>{(() => {
+        const rows=groups[date],total=recordTotals(rows,myName,personal);
+        const hasExpense=rows.some(row=>row.type==='expense'),hasSaving=rows.some(row=>row.type==='saving');
+        const savingCents=rows.reduce((sum,row)=>sum+(row.type==='saving'?(row.direction==='in'?-1:1)*utils.toCents(row.amount):0),0);
+        return <div className="record-day-totals">{hasExpense&&<span className="record-day-expense">{dailyLabel || (personal ? '支出' : '我的分攤')} NT$ {utils.fmt(utils.fromCents(total.expenseCents))}</span>}{total.incomeCents>0&&<span className="finance-income">收入 NT$ {utils.fmt(utils.fromCents(total.incomeCents))}</span>}{hasSaving&&<span>儲蓄淨存入 NT$ {utils.fmt(utils.fromCents(savingCents))}</span>}</div>;
+      })()}</div>}
       <div className="day-items">
       {items.map(item => {
         if(item.type==='income'||item.type==='saving'){

@@ -9,13 +9,14 @@ import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr() }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
   bankReview?: boolean; draftOwner?: string;
   sharedReview?: boolean;
   notice?: ReactNode;
+  entryDate?: string;
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -32,7 +33,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   const writer = useRef<DraftWriter | null>(null);
   if (!writer.current) writer.current = new DraftWriter(() => setLocalError('草稿無法保存，請確認裝置儲存空間並保留此畫面'));
   const defaults = (): ExpenseForm => ({
-    desc: '', amount: '', date: utils.todayStr(), category: defaultExpenseCategory,
+    desc: '', amount: '', date: entryDate, category: defaultExpenseCategory,
     payer: group.members.includes(myName) ? myName : group.members[0] || '',
     participants: [...group.members], splitMode: 'equal', customShares: {},
   });
@@ -41,8 +42,8 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     const draft = latest.current;
     const standard = defaults();
     const changed = draft.expense.payer !== standard.payer || draft.expense.splitMode !== 'equal'
-      || draft.expense.category && draft.expense.category !== defaultExpenseCategory || draft.expense.date !== utils.todayStr()
-      || draft.transfer.date !== utils.todayStr() || draft.transfer.from !== standard.payer
+      || draft.expense.category && draft.expense.category !== defaultExpenseCategory || draft.expense.date !== entryDate
+      || draft.transfer.date !== entryDate || draft.transfer.from !== standard.payer
       || draft.transfer.to !== (group.members.find(name => name !== standard.payer) || '')
       || draft.expense.participants.join('|') !== group.members.join('|');
     new Drafts(localStorage).save(group.code, draftOwner, draft, !!changed);
@@ -77,9 +78,9 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
       writer.current!.schedule(writeDraft);
     } else if (keepOpen) {
       finished.current = false;
-      setExpForm(defaults());
+      setExpForm({ ...defaults(), date: expForm.date });
       const from = defaults().payer;
-      setTfForm({ from, to: group.members.find(name => name !== from) || '', amount: '', note: '', date: utils.todayStr() });
+      setTfForm({ from, to: group.members.find(name => name !== from) || '', amount: '', note: '', date: expForm.date });
     }
   };
   const keyboardFields = useMemo<KeyboardField[]>(() => {
