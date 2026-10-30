@@ -9,7 +9,7 @@ import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr() }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
@@ -17,6 +17,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   sharedReview?: boolean;
   notice?: ReactNode;
   entryDate?: string;
+  reviewProgress?: {current:number;total:number;hasNext:boolean};
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -76,7 +77,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     if (!saved) {
       finished.current = false;
       writer.current!.schedule(writeDraft);
-    } else if (keepOpen) {
+    } else if (keepOpen && !bankReview && !sharedReview) {
       finished.current = false;
       setExpForm({ ...defaults(), date: expForm.date });
       const from = defaults().payer;
@@ -100,20 +101,22 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   }, [recordType, expForm.splitMode, expForm.participants, sharedReview]);
   return (
           <Modal layout="editor" title={sharedReview ? '確認分攤記帳' : bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
-            <div className="record-editor-actions">
-              <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>取消</button>
-              {recordType === 'expense' && !isEditingExpense && (
+            <div className="record-editor-actions" data-continuing={!!reviewProgress?.hasNext}>
+              <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>{reviewProgress?'返回清單':'取消'}</button>
+              {reviewProgress?.hasNext && <button type="button" className="btn btn-ghost btn-sm" onClick={()=>submit(false)} disabled={isSaving}>確認後返回</button>}
+              {recordType === 'expense' && !isEditingExpense && !bankReview && !sharedReview && (
                 <button className="btn btn-ghost btn-sm" onClick={() => submit(true)} disabled={isSaving}>{isSaving ? '儲存中…' : '儲存並繼續'}</button>
               )}
               <button
                 className="btn btn-primary btn-sm"
-                onClick={() => submit(false)}
+                onClick={() => submit(!!reviewProgress?.hasNext)}
                 disabled={isSaving}
               >
-                {isSaving ? '儲存中…' : bankReview || sharedReview ? '確認加入帳本' : '儲存'}
+                {isSaving ? '儲存中…' : reviewProgress ? reviewProgress.hasNext ? '確認並下一筆' : '確認並完成' : bankReview || sharedReview ? '確認加入帳本' : '儲存'}
               </button>
             </div>
           }>
+            {reviewProgress&&<p className="pending-review-progress" role="status">{bankReview?'銀行通知':'共用分攤'} · 第 {reviewProgress.current}／{reviewProgress.total} 筆</p>}
             {notice}
             {(!personal && !isEditingExpense && !isEditingTransfer) && (
               <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">

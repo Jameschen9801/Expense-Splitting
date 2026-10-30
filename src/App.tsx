@@ -37,6 +37,7 @@ import { StatisticsRecords, statisticsDetailTitle } from './components/Statistic
 import { RecordDateNavigator } from './components/RecordDateNavigator';
 import { dayInMonth, recordGroups, recordTotals, resetRecordQuery, type StatisticsDetail } from './lib/recordViews';
 import { recordDateLabel } from './lib/ui';
+import { readRecordView, saveRecordView, recordSearchQuery, type RecordView } from './lib/recordNavigation';
 import { CashflowEditor, EntryKindTabs } from './components/CashflowEditor';
 import { RecordProvenance } from './components/RecordProvenance';
 import { FinanceTotals } from './components/PersonalStatistics';
@@ -123,6 +124,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [activeTab, setActiveTab] = useState<'records' | 'balance' | 'members' | 'stats'>('records');
   const [recordType, setRecordType] = useState<'expense' | 'transfer'>('expense');
   const [recordSearch, setRecordSearch] = useState('');
+  const [recordSearchAll, setRecordSearchAll] = useState(false);
   const [recordFilter, setRecordFilter] = useState<'all' | 'mine' | 'paid'>('all');
   const [recordMonth, setRecordMonth] = useState('');
   const [recordCategory, setRecordCategory] = useState('');
@@ -131,6 +133,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [statsPeriod, setStatsPeriod] = useState(utils.todayStr().slice(0,7));
   const [statisticsDetail, setStatisticsDetail] = useState<StatisticsDetail|null>(null);
   const statisticsScroll = useRef(0);
+  const tabScroll = useRef<Partial<Record<typeof groupTabs[number]['id'],number>>>({});
+  const [statsVisited,setStatsVisited] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dataSettings, setDataSettings] = useState(false);
   const [bankSettings, setBankSettings] = useState(false);
@@ -209,7 +213,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   groupCodeRef.current = currentGroup?.code;
   const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
   const personal = isPersonalLedger(currentGroup);
-  const recordEntryDate = personal && activeTab === 'records' && recordView === 'day' && recordDay.startsWith(recordMonth+'-') ? recordDay : utils.todayStr();
+  const searchingAllDates = recordSearchAll && !!recordSearch.trim();
+  const recordEntryDate = personal && !searchingAllDates && activeTab === 'records' && recordView === 'day' && recordDay.startsWith(recordMonth+'-') ? recordDay : utils.todayStr();
   const personalSyncState = useSyncExternalStore(personalLedgerSync.subscribe, personalLedgerSync.getSnapshot);
   const personalLink = personalSyncState.links[currentGroup?.code || ''];
   const inboxBooks = useMemo(() => myGroups.flatMap(book => {
@@ -326,7 +331,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
         setCurrentPage('group');
         setActiveTab('records');
         setRecordMonth(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : '');
-        setRecordDay(utils.todayStr()); setRecordView('day'); setStatsPeriod(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : ''); setStatisticsDetail(null);
+        setRecordDay(utils.todayStr()); setRecordView(readRecordView(localStorage,data.code)); setStatsPeriod(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : ''); setStatisticsDetail(null);
       }
     }
   }, []);
@@ -402,14 +407,15 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     setCurrentPage('group');
     setActiveTab('records');
     setRecordMonth(isPersonalLedger(data) ? (recordDate || utils.todayStr()).slice(0,7) : ''); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
-    setRecordDay(recordDate || utils.todayStr()); setRecordView('day'); setStatsPeriod(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : ''); setStatisticsDetail(null);
-    setFiltersOpen(false);
+    setRecordDay(recordDate || utils.todayStr()); setRecordView(recordDate?'day':readRecordView(localStorage,data.code)); setStatsPeriod(isPersonalLedger(data) ? utils.todayStr().slice(0,7) : ''); setStatisticsDetail(null);
+    setFiltersOpen(false); setRecordSearchAll(false); setStatsVisited(false); tabScroll.current={};
     storage.setLastGroup(data.code);
+    requestAnimationFrame(()=>window.scrollTo({top:0,behavior:'instant'}));
   };
 
   const focusSavedRecord = (date: string) => {
     setRecordMonth(date.slice(0,7)); setRecordDay(date); setRecordCategory(''); setRecordSearch(''); setRecordFilter('all');
-    setStatisticsDetail(null); setActiveTab('records');
+    setStatisticsDetail(null); setActiveTab('records'); setRecordSearchAll(false); tabScroll.current.records=0;
   };
 
   const persistGroupMutation = async (
@@ -1024,21 +1030,35 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const balances = useMemo(() => currentGroup && !personal ? utils.calcBalances(currentGroup) : {}, [currentGroup, personal]);
   const settlements = useMemo(() => utils.calcSettlements(balances), [balances]);
 
-  const groupedRecords: Record<string, RecordItem[]> = useMemo(() => currentGroup ? recordGroups(currentGroup, myName, {
+  const groupedRecords: Record<string, RecordItem[]> = useMemo(() => currentGroup ? recordGroups(currentGroup, myName, recordSearchQuery({
     period: personal && recordView === 'day' ? recordDay : recordMonth,
-    category: recordCategory, search: recordSearch, scope: recordFilter,
-  }) : {}, [currentGroup?.expenses, currentGroup?.transfers, currentGroup?.incomes, currentGroup?.savings, myName, recordFilter, recordSearch, recordMonth, recordCategory, recordDay, recordView, personal]);
+    category: recordCategory, scope: recordFilter,
+  },recordSearch,recordSearchAll)) : {}, [currentGroup?.expenses, currentGroup?.transfers, currentGroup?.incomes, currentGroup?.savings, myName, recordFilter, recordSearch, recordMonth, recordCategory, recordDay, recordView, personal, recordSearchAll]);
   const selectedDayTotals = useMemo(() => recordTotals(Object.values(groupedRecords).flat(), myName, personal), [groupedRecords, myName, personal]);
   const bankMatchExpense = useMemo(() => personal && currentGroup ? currentGroup.expenses.find(expense => possibleBankMatches(expense, currentGroup).length > 0) : undefined, [personal, currentGroup?.expenses, currentGroup?.bankLinks]);
   const clearRecordFilters = useCallback(() => {
     const reset=resetRecordQuery();
-    setRecordSearch(reset.search); setRecordFilter(reset.scope); setRecordMonth(reset.period); setRecordDay(reset.day); setRecordCategory(reset.category); setFiltersOpen(false);
+    setRecordSearch(reset.search); setRecordFilter(reset.scope); setRecordMonth(reset.period); setRecordDay(reset.day); setRecordCategory(reset.category); setFiltersOpen(false); setRecordSearchAll(false);
     window.scrollTo({top:0,behavior:'instant'});
   }, []);
   const selectRecordPeriod = useCallback((period:string) => {
-    setRecordMonth(period);
+    setRecordMonth(period); setRecordSearchAll(false);
     if(period.length===7)setRecordDay(day=>dayInMonth(period,day));else setRecordView('month');
   }, []);
+  const selectRecordView = (view:RecordView) => {
+    setRecordView(view); if(currentGroup)saveRecordView(localStorage,currentGroup.code,view);
+  };
+  const selectGroupTab = (tab:typeof groupTabs[number]['id']) => {
+    if(tab===activeTab){tabScroll.current[tab]=0;window.scrollTo({top:0,behavior:'instant'});return;}
+    tabScroll.current[activeTab]=window.scrollY;
+    if(tab==='stats')setStatsVisited(true);
+    setActiveTab(tab);
+    requestAnimationFrame(()=>window.scrollTo({top:tabScroll.current[tab] || 0,behavior:'instant'}));
+  };
+  const selectSearchScope = (allDates:boolean) => {
+    setRecordSearchAll(allDates);
+    requestAnimationFrame(()=>window.scrollTo({top:0,behavior:'instant'}));
+  };
   const openStatisticsDetail = useCallback((category:string,period:string,tag?:string) => {
     statisticsScroll.current=window.scrollY; setStatisticsDetail({category,period,tag});
     requestAnimationFrame(()=>window.scrollTo({top:0,behavior:'instant'}));
@@ -1049,7 +1069,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   }, []);
   const statsDetailOpen = activeTab === 'stats' && !!statisticsDetail;
   const visibleRecordCount = Object.values(groupedRecords).reduce((sum, records) => sum + records.length, 0);
-  const nonDefaultPeriod = personal ? recordMonth !== utils.todayStr().slice(0,7) : !!recordMonth && recordMonth !== utils.todayStr().slice(0,7);
+  const nonDefaultPeriod = !searchingAllDates && (personal ? recordMonth !== utils.todayStr().slice(0,7) : !!recordMonth && recordMonth !== utils.todayStr().slice(0,7));
   const advancedFilterCount = Number(nonDefaultPeriod) + Number(!!recordCategory);
   const bankInputInBackground = !!statisticsDetail || bankInboxOpen || homeInboxSelect || !!cashflowEditor || !!selectedCashflow || Object.values(modals).some(Boolean);
 
@@ -1145,7 +1165,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <button
                   type="button"
                   key={tab.id}
-                  onClick={() => { setActiveTab(tab.id); window.scrollTo({ top: 0, behavior: 'instant' }); }}
+                  onClick={() => selectGroupTab(tab.id)}
                   className="group-tab"
                   aria-pressed={activeTab === tab.id}
                 >
@@ -1173,25 +1193,24 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                   {syncStatus.conflict.change.type === 'sharedDraft.confirm' && <p className="text-sm mt-3">分攤已更新，請保留雲端版本，再到待確認重新核對金額；你填的說明與分類會保留。</p>}
                 </div>}
               </div>}
-              {activeTab === 'stats' && currentGroup && <>
+              {statsVisited && currentGroup && <div className="ledger-stats-page" hidden={activeTab!=='stats'}>
                 <div style={statisticsDetail ? {display:'none'} : undefined}><Statistics group={currentGroup} myName={myName} month={statsPeriod} onMonth={setStatsPeriod} onRecords={openStatisticsDetail}/></div>
                 {statisticsDetail && <React.Fragment key={JSON.stringify(statisticsDetail)}><StatisticsRecords group={currentGroup} myName={myName} detail={statisticsDetail} onBack={closeStatisticsDetail} onExpense={showExpenseDetail} onTransfer={showTransferDetail} onCashflow={showCashflowDetail}/></React.Fragment>}
-              </>}
-              {activeTab === 'records' && (
-                <section>
-                  {personal && currentGroup && <RecordDateNavigator group={currentGroup} period={recordMonth} day={recordDay} view={recordView} months={memberMonths} onPeriod={selectRecordPeriod} onDay={setRecordDay} onView={setRecordView} onToday={()=>{clearRecordFilters();setRecordView('day');}}/>}
-                  {personal && <div className="personal-overview" data-daily={recordView==='day'}>
+              </div>}
+                <section className="ledger-records-page" hidden={activeTab!=='records'}>
+                  {personal && !searchingAllDates && currentGroup && <RecordDateNavigator group={currentGroup} period={recordMonth} day={recordDay} view={recordView} months={memberMonths} onPeriod={selectRecordPeriod} onDay={day=>{setRecordDay(day);setRecordSearchAll(false);}} onView={selectRecordView} onToday={()=>{clearRecordFilters();selectRecordView('day');}}/>}
+                  {personal && !searchingAllDates && <div className="personal-overview" data-daily={recordView==='day'}>
                     <div className="personal-overview-heading"><div className="stat-label">{recordView==='day' ? recordDateLabel(recordDay,utils.todayStr()) : recordMonth === utils.todayStr().slice(0,7) ? '本月收支' : recordMonth ? personalPeriodLabel(recordMonth)+'收支' : '累計收支'}</div><button type="button" className="btn btn-sm btn-ghost" onClick={openBankSettings} aria-label="銀行自動記帳設定"><Wallet size={15} aria-hidden="true"/>銀行設定</button></div>
                     {recordView==='day' ? <div className="day-finance-overview"><div><span>{recordCategory||recordSearch?'篩選支出':'當日支出'}</span><strong className="money"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(selectedDayTotals.expenseCents))}</strong></div>{selectedDayTotals.incomeCents>0&&<div><span>收入</span><strong className="money finance-income"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(selectedDayTotals.incomeCents))}</strong></div>}<p>{visibleRecordCount} 筆記錄{recordDay>utils.todayStr()?' · 預排記帳':''}</p></div> : <FinanceTotals incomeCents={personalIncomeTotal} expenseCents={personalTotal} balanceCents={personalIncomeTotal-personalTotal}/>}
                   </div>}
-                  {personal && <BankInboxCard compact drafts={currentGroup?.bankInbox || []} sharedDrafts={currentGroup?.sharedInbox || []} onOpen={() => setBankInboxOpen(true)} />}
-                  {!personal && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled && personalLink.mode === 'review' ? `我的分攤待確認 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
-                  {bankMatchExpense && <div className="shared-match-notice"><strong>有銀行入帳可能與分帳重複</strong><p>請開啟標示「分攤」的明細核對，可合併並保留你的實際負擔金額。</p><button type="button" className="btn btn-sm" onClick={() => showExpenseDetail(bankMatchExpense)}>核對可能重複的記錄</button></div>}
+                  {personal && !searchingAllDates && <BankInboxCard compact drafts={currentGroup?.bankInbox || []} sharedDrafts={currentGroup?.sharedInbox || []} onOpen={() => setBankInboxOpen(true)} />}
+                  {!personal && !searchingAllDates && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled && personalLink.mode === 'review' ? `我的分攤待確認 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
+                  {bankMatchExpense && !searchingAllDates && <div className="shared-match-notice"><strong>有銀行入帳可能與分帳重複</strong><p>請開啟標示「分攤」的明細核對，可合併並保留你的實際負擔金額。</p><button type="button" className="btn btn-sm" onClick={() => showExpenseDetail(bankMatchExpense)}>核對可能重複的記錄</button></div>}
                   <div className="records-heading">
-                    <h2>{personal&&recordView==='day'?'當天明細':'明細記錄'}<span className="record-count">{visibleRecordCount} 筆</span></h2>
+                    <h2>{searchingAllDates?'搜尋結果':personal&&recordView==='day'?'當天明細':'明細記錄'}<span className="record-count">{visibleRecordCount} 筆</span></h2>
                     <button className="btn btn-sm btn-primary hidden sm:inline-flex" onClick={() => toggleModal('addRecord', true)}>＋ 新增</button>
                   </div>
-                  {!personal && <p className="record-context">{recordMonth ? personalPeriodLabel(recordMonth) : '全部期間'}</p>}
+                  {!personal && !searchingAllDates && <p className="record-context">{recordMonth ? personalPeriodLabel(recordMonth) : '全部期間'}</p>}
                   <div className="record-toolbar">
                     <div className="record-search-wrap"><Search size={20} aria-hidden="true" />
                     <label className="sr-only" htmlFor="record-search">搜尋記帳明細</label>
@@ -1199,14 +1218,16 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                       id="record-search"
                       type="search"
                       value={recordSearch}
-                      onChange={event => setRecordSearch(event.target.value)}
-                      placeholder={personal ? recordView==='day'?'搜尋當日說明或分類':'搜尋說明或分類' : '搜尋說明或成員'}
+                      onChange={event => {setRecordSearch(event.target.value);if(!event.target.value.trim())setRecordSearchAll(false);}}
+                      placeholder={searchingAllDates?'搜尋本帳本全部紀錄':personal ? recordView==='day'?'搜尋當日說明或分類':'搜尋說明或分類' : '搜尋說明或成員'}
                       className="record-search"
                       enterKeyHint="search"
                     />
                     </div>
                     <button type="button" className="btn filter-toggle" aria-label="篩選明細" aria-expanded={filtersOpen} aria-controls="advanced-record-filters" onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={20} aria-hidden="true" />{advancedFilterCount > 0 && <span className="filter-count" aria-label={`${advancedFilterCount} 個篩選`}>{advancedFilterCount}</span>}</button>
                   </div>
+                  {!!recordSearch.trim()&&<div className="record-search-scope" role="group" aria-label="搜尋範圍"><button type="button" aria-pressed={!searchingAllDates} onClick={()=>selectSearchScope(false)}>{personal&&recordView==='day'?'目前日期':'目前期間'}</button><button type="button" aria-pressed={searchingAllDates} onClick={()=>selectSearchScope(true)}>全部日期</button></div>}
+                  {searchingAllDates&&<p className="record-search-context" role="status">跨月份搜尋 · 僅限這本帳本{recordCategory?' · '+(recordCategory==='income'?'收入':recordCategory==='saving'?'儲蓄':categoryLabel(recordCategory as Expense['category'])):''}</p>}
                     {!personal && <div className="record-scope" aria-label="明細篩選">
                       {([
                         ['all', '全部'],
@@ -1226,14 +1247,14 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                     </div>}
                     <div className="advanced-filters" id="advanced-record-filters" hidden={!filtersOpen}>
                       <div className="advanced-filter-grid" data-personal={personal}>
-                        {!personal && <div><label className="field-label" htmlFor="record-month">明細期間</label><select id="record-month" value={recordMonth} onChange={event => setRecordMonth(event.target.value)}><option value="">全部期間</option>{personal&&<optgroup label="全年">{[...new Set(memberMonths.map(month=>month.slice(0,4)))].map(year=><option key={year} value={year}>{year} 全年</option>)}</optgroup>}<optgroup label="月份">{memberMonths.map(month => <option key={month} value={month}>{month.replace('-', ' / ')}</option>)}</optgroup></select></div>}
+                        {!personal && <div><label className="field-label" htmlFor="record-month">明細期間</label><select id="record-month" value={recordMonth} onChange={event => selectRecordPeriod(event.target.value)}><option value="">全部期間</option>{personal&&<optgroup label="全年">{[...new Set(memberMonths.map(month=>month.slice(0,4)))].map(year=><option key={year} value={year}>{year} 全年</option>)}</optgroup>}<optgroup label="月份">{memberMonths.map(month => <option key={month} value={month}>{month.replace('-', ' / ')}</option>)}</optgroup></select></div>}
                         <div><label className="field-label" htmlFor="record-category">明細分類</label><select id="record-category" value={recordCategory} onChange={event => setRecordCategory(event.target.value)}><option value="">{personal ? '全部分類' : '全部分類／轉帳'}</option>{personal&&<><option value="income">收入</option><option value="saving">儲蓄</option></>}{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></div>
                       </div>
                       {advancedFilterCount > 0 && <button type="button" className="btn btn-ghost btn-sm w-full mt-3" onClick={clearRecordFilters}>清除篩選，回到本月</button>}
                     </div>
                   <RecordsList groups={groupedRecords} myName={myName} personal={personal} filtered={!!recordSearch || recordFilter !== 'all' || !!recordCategory || nonDefaultPeriod}
-                    showDayHeadings={!personal || recordView==='month'} dailyLabel={recordCategory||recordSearch ? personal?'篩選支出':'分攤小計' : undefined} emptyTitle={personal&&recordView==='day'?'這天還沒有記錄':recordMonth===utils.todayStr().slice(0,7)?'本月還沒有記錄':undefined}
-                    resetKey={JSON.stringify([currentGroup?.code, myName, recordSearch, recordFilter, recordMonth, recordCategory, recordDay, recordView])} onClear={clearRecordFilters} onExpense={showExpenseDetail} onTransfer={showTransferDetail} onCashflow={showCashflowDetail}/>
+                    showDayHeadings={searchingAllDates || !personal || recordView==='month'} dailyLabel={recordCategory||recordSearch ? personal?'篩選支出':'分攤小計' : undefined} emptyTitle={personal&&recordView==='day'?'這天還沒有記錄':recordMonth===utils.todayStr().slice(0,7)?'本月還沒有記錄':undefined}
+                    resetKey={JSON.stringify([currentGroup?.code, myName, recordSearch, recordFilter, recordMonth, recordCategory, recordDay, recordView, recordSearchAll])} onClear={clearRecordFilters} onExpense={showExpenseDetail} onTransfer={showTransferDetail} onCashflow={showCashflowDetail}/>
                   <button
                     type="button"
                     className="mobile-add-button sm:hidden"
@@ -1244,7 +1265,6 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                     新增
                   </button>
                 </section>
-              )}
 
               {activeTab === 'balance' && (
                 <>
@@ -1594,7 +1614,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
       {homeInboxSelect && <Modal title="選擇待確認帳本" onClose={() => setHomeInboxSelect(false)}><div className="space-y-3">{inboxBooks.map(item => <button type="button" className="btn w-full justify-between" key={item.book.code} onClick={() => { enterGroup(item.group, item.book.myName); setHomeInboxSelect(false); setBankInboxOpen(true); }}><span>{item.group.name}</span><span>{(item.group.bankInbox?.length || 0) + (item.group.sharedInbox?.length || 0)} 筆待確認</span></button>)}</div></Modal>}
-      {bankInboxOpen && currentGroup && <PendingInbox group={currentGroup} myName={myName} onClose={() => setBankInboxOpen(false)} onSaved={(message, date) => { if (date) focusSavedRecord(date); showToast(message); }} />}
+      {bankInboxOpen && currentGroup && <PendingInbox group={currentGroup} myName={myName} onClose={() => setBankInboxOpen(false)} onSaved={(message, date, continued) => { if (!continued) { if (date) focusSavedRecord(date); showToast(message); } }} />}
       {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
       {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && (!bankInputs[0].setup || !bankInputInBackground) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} background={bankInputInBackground} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={(group, name, date) => { if (!bankInputInBackground) enterGroup(group, name, date); }} onSaved={showToast} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">

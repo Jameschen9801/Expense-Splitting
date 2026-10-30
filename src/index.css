@@ -302,6 +302,9 @@ input.expense-amount-input { min-height: 84px; font-size: 38px; line-height: 1.3
 .modal-panel[data-layout="editor"] input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .record-editor-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .record-editor-actions .btn { flex: 1; padding-inline: 10px; }
+.record-editor-actions[data-continuing="true"] { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.record-editor-actions[data-continuing="true"] > .btn-primary { grid-column:1 / -1; }
+.pending-review-progress { padding:10px 14px; margin-bottom:16px; border-radius:14px; background:var(--ui-accent-soft); color:var(--ui-accent); font-size:13px; font-weight:650; }
 .modal-panel[data-layout="editor"] .modal-footer { padding: 12px 20px max(env(safe-area-inset-bottom), 12px); }
 .modal-panel[data-layout="editor"] .keyboard-input-bar { padding: 0; }
 .modal-viewport[data-keyboard-open="true"] .modal-panel[data-layout="editor"] .modal-footer { padding-bottom: 12px; }
@@ -365,6 +368,11 @@ button.sync-status { min-height: 44px; }
 .records-heading h2 { font-size: 22px; font-weight: 650; }
 .record-count { font-size: 13px; font-weight: 400; color: var(--ui-subtle); margin-left: 10px; }
 .record-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.ledger-records-page[hidden], .ledger-stats-page[hidden] { display:none !important; }
+.record-search-scope { display:inline-flex; gap:3px; padding:3px; margin-top:12px; border-radius:999px; background:var(--ui-inset); }
+.record-search-scope > button { min-height:40px; padding:7px 14px; border-radius:999px; color:var(--ui-secondary); font-size:13px; }
+.record-search-scope > button[aria-pressed="true"] { background:var(--ui-accent); color:var(--ui-on-accent); }
+.record-search-context { font-size:12px; color:var(--ui-subtle); line-height:1.7; margin-top:10px; }
 .record-search-wrap { position: relative; min-width: 0; }
 .record-search-wrap > svg { position: absolute; top: 14px; left: 14px; color: var(--ui-subtle); pointer-events: none; }
 input.record-search { padding-left: 42px; border-radius: 16px; }

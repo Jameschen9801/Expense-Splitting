@@ -2,6 +2,7 @@ import type { Group } from '../types';
 import { isPersonalLedger } from './ledgers';
 import { bankRulesKey, readBankRules } from './bankShortcuts';
 import { Outbox } from './outbox';
+import { recordViewKey } from './recordNavigation';
 
 type Store = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -24,6 +25,7 @@ export function cleanupDeletedLedger(store: Store, code: string) {
   if (store.getItem('warikan_outbox_v1') !== null) updates.set('warikan_outbox_v1', JSON.stringify(new Outbox(store).list().filter(item => item.groupCode !== code)));
   if (store.getItem(bankRulesKey) !== null) updates.set(bankRulesKey, JSON.stringify(readBankRules(store).filter(rule => rule.groupCode !== code)));
   updates.set('warikan_group_' + code, null);
+  updates.set(recordViewKey(code), null);
   if (store.getItem('warikan_last_group') === code) updates.set('warikan_last_group', null);
   const keys = Array.from({length:store.length}, (_, index) => store.key(index)).filter((key): key is string => !!key);
   for (const key of keys) {

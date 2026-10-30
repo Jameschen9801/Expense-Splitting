@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronRight } from 'lucide-react';
 import type { Expense, Group, SharedDraft } from '../types';
 import { Drafts, type ExpenseForm, type RecordDraft } from '../lib/drafts';
@@ -11,8 +11,9 @@ import { possiblePersonalMatches, sharedDraftExpense } from '../lib/sharedInbox'
 import { BankInbox } from './BankInbox';
 import { Modal } from './Modal';
 import { RecordEditor } from './RecordEditor';
+import { completeReview, nextReviewId, reviewProgress, startReviewSession, type ReviewSession } from '../lib/pendingReview';
 
-type Props = { group: Group; myName: string; onClose: () => void; onSaved: (message: string, date?: string) => void };
+type Props = { group: Group; myName: string; onClose: () => void; onSaved: (message: string, date?: string, continued?:boolean) => void };
 const draftOwner = (name: string, id: string) => name + ':shared:' + id;
 
 export function PendingInbox(props: Props) {
@@ -27,20 +28,25 @@ export function PendingInbox(props: Props) {
 export function SharedInbox({ group, myName, onClose, onSaved, navigation }: Props & { navigation?: ReactNode }) {
   const drafts = [...group.sharedInbox || []].sort((a,b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
   const [editing, setEditing] = useState<{ draft: SharedDraft; initial: RecordDraft; existing?: Expense } | null>(null);
+  const [review, setReview] = useState<ReviewSession|null>(null);
   const [ignoring, setIgnoring] = useState<SharedDraft | null>(null);
   const [separate, setSeparate] = useState(false);
   const [bank, setBank] = useState<Expense | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const lock = useRef(false);
-  const open = (draft: SharedDraft) => {
+  useEffect(()=>{
+    if(!saving && editing && !drafts.some(item=>item.id===editing.draft.id)){setEditing(null);setError('這筆分攤已在另一個畫面處理，輸入的草稿會保留');}
+  },[group.sharedInbox,editing,saving]);
+  const open = (draft: SharedDraft, session:ReviewSession = startReviewSession(drafts.map(item=>item.id),draft.id)) => {
+    setReview(session);
     const cached = new Drafts(localStorage).read(group.code, draftOwner(myName, draft.id));
     const expense: ExpenseForm = { desc: draft.desc, amount: String(draft.amount), date: draft.date, category: draft.category || 'other', payer: myName, participants: [myName], splitMode: 'equal', customShares: {} };
     if (cached?.expenseId === draft.id) Object.assign(expense, cached.expense, { amount: String(draft.amount) });
     setEditing({ draft, existing: group.expenses.find(record => record.id === draft.id), initial: { recordType: 'expense', expenseId: draft.id, expense, transfer: { from: myName, to: '', amount: '', date: draft.date, note: '' } } });
     setError(''); setSeparate(false); setBank(null);
   };
-  const confirm = async (form: ExpenseForm) => {
+  const confirm = async (form: ExpenseForm, keepOpen=false) => {
     if (!editing || lock.current) return false;
     lock.current = true; setSaving(true); setError('');
     try {
@@ -54,7 +60,12 @@ export function SharedInbox({ group, myName, onClose, onSaved, navigation }: Pro
         ...(bank ? { bankExpenseId: bank.id, expectedBank: fingerprint(bank) } : {}),
         meta: { id: crypto.randomUUID(), actor: myName, actorUid: currentDeviceUid(), at: Date.now(), expected: fingerprint(editing.draft) } });
       try { new Drafts(localStorage).clear(group.code, draftOwner(myName, pending.id)); } catch { /* Confirmation remains durable in the outbox. */ }
-      setEditing(null); onSaved(bank ? '已改記你的分攤，銀行全額未重複計入' : editing.existing ? '已確認並更新原分攤，未重複新增' : '分攤已確認加入個人帳本', expense.date); return true;
+      const done=completeReview(review || startReviewSession(drafts.map(item=>item.id),pending.id),pending.id);
+      const fresh=sync.merge(storage.getGroup(group.code) || group);
+      const nextId=keepOpen?nextReviewId(done,(fresh.sharedInbox || []).map(item=>item.id)):undefined;
+      const next=fresh.sharedInbox?.find(item=>item.id===nextId);
+      if(next)open(next,done);else{setEditing(null);setReview(null);}
+      onSaved(bank ? '已改記你的分攤，銀行全額未重複計入' : editing.existing ? '已確認並更新原分攤，未重複新增' : '分攤已確認加入個人帳本', expense.date, !!next); return true;
     } catch (cause) { setError(cause instanceof Error ? cause.message : '確認未完成，內容仍保留'); return false; }
     finally { lock.current = false; setSaving(false); }
   };
@@ -69,12 +80,12 @@ export function SharedInbox({ group, myName, onClose, onSaved, navigation }: Pro
   if (ignoring) return <Modal title="忽略這筆分攤？" onClose={() => setIgnoring(null)}><h3 className="text-lg mb-3">{ignoring.desc}</h3><p className="text-sm leading-relaxed">{ignoring.sharedSource.groupName} · {ignoring.date}<br/>你的分攤 NT$ {utils.fmt(ignoring.amount)}</p><p className="text-sm text-ink-2 mt-3">同一筆分攤不會再送入待確認。已經手動記帳或確認過的紀錄會保留。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex gap-2 mt-5"><button type="button" className="btn flex-1" onClick={() => setIgnoring(null)}>返回</button><button type="button" className="btn btn-danger flex-1" onClick={ignore}>確認忽略</button></div></Modal>;
   if (editing) {
     const matches = possiblePersonalMatches(editing.draft, group), banks = possibleBankMatches(editing.draft, group);
-    return <RecordEditor group={group} myName={myName} initial={editing.initial} sharedReview draftOwner={draftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) setEditing(null); }} onExpense={confirm} onTransfer={async () => false}
+    return <Fragment key={editing.draft.id}><RecordEditor reviewProgress={reviewProgress(review,drafts.map(item=>item.id))} group={group} myName={myName} initial={editing.initial} sharedReview draftOwner={draftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) setEditing(null); }} onExpense={confirm} onTransfer={async () => false}
       notice={<><div className="shared-source-detail"><strong>來自 {editing.draft.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(editing.draft.sharedSource.totalAmount)} · 你的分攤 NT$ {utils.fmt(editing.draft.amount)}</p><p>{editing.existing ? '原分攤已更新，確認後會更新同一筆個人紀錄。' : '尚未計入支出；補好說明與分類後再確認。'}</p></div>
         {(matches.length > 0 || banks.length > 0) && <div className="shared-match-notice"><strong>有可能已記過的消費</strong>{matches.map(record => <p key={record.id}>{record.desc} · NT$ {utils.fmt(record.amount)} · {record.date}</p>)}
           {matches.length > 0 && <button type="button" className="btn btn-sm" onClick={() => { setIgnoring(editing.draft); setEditing(null); }}>已經記過，忽略此分攤</button>}
           {banks.map(record => <div key={record.id}><p>{record.desc} · 銀行全額 NT$ {utils.fmt(record.amount)}</p><button type="button" aria-pressed={bank?.id === record.id} className="btn btn-sm" onClick={() => { setBank(record); setSeparate(false); }}>{bank?.id === record.id ? '已選擇合併銀行記帳' : '同一筆刷卡，改為只記我的分攤'}</button></div>)}
-          <label><input type="checkbox" checked={separate} onChange={event => { setSeparate(event.target.checked); if (event.target.checked) setBank(null); }}/>這是不同消費，仍要新增</label></div>}</>}/>;
+          <label><input type="checkbox" checked={separate} onChange={event => { setSeparate(event.target.checked); if (event.target.checked) setBank(null); }}/>這是不同消費，仍要新增</label></div>}</>}/></Fragment>;
   }
   return <Modal title="共用分攤待確認" onClose={onClose}>{navigation}
     <div className="bank-inbox-intro"><strong>{drafts.length}</strong><div><h3>筆等你確認</h3><p>{group.name} · 尚未正式入帳</p></div></div>
