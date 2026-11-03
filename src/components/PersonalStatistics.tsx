@@ -5,7 +5,7 @@ import { summarizePersonal, personalPeriodLabel } from '../lib/personalFinance';
 import { utils } from '../lib/utils';
 import { CategoryIcon } from './CategoryIcon';
 
-const colors:Record<ExpenseCategory,string>={food:'#c46b45',shopping:'#4679b8',transport:'#74965f',stay:'#7767a6',bills:'#bf954d',health:'#4b9a98',entertainment:'#b86d91',social:'#bf6d71',insurance:'#64879f',travel:'#598aa9',education:'#9c8d55',haircut:'#8c7a70',other:'#8c9292'};
+const colors:Record<ExpenseCategory,string>={food:'#c46b45',shopping:'#4679b8',household:'#8b9156',electronics:'#6b79a6',transport:'#74965f',stay:'#7767a6',bills:'#bf954d',health:'#4b9a98',entertainment:'#b86d91',social:'#bf6d71',insurance:'#64879f',travel:'#598aa9',education:'#9c8d55',haircut:'#8c7a70',other:'#8c9292'};
 export const moneyFromCents=(value:number)=>utils.fmt(utils.fromCents(value));
 export function FinanceTotals({incomeCents,expenseCents,balanceCents}:{incomeCents:number;expenseCents:number;balanceCents:number}) {
   const totals=[{label:'收入',value:incomeCents,className:'finance-income'},{label:'支出',value:expenseCents,className:''},{label:'結餘',value:balanceCents,className:balanceCents<0?'finance-negative':''}];

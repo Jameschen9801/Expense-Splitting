@@ -17,7 +17,7 @@ export interface Group {
   security?: GroupSecurity;
 }
 
-export type ExpenseCategory = 'other' | 'food' | 'transport' | 'stay' | 'shopping' | 'entertainment' | 'bills' | 'health' | 'social' | 'insurance' | 'travel' | 'education' | 'haircut';
+export type ExpenseCategory = 'other' | 'food' | 'transport' | 'stay' | 'shopping' | 'household' | 'electronics' | 'entertainment' | 'bills' | 'health' | 'social' | 'insurance' | 'travel' | 'education' | 'haircut';
 export type MutationMeta = { id: string; actor: string; actorUid?: string; at: number; expected?: string | null };
 export type AuditEntry = {
   id: string; actor: string; actorUid?: string; at: number; action: string; target: string;

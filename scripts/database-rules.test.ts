@@ -162,6 +162,8 @@ test('核准的新分類及匯入地點標籤可保存，未知欄位或過長�
   await privateRef().set(cloud(personal));
   await assertSucceeds(privateRef().child('expenses/education').set({...personalExpense,id:'education',category:'education',importSource:{system:'ReceiptBox',category:'教育'},location:'教室',tags:['現金']}));
   await assertSucceeds(privateRef().child('expenses/haircut').set({...personalExpense,id:'haircut',category:'haircut'}));
+  await assertSucceeds(privateRef().child('expenses/household').set({...personalExpense,id:'household',category:'household',importSource:{system:'ReceiptBox',category:'日用品'}}));
+  await assertSucceeds(privateRef().child('expenses/electronics').set({...personalExpense,id:'electronics',category:'electronics',importSource:{system:'ReceiptBox',category:'家電'}}));
   const income={id:'i1',desc:'收入',amount:100,date:'2026-10-28',createdAt:2,importSource:{system:'ReceiptBox',category:'收入'}};
   await assertSucceeds(privateRef().child('incomes/i1').set(income));
   await assertFails(privateRef().child('incomes/i1').set({...income,location:'x'.repeat(301)}));
@@ -213,7 +215,7 @@ test('分攤待確認只能本人存取，起始日以前及舊版直接入帳�
   await privateRef().set(cloud(personal));
   const link={targetCode:'654321',memberName:'A',enabled:true,mode:'review',since:'2026-10-29'};
   await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456').set(link);
-  const original={...personalExpense,id:'r1',amount:2000,date:'2026-10-29',participants:['A','B']};
+  const original={...personalExpense,id:'r1',amount:2000,date:'2026-10-29',category:'household' as const,participants:['A','B']};
   const [draft]=await projectSharedDrafts({...group,expenses:[original]},'A','A','2026-10-29');
   const waiting=applyChange(personal,{type:'sharedDraft.put',draft,meta:{id:'sp1',actor:'A',actorUid:'owner',at:3}});
   await assertSucceeds(privateRef().set(cloud(waiting)));
@@ -223,7 +225,7 @@ test('分攤待確認只能本人存取，起始日以前及舊版直接入帳�
   await assertFails(privateRef().child('expenses/'+legacy.id).set(legacy));
   const [old]=await projectSharedDrafts({...group,expenses:[{...original,id:'old',date:'2026-10-28'}]},'A','A','2026-10-28');
   await assertFails(privateRef().child('sharedInbox/'+old.id).set(old));
-  const form={desc:'自己確認的說明',amount:String(draft.amount),date:draft.date,category:'shopping' as const,payer:'A',participants:['A'],splitMode:'equal' as const,customShares:{}};
+  const form={desc:'自己確認的說明',amount:String(draft.amount),date:draft.date,category:'household' as const,payer:'A',participants:['A'],splitMode:'equal' as const,customShares:{}};
   const confirmed=applyChange(waiting,{type:'sharedDraft.confirm',id:draft.id,expense:sharedDraftExpense(draft,form,5),expectedExpense:null,meta:{id:'sc1',actor:'A',actorUid:'owner',at:5,expected:fingerprint(waiting.sharedInbox![0])}});
   await assertSucceeds(privateRef().set(cloudGroup(confirmed,cloud(waiting))));
   await env.authenticatedContext('owner').database().ref('personalLedgerLinks/owner/123456/enabled').set(false);
@@ -346,6 +348,9 @@ test('手機通知待確認只供本人讀寫，不能混入共用帳本或其�
   const draft={...personalExpense,id:'bank1',category:'other' as const,bank:'測試銀行',last4:'0123'};
   await assertSucceeds(root.set(cloud({...personal,bankInbox:[draft],bankReceiptIds:['bank1']})));
   await assertSucceeds(root.child('bankInbox').get());
+  await assertSucceeds(root.child('bankInbox/bank1/category').set('household'));
+  await assertSucceeds(root.child('bankInbox/bank1/category').set('electronics'));
+  await assertFails(root.child('bankInbox/bank1/category').set('unknown'));
   await assertFails(env.authenticatedContext('stranger').database().ref('groups/654321/bankInbox').get());
   await assertFails(env.authenticatedContext('stranger').database().ref('groups/654321/bankInbox/bank1/amount').set(999));
   await assertFails(root.child('bankInbox/bank1/participants/1').set('B'));

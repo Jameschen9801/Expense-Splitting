@@ -2,7 +2,7 @@ import type { Expense, ExpenseCategory } from '../types';
 import { utils } from './utils';
 
 export const categories: { id: ExpenseCategory; label: string }[] = [
-  { id: 'food', label: '餐飲' }, { id: 'shopping', label: '購物' }, { id: 'transport', label: '交通' },
+  { id: 'food', label: '餐飲' }, { id: 'shopping', label: '購物' }, { id: 'household', label: '日用品' }, { id: 'electronics', label: '3C家電' }, { id: 'transport', label: '交通' },
   { id: 'stay', label: '居住' }, { id: 'bills', label: '生活帳單' }, { id: 'health', label: '醫療健康' },
   { id: 'entertainment', label: '休閒娛樂' }, { id: 'social', label: '人情社交' }, { id: 'insurance', label: '保險稅費' },
   { id: 'travel', label: '旅遊' }, { id: 'education', label: '教育學習' }, { id: 'haircut', label: '理髮' }, { id: 'other', label: '其他' },

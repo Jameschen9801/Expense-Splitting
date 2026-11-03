@@ -29,6 +29,40 @@ test('重匯與重新排序使用同一組來源編號，同日同額合法多�
   const a=await prepareReceiptBox([header,first,second,first].join('\n'),'我',1),b=await prepareReceiptBox([header,first,first,second].join('\n'),'我',2);
   assert.equal(a.expenses.length,3);assert.equal(new Set(a.expenses.map(row=>row.id)).size,3);assert.deepEqual(a.expenses.map(row=>row.id).sort(),b.expenses.map(row=>row.id).sort());assert.equal(a.report.identicalRowsRetained,1);
 });
+test('日用品獨立匯入、統計與備份，同店食材及設備不混入日用品',async()=>{
+  const csv='日期,分類,支出,收入,定位,註記\n2026-10-01,日用品,100,0,,全聯\n2026-10-01,食物,200,0,,全聯\n2026-10-01,日用品,300,0,,洗衣精\n2026-10-01,家電,400,0,,行動電源\n2026-10-01,日用品,500,0,,小米電磁爐\n2026-10-01,醫療,600,0,,眼霜';
+  const plan=await prepareReceiptBox(csv,'我',10);
+  assert.deepEqual(plan.expenses.map(row=>row.category),['household','food','household','electronics','electronics','household']);
+  assert.equal(receiptBoxCategory('日用品','好市多'),'household');
+  assert.equal(receiptBoxCategory('食物','好市多食材'),'food');
+  assert.equal(receiptBoxCategory('日用品','好市多年費'),'shopping');
+  assert.equal(receiptBoxCategory('日用品','玻璃安裝費'),'shopping');
+  assert.equal(receiptBoxCategory('日用品','高鐵'),'transport');
+  const book={...group,expenses:plan.expenses};
+  const stats=summarizePersonal(book,'2026-10','2026-10-30');
+  assert.equal(stats.expenseCents,210000);
+  const household=stats.categories.find(row=>row.id==='household')!;
+  assert.equal(household.count,3);assert.equal(household.cents,100000);
+  const store=memory();store.setItem('warikan_group_654321',JSON.stringify(book));
+  const backup=readBackup(JSON.stringify(createBackup(store)));
+  const restored=JSON.parse(backup.entries.warikan_group_654321);
+  assert.deepEqual(restored.expenses,plan.expenses);
+  assert.equal(restored.expenses[0].importSource.category,'日用品');
+  assert.ok(groupCsv(book).includes('日用品'));
+});
+test('3C家電保留每期日期與金額，服飾分期及軟體訂閱不混入',async()=>{
+  const csv='日期,分類,支出,收入,定位,註記\n2026-10-10,家電,4000.01,0,,分期付款 1/12\n2026-11-10,家電,4000,0,,分期付款 2/12\n2026-11-01,服飾,1750,0,,分期付款 2/6\n2026-11-01,辦公用品,690,0,,Chat GPT\n2026-11-01,日用品,999,0,,電動牙刷';
+  const {expenses}=await prepareReceiptBox(csv,'我',10);
+  assert.deepEqual(expenses.map(row=>row.category),['electronics','electronics','shopping','shopping','electronics']);
+  assert.deepEqual(expenses.slice(0,2).map(({date,amount})=>({date,amount})),[{date:'2026-10-10',amount:4000.01},{date:'2026-11-10',amount:4000}]);
+  assert.equal(receiptBoxCategory('娛樂','鏡頭'),'electronics');
+  assert.equal(receiptBoxCategory('辦公用品','筆電包'),'electronics');
+  assert.equal(receiptBoxCategory('家電','程式'),'shopping');
+  assert.equal(receiptBoxCategory('辦公用品','行動電源租借'),'shopping');
+  assert.equal(summarizePersonal({...group,expenses},'2026-10','2026-10-30').expenseCents,400001);
+  const store=memory();store.setItem('warikan_group_654321',JSON.stringify({...group,expenses}));
+  assert.equal(JSON.parse(readBackup(JSON.stringify(createBackup(store))).entries.warikan_group_654321).expenses[0].category,'electronics');
+});
 test('匯入不自行猜薪資或更改原金額，無效日期、雙欄金額與不明金額拒絕',async()=>{
   const header='日期,分類,支出,收入,定位,註記\n';
   const plan=await prepareReceiptBox(header+'2024-08-05,收入,0,9731,,可用餘額與薪資總額不同','我');assert.equal(plan.incomes[0].amount,9731);

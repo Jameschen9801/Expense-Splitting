@@ -3,21 +3,29 @@ import { categoryLabel } from './categories';
 
 const mapping: Record<string, ExpenseCategory> = {
   食物:'food', 飲料:'food', 酒水:'food', 汽油:'transport', 巴士:'transport', 計程車:'transport', 機車保養:'transport', 停車費:'transport', 交通:'transport',
-  房租:'stay', 家具:'stay', 服飾:'shopping', 日用品:'shopping', 家電:'shopping', 辦公用品:'shopping',
+  房租:'stay', 家具:'stay', 服飾:'shopping', 日用品:'household', 家電:'electronics', 辦公用品:'shopping',
   電話費:'bills', 電費:'bills', 娛樂:'entertainment', 禮物:'social', 禮品:'social', 保險費:'insurance', 醫療:'health', 健身:'health',
   旅行:'travel', 教育:'education', 理髮:'haircut', 交通罰單:'other',
 };
 export function receiptBoxCategory(original: string, note: string): ExpenseCategory {
   if (['食物','飲料','娛樂','日用品','服飾','家電'].includes(original)
     && /^(加油|汽油|停車費|停車|車票|高鐵|台鐵|捷運|Uber|uber|計程車|洗車)$/.test(note.trim())) return 'transport';
+  // Source categories identify otherwise unnamed instalments. Do not infer
+  // electronics from an instalment number alone (clothing also has instalments).
+  if (original === '家電' && /^(程式|軟體|訂閱)$/.test(note.trim())) return 'shopping';
+  if (['娛樂','日用品','辦公用品'].includes(original)
+    && /鏡頭|相機|記憶卡|手機|MacBook|Apple Watch|電腦|筆電|螢幕|耳機|防潮箱|行動電源|滑鼠|鍵盤|電磁爐|吸塵器|電動牙刷|保護貼/i.test(note)
+    && !/租借|租用|訂閱/.test(note)) return 'electronics';
+  // Preserve the source's household distinction without treating equipment,
+  // furniture, fees or unclear services as everyday supplies.
+  if (original === '日用品' && /年費|手續費|體檢|隱形眼鏡|耳溫槍|溫度計|自然人憑證|玻璃安裝|電磁爐|行動電源|相機|防潮箱|吸塵器|保護貼|家具|椅子|增高架|皮鞋|^(?:充電|清潔費|運費|記帳|炒飯)$/.test(note.trim())) return 'shopping';
   if (original === '酒水') {
     if (/送禮|禮物|紅包|生日|母親節|父親節/.test(note)) return 'social';
     if (/WSET|課程|學費|上課|證照/i.test(note)) return 'education';
     if (/品酒會|場地費|門票|酒展|音樂|展覽/.test(note)) return 'entertainment';
   }
-  if (original === '娛樂' && /鏡頭|相機|記憶卡|手機|MacBook|Apple Watch|電腦|螢幕|耳機|防潮箱/i.test(note)) return 'shopping';
   if (['交通','汽油'].includes(original) && /^(早餐|午餐|晚餐|宵夜|飲料|咖啡)$/.test(note.trim())) return 'food';
-  if (original === '醫療' && /眼霜|面膜|保養品|洗面乳/.test(note)) return 'shopping';
+  if (original === '醫療' && /眼霜|面膜|保養品|洗面乳/.test(note)) return 'household';
   return mapping[original] || 'other';
 }
 
