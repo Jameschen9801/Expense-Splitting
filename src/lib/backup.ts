@@ -3,6 +3,7 @@ import { categories, categoryLabel } from './categories';
 import { changeEntityId, type GroupChange, type PendingChange } from './outbox';
 import { utils } from './utils';
 import { assertLedgerChange, isPersonalLedger, ledgerKind } from './ledgers';
+import { validSharedRoute } from './sharedRouting';
 
 type Store = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeItem'>;
 export type Backup = { app: 'Expense-Splitting'; version: 1; createdAt: string; entries: Record<string, string> };
@@ -75,7 +76,7 @@ function validGroup(group: any): group is Group {
   if (records.length > 50000 || new Set(records.map(record=>record.id)).size !== records.length) return false;
   if (group.history && (!object(group.history) || Object.keys(group.history).length > 300 || Object.entries(group.history).some(([id, entry]: [string, any]) =>
     !object(entry) || entry.id !== id || !text(entry.actor, 100) || !text(entry.target, 200) || !Number.isFinite(entry.at)
-    || !['expense.put','expense.remove','sharedExpense.remove','expense.linkBank','income.put','income.remove','saving.put','saving.remove','import.receiptbox','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link','sharedDraft.put','sharedDraft.confirm','sharedDraft.remove','sharedDraft.withdraw'].includes(entry.action)
+    || !['expense.put','expense.remove','sharedExpense.remove','expense.linkBank','expense.routeShared','expense.routeCreate','income.put','income.remove','saving.put','saving.remove','import.receiptbox','transfer.put','transfer.remove','member.add','member.remove','group.rename','bankDraft.put','bankDraft.confirm','bankDraft.remove','bankDraft.link','bankDraft.routeShared','sharedDraft.put','sharedDraft.confirm','sharedDraft.remove','sharedDraft.withdraw'].includes(entry.action)
     || !Array.isArray(entry.changes) || entry.changes.length > 30 || entry.changes.some((change: any) => !object(change) || !text(change.label, 100) || !text(change.before, 10000) || !text(change.after, 10000))))) return false;
   if (group.security) {
     const security = group.security;
@@ -87,6 +88,7 @@ function validGroup(group: any): group is Group {
   if (group.bankInbox != null && (!isPersonalLedger(group) || !Array.isArray(group.bankInbox) || group.bankInbox.length > 50000 || !group.bankInbox.every(validBankDraft)
     || new Set([...group.expenses, ...group.bankInbox].map(record => record.id)).size !== group.expenses.length + group.bankInbox.length)) return false;
   if (group.bankReceiptIds != null && (!Array.isArray(group.bankReceiptIds) || group.bankReceiptIds.length > 100000 || !group.bankReceiptIds.every(recordId))) return false;
+  if (group.sharedRoutes != null && (!isPersonalLedger(group)||!object(group.sharedRoutes)||Object.keys(group.sharedRoutes).length>100000||Object.entries(group.sharedRoutes).some(([id,value])=>!recordId(id)||!validSharedRoute(value)))) return false;
   if (group.sharedInbox != null && (!isPersonalLedger(group) || !Array.isArray(group.sharedInbox) || group.sharedInbox.length > 50000 || !group.sharedInbox.every(validSharedDraft) || new Set(group.sharedInbox.map(record => record.id)).size !== group.sharedInbox.length)) return false;
   if (group.sharedHandled != null && (!isPersonalLedger(group) || !object(group.sharedHandled) || Object.keys(group.sharedHandled).length > 100000 || Object.entries(group.sharedHandled).some(([id, value]: [string, any]) => !/^eshared_[a-f0-9]{64}$/.test(id) || !object(value) || !['confirmed','ignored'].includes(value.status) || typeof value.version !== 'string' || !/^[a-f0-9]{64}$/.test(value.version)))) return false;
   if (group.bankLinks != null && (!isPersonalLedger(group) || !object(group.bankLinks) || Object.keys(group.bankLinks).length > 100000
@@ -117,6 +119,8 @@ function validPending(item: any): item is PendingChange {
   if (change.meta && (!object(change.meta) || !text(change.meta.id, 150) || !text(change.meta.actor, 100)
     || !Number.isFinite(change.meta.at) || (change.meta.expected != null && !text(change.meta.expected, 100000)))) return false;
   switch (change.type) {
+    case 'bankDraft.routeShared': case 'expense.routeShared': return recordId(change.id)&&validSharedRoute(change.route)&&validRecord(change.expense)&&'payer' in change.expense&&!change.expense.sharedSource
+      &&change.expense.id===change.route.expenseId&&change.meta?.id===change.route.mutationId&&text(change.meta?.expected,100000)&&(change.expectedTarget===null||text(change.expectedTarget,100000));
     case 'bankDraft.put': return validBankDraft(change.draft);
     case 'sharedDraft.put': return validSharedDraft(change.draft);
     case 'sharedDraft.confirm': return recordId(change.id) && validRecord(change.expense) && 'payer' in change.expense && !!change.expense.sharedSource?.confirmedAt && change.id === change.expense.id && (change.expectedExpense === null || text(change.expectedExpense,100000)) && (!change.bankExpenseId || recordId(change.bankExpenseId) && text(change.expectedBank,100000));
@@ -181,11 +185,11 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const current: Group | null = parse(store.getItem(key) || 'null');
     if (current && (ledgerKind(current) !== ledgerKind(imported) || isPersonalLedger(current) && current.security?.ownerUid !== imported.security?.ownerUid)) throw new Error('備份中的帳本類型或個人帳本身分與目前帳本不同，無法合併');
     originals.set(imported.code, current);
-    const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.sharedInbox?.some(item => item.id === record.id) && !current?.sharedHandled?.[record.id] && !current?.bankReceiptIds?.includes(record.id) && !current?.bankLinks?.[record.id]);
+    const missingExpenses = imported.expenses.filter(record => !current?.expenses.some(item => item.id === record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.sharedInbox?.some(item => item.id === record.id) && !current?.sharedHandled?.[record.id] && !current?.sharedRoutes?.[record.id] && !current?.bankReceiptIds?.includes(record.id) && !current?.bankLinks?.[record.id]);
     const missingTransfers = imported.transfers.filter(record => !current?.transfers.some(item => item.id === record.id));
     const missingIncomes = (imported.incomes || []).filter(record=>!current?.incomes?.some(item=>item.id===record.id));
     const missingSavings = (imported.savings || []).filter(record=>!current?.savings?.some(item=>item.id===record.id));
-    const missingInbox = (imported.bankInbox || []).filter(record => !current?.bankReceiptIds?.includes(record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
+    const missingInbox = (imported.bankInbox || []).filter(record => !current?.sharedRoutes?.[record.id] && !current?.bankReceiptIds?.includes(record.id) && !current?.bankInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
     const missingShared = (imported.sharedInbox || []).filter(record => !current?.sharedHandled?.[record.id] && !current?.sharedInbox?.some(item => item.id === record.id) && !current?.expenses.some(item => item.id === record.id));
     result.skipped += imported.expenses.length + imported.transfers.length - missingExpenses.length - missingTransfers.length;
     missingExpenses.forEach(record => addedRecords.push({ group: imported, record, type: 'expense' }));
@@ -200,6 +204,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
       ...(imported.incomes || current.incomes ? { incomes: [...current.incomes || [],...missingIncomes] } : {}),
       ...(imported.savings || current.savings ? { savings: [...current.savings || [],...missingSavings] } : {}),
       ...(imported.bankLinks || current.bankLinks ? { bankLinks: { ...imported.bankLinks, ...current.bankLinks } } : {}),
+      ...(imported.sharedRoutes || current.sharedRoutes ? { sharedRoutes: {...imported.sharedRoutes,...current.sharedRoutes} } : {}),
       ...(imported.bankInbox || current.bankInbox ? { bankInbox: [...current.bankInbox || [], ...missingInbox], bankReceiptIds: [...new Set([...(current.bankReceiptIds || []), ...(imported.bankReceiptIds || [])])] } : {}),
       ...(imported.sharedInbox || current.sharedInbox ? { sharedInbox: [...current.sharedInbox || [], ...missingShared] } : {}),
       ...(imported.sharedHandled || current.sharedHandled ? { sharedHandled: { ...imported.sharedHandled, ...current.sharedHandled } } : {}),
@@ -218,7 +223,7 @@ export function planRestore(store: Store, backup: Backup): RestorePlan {
     const current = originals.has(item.groupCode) ? originals.get(item.groupCode) : parse(store.getItem('warikan_group_' + item.groupCode) || 'null');
     const currentRecord = [...current?.expenses || [], ...current?.transfers || [], ...current?.incomes || [], ...current?.savings || [], ...current?.bankInbox || [], ...current?.sharedInbox || []].find(record => record.id === id);
     // Never replay old edits/deletions or management changes over existing local work.
-    if (!id || currentRecord || current?.bankReceiptIds?.includes(id) || current?.sharedHandled?.[id] || pending.some(queued => queued.groupCode === item.groupCode && entityId(queued.change) === id)) { result.skipped++; continue; }
+    if (!id || currentRecord || current?.sharedRoutes?.[id] || current?.bankReceiptIds?.includes(id) || current?.sharedHandled?.[id] || pending.some(queued => queued.groupCode === item.groupCode && entityId(queued.change) === id)) { result.skipped++; continue; }
     const targetGroup = result.entries['warikan_group_' + item.groupCode] || store.getItem('warikan_group_' + item.groupCode);
     if (!targetGroup) { result.skipped++; continue; }
     assertLedgerChange(parse(targetGroup), item.change);

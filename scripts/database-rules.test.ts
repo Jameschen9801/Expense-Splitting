@@ -1,4 +1,5 @@
 import test, { before, after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import type { Group } from '../src/types';
@@ -8,7 +9,22 @@ import { cloudGroup, normalizeGroup as normalizeGroupForTest } from '../src/lib/
 import { personalLedgerDeletionUpdate } from '../src/lib/ledgerDeletion';
 import { projectSharedExpenses } from '../src/lib/sharedExpenses';
 import { projectSharedDrafts, sharedDraftExpense } from '../src/lib/sharedInbox';
+import { prepareSharedRoute, routeForm, pureAdvance, sharedRoutingPatch } from '../src/lib/sharedRouting';
 const cloud = (group: Group) => cloudGroup(group) as any;
+
+async function routingFixture(posted=false){
+  const draft={...personalExpense,id:'ebank_route',amount:2000,date:'2026-11-08',category:'food' as const,revision:1,lastMutationId:'capture',bank:'測試銀行',last4:'1234'};
+  const {bank,last4,...expense}=draft;
+  const source={...personal,...(posted?{expenses:[expense]}:{bankInbox:[draft],bankReceiptIds:[draft.id]})};
+  const target={...group,kind:'shared' as const,security:{...group.security!,ownerUid:'member',users:{...group.security!.users,owner:{...group.security!.users.owner,role:'member' as const},member:{...group.security!.users.member,role:'owner' as const}}}};
+  const raw=cloud(source);
+  if(posted)raw.bankInbox={[draft.id]:{...draft,_deleted:true,lastMutationId:'old-confirm',_lastAudit:{id:'old-confirm',action:'bankDraft.confirm',actor:'A',actorUid:'owner',at:3,target:draft.id,changes:[]}}};
+  await env.withSecurityRulesDisabled(async context=>{await context.database().ref('groups/654321').set(raw);await context.database().ref('groups/123456').set(cloud(target));});
+  const record=posted?expense:draft;
+  const form={...routeForm(record,'A',target.members),desc:'共同晚餐',participants:['A','B']};
+  const change=await prepareSharedRoute(source,record,target,'A',form,posted?'expense':'bank',{id:'routing1',actor:'A',actorUid:'owner',at:10});
+  return {source,target,draft,record,form,change,patch:sharedRoutingPatch(source,target,change,'owner')!};
+}
 
 let env: RulesTestEnvironment;
 const group: Group = { code: '123456', name: '權限測試', createdAt: 1, members: ['A','B','C'], expenses: [], transfers: [],
@@ -41,6 +57,79 @@ test('同步資料僅同一帳號可讀寫，其他匿名身分及列出所有�
 beforeEach(async () => {
   await env.clearDatabase();
   await env.withSecurityRulesDisabled(context => context.database().ref('groups/123456').set(cloud(group)));
+});
+test('銀行通知轉成分帳必須一次完成，群組成員可建立分帳且不暴露私人銀行資料',async()=>{
+  const {source,target,draft,change,patch}=await routingFixture();
+  const root=env.authenticatedContext('owner').database().ref();
+  for(const omitted of [`groups/${target.code}/expenses/${change.expense.id}`,`groups/${source.code}/bankInbox/${draft.id}`,`groups/${source.code}/sharedRoutes/${draft.id}`]){
+    const partial={...patch};delete partial[omitted];await assertFails(root.update(partial));
+    if(!(await privateRef().child('bankInbox/'+draft.id).get()).exists())throw Error('Rejected update must preserve the original notification');
+  }
+  await assertSucceeds(root.update(patch));
+  const personalRaw=(await privateRef().get()).val();
+  if(personalRaw.bankInbox[draft.id]._deleted!==true||personalRaw.expenses?.[draft.id])throw Error('The full card amount must not become a personal expense');
+  const sharedRaw=(await owner().get()).val();
+  if(Object.keys(sharedRaw.expenses).length!==1||sharedRaw.expenses[change.expense.id].amount!==2000||sharedRaw.expenses[change.expense.id].bank||sharedRaw.expenses[change.expense.id].last4)throw Error('Shared record must contain only the shared expense');
+  await assertFails(privateRef('member').child('sharedRoutes/'+draft.id).get());
+  await assertFails(env.unauthenticatedContext().database().ref('groups/654321/sharedRoutes').get());
+  await assertSucceeds(privateRef().set(personalRaw));
+  await assertSucceeds(env.authenticatedContext('member').database().ref('groups/123456').set(sharedRaw));
+});
+test('同一通知不能同時轉到兩本共用帳本，重試不能覆寫已更正的分帳',async()=>{
+  const {source,target,record,form,change,patch}=await routingFixture();
+  const other={...target,code:'123457'};
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123457').set(cloud(other)));
+  const second=await prepareSharedRoute(source,record,other,'A',form,'bank',{id:'routing2',actor:'A',actorUid:'owner',at:11});
+  const otherPatch=sharedRoutingPatch(source,other,second,'owner')!;
+  const root=env.authenticatedContext('owner').database().ref();
+  await assertSucceeds(root.update(patch));await assertFails(root.update(otherPatch));
+  await assertFails(privateRef().child('expenses/'+record.id).set({...record,bank:null,last4:null}));
+  if((await env.authenticatedContext('owner').database().ref('groups/123457/expenses').get()).exists())throw Error('Losing concurrent route created a second expense');
+  const raw=(await owner().get()).val(),current=normalizeGroupForTest(raw);
+  const updated=applyChange(current,{type:'expense.put',expense:{...current.expenses[0],desc:'之後更正'},meta:{id:'later',actor:'A',actorUid:'owner',at:20}});
+  await assertSucceeds(owner().child('expenses/'+change.expense.id).set((cloudGroup(updated,raw) as any).expenses[change.expense.id]));
+  await assertFails(root.update(patch));
+  if((await owner().child('expenses/'+change.expense.id+'/desc').get()).val()!=='之後更正')throw Error('A stale route overwrote a later correction');
+  await assertSucceeds(privateRef().child('name').set('個人帳本更名'));
+});
+test('原通知或既有分帳剛變更時，原子連結被拒絕且保留原資料',async()=>{
+  const {source,target,draft,form}=await routingFixture();
+  const existing={...personalExpense,id:'already',amount:2000,date:draft.date,participants:['A','B'],revision:1,lastMutationId:'existing'};
+  const withExpense={...target,expenses:[existing]};
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456').set(cloud(withExpense)));
+  const change=await prepareSharedRoute(source,draft,withExpense,'A',form,'bank',{id:'linkroute',actor:'A',actorUid:'owner',at:12},existing);
+  const patch=sharedRoutingPatch(source,withExpense,change,'owner')!;
+  const root=env.authenticatedContext('owner').database().ref();
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456/expenses/already/lastMutationId').set('changed'));
+  await assertFails(root.update(patch));
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456/expenses/already/lastMutationId').set('existing'));
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/654321/bankInbox/'+draft.id+'/amount').set(2100));
+  await assertFails(root.update(patch));
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/654321/bankInbox/'+draft.id+'/amount').set(2000));
+  await assertSucceeds(root.update(patch));
+  const sharedRaw=(await owner().get()).val();
+  assert.deepEqual(sharedRaw.expenses.already,cloud(withExpense).expenses.already);
+  assert.equal(Object.keys(sharedRaw.expenses).length,1);
+});
+test('已入帳全額可轉成純代墊，陌生人與背景服務不能代替本人轉換',async()=>{
+  const {source,target,record,form}=await routingFixture(true);
+  const change=await prepareSharedRoute(source,record,target,'A',pureAdvance(form,'A',target.members),'expense',{id:'advance',actor:'A',actorUid:'owner',at:12});
+  const patch=sharedRoutingPatch(source,target,change,'owner')!;
+  for(const uid of ['member','stranger'])await assertFails(env.authenticatedContext(uid).database().ref().update(patch));
+  await env.withSecurityRulesDisabled(context=>context.database().ref('bankBackgroundServices/bank-service').set(true));
+  await assertFails(env.authenticatedContext('bank-service').database().ref().update(patch));
+  await assertSucceeds(env.authenticatedContext('owner').database().ref().update(patch));
+  const raw=(await privateRef().get()).val(),sharedRaw=(await owner().get()).val();
+  await assertSucceeds(privateRef().set(raw));
+  if(raw.expenses[record.id]._deleted!==true||sharedRaw.expenses[change.expense.id].participants.includes('A'))throw Error('Advance payment must not remain a personal expense');
+});
+test('未加入的共用帳本不能接收轉換，轉換標記也不能單獨偽造或改到另一帳本',async()=>{
+  const {source,target,draft,patch}=await routingFixture();
+  const root=env.authenticatedContext('owner').database().ref();
+  await assertFails(privateRef().child('sharedRoutes/'+draft.id).set(patch[`groups/${source.code}/sharedRoutes/${draft.id}`]));
+  await env.withSecurityRulesDisabled(context=>context.database().ref('groups/123456/security/users/owner').remove());
+  await assertFails(root.update(patch));
+  if((await privateRef().child('bankInbox/'+draft.id+'/_deleted').get()).exists())throw Error('Membership failure removed the original notification');
 });
 test('背景憑證與接收管理路徑不允許前端帳號直接讀寫', async () => {
   await env.withSecurityRulesDisabled(context => context.database().ref().update({ bankIngressKeys: { digest: { uid: 'owner' } }, bankIngressUsers: { owner: { keys: { digest: { enabled: true } } } } }));

@@ -47,6 +47,8 @@ import { DataSettings } from './components/DataSettings';
 import { BankImport } from './components/BankImport';
 import { BankInboxCard } from './components/BankInbox';
 import { PendingInbox } from './components/SharedInbox';
+import { SharedRouteFlow } from './components/SharedRouteFlow';
+import { isSharedRouteChange, routeExpenseForm, sharedRouteDraftOwner } from './lib/sharedRouting';
 import { BankSetup } from './components/BankSetup';
 import { BankInstallation } from './components/BankInstallation';
 import { bankInstallationHash } from './lib/bankInstallation';
@@ -167,6 +169,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   });
 
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+  const [routingExpense,setRoutingExpense]=useState<Expense|null>(null);
   const [bankMergeId, setBankMergeId] = useState('');
   const [cashflowEditor,setCashflowEditor]=useState<{kind:CashflowKind;record?:Income|Saving}|null>(null);
   const [selectedCashflow,setSelectedCashflow]=useState<{kind:CashflowKind;record:Income|Saving}|null>(null);
@@ -401,6 +404,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   };
 
   const enterGroup = (data: Group, name: string, recordDate?: string) => {
+    setRoutingExpense(null);
     setCurrentGroup(sync.merge(data));
     setMyName(name);
     setSettingsGroupName(data.name);
@@ -462,6 +466,12 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
         if (pending) new Drafts(localStorage).save(currentGroup.code, myName + ':shared:' + change.id, { recordType: 'expense', expenseId: change.id,
           expense: { desc: change.expense.desc, amount: String(pending.amount), date: change.expense.date, category: change.expense.category, payer: myName, participants: [myName], splitMode: 'equal', customShares: {} },
           transfer: { from: myName, to: '', amount: '', date: pending.date, note: '' } }, true);
+      }
+      if(choice==='cloud'&&change&&isSharedRouteChange(change)&&conflict&&changeRecord(conflict.cloud,change)){
+        new Drafts(localStorage).save(change.route.groupCode,sharedRouteDraftOwner(currentGroup.code,change.id),{
+          recordType:'expense',expenseId:change.id,expense:routeExpenseForm(change.expense),
+          transfer:{from:change.route.memberName,to:'',amount:'',date:change.expense.date,note:''}
+        },true);
       }
       sync.resolveConflict(currentGroup.code, choice);
     } catch (cause) { showToast(cause instanceof Error ? cause.message : '處理未完成，原有變更仍保留'); }
@@ -1188,9 +1198,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                   })()}
                   <div className="flex flex-wrap gap-2">
                     <button type="button" className="btn btn-sm" onClick={() => resolveRecordConflict('cloud')}>保留雲端版本</button>
-                    {syncStatus.conflict.change.type !== 'sharedDraft.confirm' && <button type="button" className="btn btn-primary btn-sm" onClick={() => resolveRecordConflict('mine')}>使用此裝置版本</button>}
+                    {syncStatus.conflict.change.type !== 'sharedDraft.confirm' && !isSharedRouteChange(syncStatus.conflict.change) && <button type="button" className="btn btn-primary btn-sm" onClick={() => resolveRecordConflict('mine')}>使用此裝置版本</button>}
                   </div>
                   {syncStatus.conflict.change.type === 'sharedDraft.confirm' && <p className="text-sm mt-3">分攤已更新，請保留雲端版本，再到待確認重新核對金額；你填的說明與分類會保留。</p>}
+                  {isSharedRouteChange(syncStatus.conflict.change)&&<p className="text-sm mt-3">通知或共用分帳已更新，請保留雲端版本，再重新核對歸屬；不會強制新增第二筆分帳。</p>}
                 </div>}
               </div>}
               {statsVisited && currentGroup && <div className="ledger-stats-page" hidden={activeTab!=='stats'}>
@@ -1563,6 +1574,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               <button className="btn btn-ghost w-full" onClick={() => duplicateExpense(selectedExpense)}>
                 <Copy size={14} className="mr-1.5" /> 複製為新費用
               </button>
+              {personal&&!selectedExpense.sharedSource&&<button type="button" className="btn w-full" onClick={()=>{setRoutingExpense(selectedExpense);toggleModal('expenseDetail',false);}}>轉成共同分帳</button>}
               <button className="btn btn-danger w-full" onClick={() => removeExpense(selectedExpense.id)}>
                 <Trash2 size={14} className="mr-1.5" /> 刪除此筆費用
               </button>
@@ -1615,6 +1627,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}
       {homeInboxSelect && <Modal title="選擇待確認帳本" onClose={() => setHomeInboxSelect(false)}><div className="space-y-3">{inboxBooks.map(item => <button type="button" className="btn w-full justify-between" key={item.book.code} onClick={() => { enterGroup(item.group, item.book.myName); setHomeInboxSelect(false); setBankInboxOpen(true); }}><span>{item.group.name}</span><span>{(item.group.bankInbox?.length || 0) + (item.group.sharedInbox?.length || 0)} 筆待確認</span></button>)}</div></Modal>}
       {bankInboxOpen && currentGroup && <PendingInbox group={currentGroup} myName={myName} onClose={() => setBankInboxOpen(false)} onSaved={(message, date, continued) => { if (!continued) { if (date) focusSavedRecord(date); showToast(message); } }} />}
+      {routingExpense&&currentGroup&&<SharedRouteFlow group={currentGroup} record={routingExpense} source="expense" onClose={()=>{setRoutingExpense(null);if(currentGroup.expenses.some(record=>record.id===routingExpense.id))toggleModal('expenseDetail',true);}} onSaved={message=>{setRoutingExpense(null);setSelectedExpense(null);showToast(message);}}/>}
       {deleteTarget && <DeleteLedgerDialog group={deleteTarget} pending={sync.getStatus(deleteTarget.code).pending} connected={sync.getStatus(deleteTarget.code).connected} busy={isDeletingLedger} error={deleteError} onClose={() => { if (!deleteLock.current) setDeleteTarget(null); }} onConfirm={deletePersonalLedger} />}
       {bankInputs[0] && !dataSettings && !bankSettings && !accountSettings && !deleteTarget && (!bankInputs[0].setup || !bankInputInBackground) && <React.Fragment key={bankInputs[0].key}>{bankInputs[0].setup ? <BankSetup setup={bankInputs[0].setup} groups={myGroups} currentGroup={currentGroup} onClose={() => setBankInputs(queue => queue.slice(1))} onCreateLedger={() => { setNewGroupKind('personal'); setNewGroupName('日常記帳'); toggleModal('createGroup', true); }} /> : <BankImport input={bankInputs[0]} background={bankInputInBackground} onClose={() => setBankInputs(queue => queue.slice(1))} onGroup={(group, name, date) => { if (!bankInputInBackground) enterGroup(group, name, date); }} onSaved={showToast} />}</React.Fragment>}
       {updates.available && <div className="app-update-banner" role="status">

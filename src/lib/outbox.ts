@@ -2,8 +2,10 @@ import type { BankDraft, Expense, Group, Income, MutationMeta, Saving, SharedDra
 import { auditEntry, fingerprint, RecordConflictError, updatedRecord } from './audit';
 import { assertLedgerChange } from './ledgers';
 import { possibleBankMatches, possibleSharedMatches } from './sharedExpenses';
+import { isSharedRouteChange, type SharedRouteChange } from './sharedRouting';
 
 export type GroupChange = (
+  | SharedRouteChange
   | { type: 'expense.put'; expense: Expense }
   | { type: 'expense.remove'; id: string }
   | { type: 'income.put'; income: Income }
@@ -47,6 +49,12 @@ export function applyChange(group: Group, change: GroupChange): Group {
   if (change.meta && before && typeof before === 'object' && before.lastMutationId === change.meta.id) return group;
   let next: Group;
   switch (change.type) {
+    case 'bankDraft.routeShared': case 'expense.routeShared': {
+      if(group.sharedRoutes?.[target] || !before) return group;
+      next={...group,sharedRoutes:{...group.sharedRoutes,[target]:change.route},
+        ...(change.type==='bankDraft.routeShared'?{bankInbox:(group.bankInbox||[]).filter(record=>record.id!==target),bankReceiptIds:[...new Set([...(group.bankReceiptIds||[]),target])]}:{expenses:group.expenses.filter(record=>record.id!==target)})};
+      break;
+    }
     case 'sharedDraft.put': {
       if (group.sharedHandled?.[target]?.status === 'ignored' || group.sharedHandled?.[target] && !group.expenses.some(record => record.id === target)) return group;
       next = { ...group, sharedInbox: [...(group.sharedInbox || []).filter(record => record.id !== target), updatedRecord(change.draft, before as SharedDraft | undefined, change.meta)] };
@@ -125,6 +133,10 @@ export function applyChange(group: Group, change: GroupChange): Group {
 export function applyCloudChange(group: Group, change: GroupChange): Group {
   if (change.meta && Object.hasOwn(group.history || {}, change.meta.id)) return group;
   const target = changeEntityId(change);
+  if(isSharedRouteChange(change) && group.sharedRoutes?.[target]){
+    if(group.sharedRoutes[target].mutationId===change.meta?.id)return group;
+    throw new RecordConflictError(group,target);
+  }
   if (change.type === 'sharedDraft.confirm') {
     if (!group.sharedInbox?.some(record => record.id === target) && group.sharedHandled?.[target]) return group;
     if (fingerprint(group.expenses.find(record => record.id === target)) !== change.expectedExpense) throw new RecordConflictError(group, target);

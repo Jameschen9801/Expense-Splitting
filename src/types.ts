@@ -12,6 +12,7 @@ export interface Group {
   bankInbox?: BankDraft[];
   bankReceiptIds?: string[];
   bankLinks?: Record<string, string>;
+  sharedRoutes?: Record<string, SharedRoute>;
   sharedInbox?: SharedDraft[];
   sharedHandled?: Record<string, { status: 'confirmed' | 'ignored'; version: string }>;
   security?: GroupSecurity;
@@ -79,6 +80,14 @@ export interface BankDraft extends Expense {
   bank: string;
   last4: string;
 }
+
+export type SharedRoute = {
+  source: 'bank' | 'expense'; mode: 'create' | 'link';
+  groupCode: string; expenseId: string; memberName: string;
+  at: number; mutationId: string;
+  sourceRevision: number; sourceMutationId: string; sourceAmount: number; sourceDate: string;
+  targetRevision: number; targetMutationId: string; amount: number; date: string;
+};
 
 export interface Share {
   name: string;

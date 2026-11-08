@@ -69,6 +69,7 @@ export const actionLabel = (action: string) => ({
   'transfer.remove': '刪除轉帳', 'member.add': '新增成員', 'member.remove': '移除成員', 'group.rename': '修改群組名稱',
   'bankDraft.put': '收到手機通知', 'bankDraft.confirm': '確認通知並入帳', 'bankDraft.remove': '忽略手機通知',
   'bankDraft.link': '通知連結分帳', 'expense.linkBank': '銀行入帳合併至分帳',
+  'bankDraft.routeShared':'通知轉成共同分帳', 'expense.routeShared':'個人支出轉成共同分帳', 'expense.routeCreate':'從個人帳本建立分帳',
   'sharedDraft.put': '收到共用分攤', 'sharedDraft.confirm': '確認分攤並入帳', 'sharedDraft.remove': '忽略共用分攤', 'sharedDraft.withdraw': '移出分攤待確認',
   'sharedExpense.remove': '刪除已確認分攤',
   'income.put': '新增／修改收入', 'income.remove': '刪除收入',

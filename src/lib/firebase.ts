@@ -2,10 +2,13 @@ import type { Database, Unsubscribe } from 'firebase/database';
 import { Expense, Group, Transfer, type AuditEntry, type BankDraft, type LedgerRecord, type PersonalLedgerLink } from '../types';
 import { withoutUndefined } from './firebaseData';
 import { applyCloudChange, type GroupChange } from './outbox';
-import { RecordConflictError, updatedRecord } from './audit';
+import { RecordConflictError, updatedRecord, fingerprint } from './audit';
 import { isPersonalLedger } from './ledgers';
 import { personalLedgerDeletionUpdate } from './ledgerDeletion';
 import { applyChange } from './outbox';
+import { sharedRoutingPatch, isSharedRouteChange, type SharedRouteChange } from './sharedRouting';
+import { storage } from './utils';
+import { overlayPending, Outbox } from './outbox';
 import { excludedOnTargetChange, projectSharedDrafts, reviewLink, sharedReviewChanges } from './sharedInbox';
 
 const firebaseConfig = {
@@ -87,7 +90,7 @@ export const cloudGroup = (group: Group, previous?: any) => {
   if (!group.security) return withoutUndefined(group);
   const records = (rows: LedgerRecord[], old: any) => {
     const present = new Set(rows.map(row => row.id));
-    const removals = new Map(Object.values(group.history || {}).filter(entry => ['expense.remove', 'sharedExpense.remove', 'expense.linkBank', 'transfer.remove', 'income.remove', 'saving.remove', 'sharedDraft.confirm', 'sharedDraft.remove', 'sharedDraft.withdraw'].includes(entry.action)).reverse().map(entry => [entry.target, entry]));
+    const removals = new Map(Object.values(group.history || {}).filter(entry => ['expense.remove', 'sharedExpense.remove', 'expense.linkBank', 'expense.routeShared', 'transfer.remove', 'income.remove', 'saving.remove', 'sharedDraft.confirm', 'sharedDraft.remove', 'sharedDraft.withdraw'].includes(entry.action)).reverse().map(entry => [entry.target, entry]));
     const deleted = Object.fromEntries(Object.entries(old || {}).filter(([, record]: [string, any]) => record?._deleted));
     for (const [id, record] of Object.entries(old || {}) as [string, any][]) {
       if (record._deleted || present.has(id)) continue;
@@ -103,7 +106,7 @@ export const cloudGroup = (group: Group, previous?: any) => {
   const bankInbox = records(group.bankInbox || [], previous?.bankInbox);
   for (const [id, draft] of Object.entries(previous?.bankInbox || {}) as [string, any][]) {
     if (!bankReceiptIds?.includes(id) || group.bankInbox?.some(item => item.id === id) || draft._deleted) continue;
-    const entry = Object.values(group.history || {}).find(item => item.target === id && ['bankDraft.confirm','bankDraft.remove','bankDraft.link'].includes(item.action));
+    const entry = Object.values(group.history || {}).find(item => item.target === id && ['bankDraft.confirm','bankDraft.remove','bankDraft.link','bankDraft.routeShared'].includes(item.action));
     bankInbox[id] = { ...draft, _deleted: true, ...(entry ? { _lastAudit: entry, lastMutationId: entry.id, updatedAt: entry.at, updatedBy: entry.actor, updatedByUid: entry.actorUid } : {}) };
   }
   return withoutUndefined({ ...visibleGroup, members: Object.fromEntries(group.members.map(name => [name, true])),
@@ -213,7 +216,10 @@ const updateGroup = async (
   const { get } = await import('firebase/database');
   if (!(await get(groupRef)).exists()) throw new Error('群組不存在');
   const result = await runTransaction(groupRef, current => {
-    if (!current) return;
+    // A book without an active listener can initially have an empty SDK cache.
+    // Let the server's hash check supply its current value instead of aborting
+    // a valid queued confirmation before it ever reaches the server.
+    if (!current) return null;
     return cloudGroup(updater(normalizeGroup(current)), current);
   });
   if (!result.committed || !result.snapshot.exists()) {
@@ -223,6 +229,7 @@ const updateGroup = async (
 };
 
 export const applyChangeInCloud = async (groupCode: string, change: GroupChange): Promise<Group> => {
+  if(isSharedRouteChange(change))return routeSharedInCloud(groupCode,change);
   const group = await fetchGroupOnce(groupCode);
   if (!group) throw new Error('群組不存在');
   if (group.security && change.type !== 'expense.linkBank' && ['expense.', 'transfer.', 'income.', 'saving.'].some(prefix => change.type.startsWith(prefix))) {
@@ -288,6 +295,36 @@ export const applyChangeInCloud = async (groupCode: string, change: GroupChange)
     return result;
   });
 };
+
+async function routeSharedInCloud(code: string, change: SharedRouteChange): Promise<Group> {
+  const [database,{ref,get,update}]=await Promise.all([getDatabaseInstance(),import('firebase/database')]);
+  const sourceRef=ref(database,'groups/'+code),targetRef=ref(database,'groups/'+change.route.groupCode);
+  const sourceSnapshot=await get(sourceRef);
+  if(!sourceSnapshot.exists())throw new Error('個人帳本不存在，轉換尚未完成');
+  const source=normalizeGroup(sourceSnapshot.val());
+  if(source.sharedRoutes?.[change.id]?.mutationId===change.meta?.id)return source;
+  const targetSnapshot=await get(targetRef);
+  if(!targetSnapshot.exists())throw new Error('共用帳本不存在，原記錄仍保留');
+  const target=normalizeGroup(targetSnapshot.val());
+  if(change.route.mode==='create' && targetSnapshot.child('expenses/'+change.route.expenseId).exists())throw new RecordConflictError(source,change.id);
+  const patch=sharedRoutingPatch(source,target,change,deviceUid);
+  if(patch)try{await update(ref(database),patch);}catch(error){
+    const latest=await fetchGroupOnce(code).catch(()=>null);
+    if(latest?.sharedRoutes?.[change.id]?.mutationId===change.meta?.id)return latest;
+    const other=await fetchGroupOnce(change.route.groupCode).catch(()=>null);
+    const before=(change.route.source==='bank'?latest?.bankInbox:latest?.expenses)?.find(record=>record.id===change.id);
+    const existing=other?.expenses.find(record=>record.id===change.route.expenseId);
+    if(latest && (latest.sharedRoutes?.[change.id] || fingerprint(before)!==change.meta?.expected || other && fingerprint(existing)!==change.expectedTarget))throw new RecordConflictError(latest,change.id);
+    throw error;
+  }
+  // The durable marker acknowledges the whole atomic update. A cache failure
+  // after it commits must not turn a successful transfer into a second expense.
+  try{
+    const saved=await fetchGroupOnce(change.route.groupCode);
+    if(saved && typeof localStorage!=='undefined')storage.saveGroup(saved.code,overlayPending(saved,new Outbox(localStorage).list()));
+  }catch{/* Refresh when the destination is opened. */}
+  return (await fetchGroupOnce(code)) || source;
+}
 
 // Derived records are reconciled from current cloud data, rather than replaying
 // stale copies from an offline queue. A target transaction preserves manual work.

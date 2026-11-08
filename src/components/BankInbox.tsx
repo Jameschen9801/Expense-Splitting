@@ -10,6 +10,7 @@ import { sync } from '../lib/sync';
 import { storage, utils } from '../lib/utils';
 import { Modal } from './Modal';
 import { RecordEditor } from './RecordEditor';
+import { SharedRouteFlow } from './SharedRouteFlow';
 import { completeReview, nextReviewId, reviewProgress, startReviewSession, type ReviewSession } from '../lib/pendingReview';
 
 export function BankInboxCard({ drafts, sharedDrafts = [], onOpen, compact = false }: { drafts: BankDraft[]; sharedDrafts?: SharedDraft[]; onOpen: () => void; compact?: boolean }) {
@@ -27,6 +28,7 @@ export function BankInboxCard({ drafts, sharedDrafts = [], onOpen, compact = fal
 export function BankInbox({ group, myName, onClose, onSaved, navigation }: { group: Group; myName: string; onClose: () => void; onSaved: (message: string, date?: string, continued?:boolean) => void; navigation?: ReactNode }) {
   const drafts = [...(group.bankInbox || [])].sort((a,b) => a.createdAt - b.createdAt);
   const [editing, setEditing] = useState<{ draft: BankDraft; initial: RecordDraft } | null>(null);
+  const [routing,setRouting]=useState<{draft:BankDraft;form:ExpenseForm}|null>(null);
   const [review, setReview] = useState<ReviewSession|null>(null);
   const [ignoring, setIgnoring] = useState<BankDraft | null>(null);
   const [linking, setLinking] = useState<{ draft: BankDraft; expense: Expense } | null>(null);
@@ -38,7 +40,8 @@ export function BankInbox({ group, myName, onClose, onSaved, navigation }: { gro
     if (saving) return;
     if (editing && !drafts.some(item => item.id === editing.draft.id)) { setEditing(null); setError('這則通知已在另一個畫面處理'); }
     if (ignoring && !drafts.some(item => item.id === ignoring.id)) setIgnoring(null);
-  }, [group.bankInbox, editing, ignoring, saving]);
+    if (routing && !drafts.some(item=>item.id===routing.draft.id)) {setRouting(null);setError('這則通知已處理，請核對最新記錄');}
+  }, [group.bankInbox, editing, ignoring, routing, saving]);
   const open = (draft: BankDraft, session:ReviewSession = startReviewSession(drafts.map(item=>item.id),draft.id)) => {
     setReview(session);
     const cached = new Drafts(localStorage).read(group.code, bankDraftOwner(myName, draft.id));
@@ -90,7 +93,17 @@ export function BankInbox({ group, myName, onClose, onSaved, navigation }: { gro
       setIgnoring(null); onSaved('已忽略這則通知，未加入帳本');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '忽略未完成，原資料保留'); }
   };
-  if (editing) return <Fragment key={editing.draft.id}><RecordEditor reviewProgress={reviewProgress(review,drafts.map(item=>item.id))} group={group} myName={myName} initial={editing.initial} bankReview draftOwner={bankDraftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) { setEditing(null); setError(''); } }} onExpense={confirm} onTransfer={async () => false}
+  if(routing)return <SharedRouteFlow group={group} record={routing.draft} source="bank" initialForm={routing.form} onClose={()=>setRouting(null)} onSaved={message=>{
+    const id=routing.draft.id;
+    try{new Drafts(localStorage).clear(group.code,bankDraftOwner(myName,id));}catch{/* The outbox owns the receipt now. */}
+    const done=completeReview(review||startReviewSession(drafts.map(item=>item.id),id),id);
+    const fresh=sync.merge(storage.getGroup(group.code)||group);
+    const nextId=nextReviewId(done,(fresh.bankInbox||[]).map(item=>item.id));
+    const next=fresh.bankInbox?.find(item=>item.id===nextId);
+    setRouting(null);if(next)open(next,done);else{setEditing(null);setReview(null);}
+    onSaved(message,undefined,!!next);
+  }}/>;
+  if (editing) return <Fragment key={editing.draft.id}><RecordEditor reviewProgress={reviewProgress(review,drafts.map(item=>item.id))} group={group} myName={myName} initial={editing.initial} bankReview draftOwner={bankDraftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) { setEditing(null); setError(''); } }} onExpense={confirm} onTransfer={async () => false} onRouteShared={form=>{setEditing({...editing,initial:{...editing.initial,expense:form}});setRouting({draft:editing.draft,form});}}
     notice={possibleSharedMatches(editing.draft, group.expenses).length > 0 && <div className="shared-match-notice"><strong>有可能相同的分帳</strong><p>同日、同刷卡全額的分帳已同步，請先返回核對，避免重複入帳。</p><button type="button" className="btn btn-sm" onClick={() => { const detail = { failed: false }; window.dispatchEvent(new CustomEvent('warikan:flush-draft', { detail })); if (!detail.failed) { setEditing(null); setError(''); } }}>返回核對分帳</button><label><input type="checkbox" checked={separateExpense} onChange={event => setSeparateExpense(event.target.checked)} />這是另一筆消費，仍要新增</label></div>} /></Fragment>;
   if (linking) return <Modal title="連結這筆分帳？" onClose={() => setLinking(null)}><div className="shared-match-notice"><strong>{linking.expense.desc}</strong><p>{linking.expense.sharedSource?.groupName} · {linking.expense.date}</p><p>銀行刷卡全額 NT$ {utils.fmt(linking.draft.amount)}</p><p>你的實際分攤 NT$ {utils.fmt(linking.expense.amount)}</p></div><p className="text-sm leading-relaxed">確認是同一筆消費後，通知會移出待確認，個人帳本只保留你的分攤金額。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex flex-col gap-2 mt-5"><button type="button" className="btn btn-primary" disabled={saving} onClick={link}>確認是同一筆，連結分帳</button><button type="button" className="btn" onClick={() => setLinking(null)}>返回核對</button></div></Modal>;
   if (ignoring) return <Modal title="忽略這則通知？" onClose={() => setIgnoring(null)}><p className="text-sm leading-relaxed">{ignoring.bank} · NT$ {utils.fmt(ignoring.amount)} · {ignoring.date}</p><p className="text-sm text-ink-2 leading-relaxed mt-3">這則通知會移出待確認，同一通知重送也不會再次新增。不影響已確認的帳目。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex gap-2 mt-5"><button type="button" className="btn flex-1" onClick={() => setIgnoring(null)}>保留通知</button><button type="button" className="btn btn-danger flex-1" onClick={ignore}>確認忽略</button></div></Modal>;

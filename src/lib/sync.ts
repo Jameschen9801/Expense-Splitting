@@ -3,6 +3,7 @@ import { storage } from './utils';
 import { Outbox, overlayPending, changeEntityId, changeRecord, type GroupChange, type PendingChange } from './outbox';
 import { fingerprint, RecordConflictError } from './audit';
 import { applyChangeInCloud } from './firebase';
+import { isSharedRouteChange } from './sharedRouting';
 
 export function createSyncEngine(dependencies: {
   getStorage: () => Pick<Storage, 'getItem' | 'setItem'>;
@@ -59,6 +60,7 @@ export function createSyncEngine(dependencies: {
       const entityId = changeEntityId;
       const latest = outbox().list().filter(item => item.groupCode === code && entityId(item.change) === conflict.targetId).at(-1)?.change || conflict.change;
       if (keep === 'mine' && latest.type === 'sharedDraft.confirm') throw new Error('請先保留雲端版本，再到待確認核對最新分攤金額');
+      if (keep === 'mine' && isSharedRouteChange(latest)) throw new Error('請先保留雲端版本，再重新核對通知與共用分帳');
       const entries = outbox().list().filter(item => item.groupCode !== code || entityId(item.change) !== conflict.targetId);
       if (keep === 'mine') {
         const record = changeRecord(conflict.cloud, latest);

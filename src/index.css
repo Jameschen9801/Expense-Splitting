@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+.bank-route-button { width:100%; margin-bottom:20px; border-color:var(--ui-accent); color:var(--ui-accent); background:var(--ui-accent-soft); }
+.shared-route-choices { display:grid; gap:10px; }
+.shared-route-choice { display:grid; grid-template-columns:24px minmax(0,1fr) 18px; align-items:center; gap:12px; width:100%; min-height:76px; padding:15px; border:1px solid var(--ui-control); border-radius:18px; background:var(--ui-surface); text-align:left; }
+.shared-route-choice strong, .shared-route-choice small { display:block; }
+.shared-route-choice strong { font-size:15px; overflow-wrap:anywhere; }
+.shared-route-choice small { margin-top:4px; color:var(--ui-subtle); font-size:12px; }
+.shared-route-destination { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:12px; }
+.shared-route-destination div { min-width:0; }
+.shared-route-destination small, .shared-route-destination strong { display:block; }
+.shared-route-destination small { font-size:11px; color:var(--ui-subtle); margin-bottom:4px; }
+.shared-route-destination strong { font-size:16px; overflow-wrap:anywhere; }
+.shared-route-destination button { flex-shrink:0; }
+.shared-route-outcome { padding:12px 14px; border-radius:16px; background:var(--ui-accent-soft); color:var(--ui-accent); margin-bottom:18px; font-size:13px; line-height:1.6; }
+.shared-route-outcome strong { font-size:17px; margin-left:5px; font-variant-numeric:tabular-nums; }
+.shared-route-outcome small { display:block; margin-top:3px; font-size:12px; }
+.shared-route-sync { margin-bottom:18px; font-size:13px; }
+.shared-route-sync summary { cursor:pointer; min-height:44px; padding:12px 0; color:var(--ui-secondary); }
+
 /* Redesign-preserve for a daily mobile tool: DESIGN_VARIANCE 4,
    MOTION_INTENSITY 2, VISUAL_DENSITY 5. Solid surfaces keep scrolling light.
    Shape rule: pill buttons, 16px controls, 20px panels, 28px mobile sheets.

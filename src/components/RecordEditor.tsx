@@ -7,9 +7,10 @@ import { utils } from '../lib/utils';
 import { Modal } from './Modal';
 import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
+import { pureAdvance } from '../lib/sharedRouting';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
@@ -18,6 +19,9 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   notice?: ReactNode;
   entryDate?: string;
   reviewProgress?: {current:number;total:number;hasNext:boolean};
+  title?: string; submitLabel?: string; lockPayer?: boolean;
+  onRouteShared?: (form: ExpenseForm) => void;
+  onFormChange?: (form: ExpenseForm) => void;
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -51,6 +55,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   };
   useEffect(() => {
     if (!finished.current) writer.current!.schedule(writeDraft);
+    onFormChange?.(expForm);
   }, [expForm, tfForm, recordType]);
   useEffect(() => {
     const flush = (event?: Event) => {
@@ -100,7 +105,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     ];
   }, [recordType, expForm.splitMode, expForm.participants, sharedReview]);
   return (
-          <Modal layout="editor" title={sharedReview ? '確認分攤記帳' : bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄"} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
+          <Modal layout="editor" title={title || (sharedReview ? '確認分攤記帳' : bankReview ? '確認手機記帳' : isEditingExpense || isEditingTransfer ? (recordType === 'expense' ? "編輯費用" : "編輯轉帳") : "新增紀錄")} keyboardFields={keyboardFields} keyboardError={formError} onClose={() => close()} footer={
             <div className="record-editor-actions" data-continuing={!!reviewProgress?.hasNext}>
               <button className="btn btn-ghost btn-sm" onClick={() => close()} disabled={isSaving}>{reviewProgress?'返回清單':'取消'}</button>
               {reviewProgress?.hasNext && <button type="button" className="btn btn-ghost btn-sm" onClick={()=>submit(false)} disabled={isSaving}>確認後返回</button>}
@@ -112,12 +117,13 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 onClick={() => submit(!!reviewProgress?.hasNext)}
                 disabled={isSaving}
               >
-                {isSaving ? '儲存中…' : reviewProgress ? reviewProgress.hasNext ? '確認並下一筆' : '確認並完成' : bankReview || sharedReview ? '確認加入帳本' : '儲存'}
+                {isSaving ? '儲存中…' : submitLabel || (reviewProgress ? reviewProgress.hasNext ? '確認並下一筆' : '確認並完成' : bankReview || sharedReview ? '確認加入帳本' : '儲存')}
               </button>
             </div>
           }>
             {reviewProgress&&<p className="pending-review-progress" role="status">{bankReview?'銀行通知':'共用分攤'} · 第 {reviewProgress.current}／{reviewProgress.total} 筆</p>}
             {notice}
+            {onRouteShared && <button type="button" className="btn bank-route-button" disabled={isSaving} onClick={()=>{if(writer.current!.flush())onRouteShared(expForm);}}>幫別人先付？記到共用帳本</button>}
             {(!personal && !isEditingExpense && !isEditingTransfer) && (
               <div className="flex bg-paper border border-line p-1 rounded-full mb-5 gap-1 shadow-sm">
                 <button 
@@ -171,7 +177,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 {!personal && <><div className="field">
                   <label className="field-label" htmlFor="expense-payer">誰先付款</label>
-                  <select id="expense-payer" value={expForm.payer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
+                  <select id="expense-payer" value={expForm.payer} disabled={lockPayer} onChange={e => setExpForm({ ...expForm, payer: e.target.value })}>
                     {group.members.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
@@ -182,7 +188,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   </div>
                   <div className="grid grid-cols-3 gap-1.5 mt-2" aria-label="快速選擇分攤對象">
                     <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: [...(group.members || [])] })}>全員</button>
-                    <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: (group.members || []).filter(member => member !== expForm.payer) })}>除付款人</button>
+                    <button type="button" className="quick-select-button" aria-label="純代墊，我不分攤" aria-pressed={expForm.payer===myName&&!expForm.participants.includes(myName)&&expForm.participants.length>0} disabled={!group.members.some(member=>member!==myName)} onClick={() => setExpForm(pureAdvance(expForm,myName,group.members))}>純代墊</button>
                     <button type="button" className="quick-select-button" onClick={() => setExpForm({ ...expForm, participants: group.members.includes(myName) ? [myName] : [] })}>只有我</button>
                   </div>
                   <div className="flex flex-wrap gap-2 mt-2">
@@ -203,6 +209,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                       </button>
                     ))}
                   </div>
+                  {expForm.payer===myName&&!expForm.participants.includes(myName)&&expForm.participants.length>0&&<p className="personal-sync-note">我先付，其他人分攤；我的負擔為 0。</p>}
                 </div>
                 <div className="field">
                   <label className="field-label">分攤方式</label>
