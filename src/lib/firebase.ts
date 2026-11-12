@@ -10,6 +10,7 @@ import { sharedRoutingPatch, isSharedRouteChange, type SharedRouteChange } from 
 import { storage } from './utils';
 import { overlayPending, Outbox } from './outbox';
 import { excludedOnTargetChange, projectSharedDrafts, reviewLink, sharedReviewChanges } from './sharedInbox';
+import { readServerJson } from './syncFeedback';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -202,6 +203,19 @@ export const fetchGroupOnce = async (groupCode: string): Promise<Group | null> =
   }
   return null;
 }
+
+// Explicit retries verify a real response instead of falling back to SDK cache.
+export const fetchGroupFromServer = async (code: string, signal: AbortSignal): Promise<Group | null> => {
+  if (!/^\d{6}$/.test(code)) throw new Error('帳本代碼格式錯誤');
+  const { auth, database } = await firebaseSession();
+  const user = auth.currentUser;
+  if (!user) throw Object.assign(new Error('No current user'), { code: 'auth/no-current-user' });
+  const url = new URL(`groups/${code}.json`, useEmulator ? 'http://127.0.0.1:9000/' : database.app.options.databaseURL);
+  if (useEmulator) url.searchParams.set('ns', 'demo-expense-splitting-default-rtdb');
+  const data = await readServerJson(url, await user.getIdToken(), signal);
+  if (auth.currentUser?.uid !== user.uid) throw Object.assign(new Error('Session changed'), { code: 'auth/session-changed' });
+  return data ? normalizeGroup(data) : null;
+};
 
 const updateGroup = async (
   groupCode: string,

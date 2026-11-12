@@ -4,6 +4,7 @@ import { Outbox, overlayPending, changeEntityId, changeRecord, type GroupChange,
 import { fingerprint, RecordConflictError } from './audit';
 import { applyChangeInCloud } from './firebase';
 import { isSharedRouteChange } from './sharedRouting';
+import { storageFailure } from './syncFeedback';
 
 export function createSyncEngine(dependencies: {
   getStorage: () => Pick<Storage, 'getItem' | 'setItem'>;
@@ -84,14 +85,17 @@ export function createSyncEngine(dependencies: {
         failures.delete(code);
         notify();
         let sending: PendingChange | undefined;
+        let savingAcknowledgement = false;
         try {
           while (connected && !removed.has(code)) {
             const item = outbox().list().find(item => item.groupCode === code);
             if (!item) return true;
             sending = item;
+            savingAcknowledgement = false;
             const group = await dependencies.send(code, item.change);
             if (removed.has(code)) return false;
             // Keep newer queued edits over the server acknowledgement.
+            savingAcknowledgement = true;
             dependencies.saveGroup(code, overlayPending(group, outbox().list().filter(pending => pending.id !== item.id)));
             outbox().acknowledge(item.id);
             notify();
@@ -104,7 +108,7 @@ export function createSyncEngine(dependencies: {
             failures.set(code, error.message);
           } else {
             const message = error instanceof Error ? error.message : '';
-            failures.set(code, /permission|denied/i.test(message) ? '雲端存取被拒絕，請確認成員權限；紀錄仍保留在此裝置' : '同步未完成，紀錄仍保留在此裝置');
+            failures.set(code, savingAcknowledgement ? '雲端已接收變更。' + storageFailure(error) : /permission|denied/i.test(message) ? '雲端存取被拒絕，請確認成員權限；紀錄仍保留在此裝置' : '同步未完成，紀錄仍保留在此裝置');
           }
           return false;
         } finally {

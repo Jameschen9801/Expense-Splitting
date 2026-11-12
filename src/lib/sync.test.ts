@@ -115,6 +115,20 @@ test('儲存空間不足時，不將操作當成已保存或送到雲端', () =>
   assert.equal(engine.getStatus(group.code).pending, 0);
 });
 
+test('雲端已接收但顯示暫存額滿時保留佇列，重試不重複入帳並明示暫存原因', async () => {
+  const store = memoryStorage(); let cloud = group, full = true;
+  const engine = createSyncEngine({ getStorage: () => store, saveGroup: () => { if (full) throw new DOMException('Full', 'QuotaExceededError'); }, send: async (_, change) => {
+    cloud = applyChange(cloud, change); return cloud;
+  } });
+  engine.enqueue(group.code, { type: 'expense.put', expense }); engine.setConnected(true);
+  assert.equal(await engine.flush(group.code), false);
+  assert.equal(engine.getStatus(group.code).pending, 1);
+  assert.match(engine.getStatus(group.code).reason!, /雲端已接收變更.*暫存空間不足/);
+  assert.equal(cloud.expenses.length, 1);
+  full = false; assert.equal(await engine.flush(group.code), true);
+  assert.equal(cloud.expenses.length, 1); assert.equal(engine.getStatus(group.code).pending, 0);
+});
+
 test('草稿跨重開恢復，依群組及使用者隔離；保存成功後可清除', () => {
   const store = memoryStorage();
   const draft: RecordDraft = { recordType: 'expense', expense: { desc: '晚餐', amount: '123', date: '2026-10-02', payer: 'A', participants: ['A', 'B'], splitMode: 'equal', customShares: {} }, transfer: { from: 'A', to: 'B', amount: '', date: '2026-10-02', note: '' } };

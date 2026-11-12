@@ -27,6 +27,7 @@ import {
 import { Group, MyGroup, Expense, Income, LedgerRecord, Saving, Transfer, Share, Settlement } from './types';
 import { storage, utils } from './lib/utils';
 import { sync } from './lib/sync';
+import { useLedgerRead } from './lib/useLedgerRead';
 import { changeEntityId, changeRecord, type GroupChange } from './lib/outbox';
 import { Drafts } from './lib/drafts';
 import { RecordsList, type RecordItem } from './components/RecordsList';
@@ -77,7 +78,6 @@ import {
   deletePersonalLedgerInCloud,
   personalLedgerWasDeleted,
   subscribeToConnection,
-  subscribeToGroup,
   subscribeToBankInbox,
 } from './lib/firebase';
 
@@ -88,9 +88,6 @@ const groupTabs = [
   { id: 'stats', label: '統計', icon: ChartPie },
   { id: 'members', label: '成員', icon: Users },
 ] as const;
-
-const FAILED_EXPENSE_RECOVERY_START = Date.parse('2026-09-22T09:28:00Z');
-const FAILED_EXPENSE_RECOVERY_END = Date.parse('2026-09-22T10:15:00Z');
 
 const editableShares = (expense: Expense) => {
   if (expense.splitMode === 'percent') {
@@ -176,8 +173,6 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const [isEditingExpense, setIsEditingExpense] = useState(false);
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
   const [isEditingTransfer, setIsEditingTransfer] = useState(false);
-  const [syncState, setSyncState] = useState<'syncing' | 'synced' | 'error' | ''>('');
-  const [syncRetryKey, setSyncRetryKey] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -214,6 +209,10 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const syncStatus = sync.getStatus(currentGroup?.code || '');
   const groupCodeRef = useRef(currentGroup?.code);
   groupCodeRef.current = currentGroup?.code;
+  const ledgerRead = useLedgerRead(currentPage === 'group' ? currentGroup?.code : undefined, setCurrentGroup, () => {
+    // Wait for the server acknowledgement of this tab's own delete action.
+    if (!deleteLock.current && groupCodeRef.current) finishLedgerRemoval(groupCodeRef.current);
+  });
   const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
   const personal = isPersonalLedger(currentGroup);
   const searchingAllDates = recordSearchAll && !!recordSearch.trim();
@@ -250,7 +249,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     void personalLedgerSync.start().catch(() => {});
     const receive = () => {
       const code = groupCodeRef.current;
-      const cached = code ? storage.getGroup(code) : null;
+      const cached = code ? ledgerRead.current(code) || storage.getGroup(code) : null;
       if (cached) setCurrentGroup(sync.merge(cached));
       setMyGroups(storage.getMyGroups());
     };
@@ -316,7 +315,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   useEffect(() => sync.subscribe(() => {
     const code = groupCodeRef.current;
     if (!code) return;
-    const cached = storage.getGroup(code);
+    const cached = ledgerRead.current(code) || storage.getGroup(code);
     if (cached) setCurrentGroup(sync.merge(cached));
   }), []);
 
@@ -338,60 +337,6 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       }
     }
   }, []);
-
-  // 當使用者停留在群組頁面時，自動開啟 Firebase 監聽雙向綁定
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    let disposed = false;
-    if (currentPage === 'group' && currentGroup?.code) {
-      setSyncState('syncing');
-      subscribeToGroup(currentGroup.code, (cloudData) => {
-          if (disposed) return;
-          if (cloudData) {
-            const cachedData = storage.getGroup(currentGroup.code);
-            const recoveryKey = `warikan_recovery_v2_${currentGroup.code}`;
-            const recoverableExpenses = cachedData?.expenses.filter(expense =>
-              expense.createdAt >= FAILED_EXPENSE_RECOVERY_START
-              && expense.createdAt <= FAILED_EXPENSE_RECOVERY_END
-              && !cloudData.expenses.some(cloudExpense => cloudExpense.id === expense.id)
-            ) || [];
-
-            if (!localStorage.getItem(recoveryKey)) {
-              try {
-                for (const expense of recoverableExpenses) {
-                  sync.enqueue(currentGroup.code, { type: 'expense.put', expense });
-                }
-                localStorage.setItem(recoveryKey, '1');
-              } catch {
-                setSyncState('error');
-                return;
-              }
-            }
-            const merged = sync.merge(cloudData);
-            setCurrentGroup(merged);
-            try {
-              storage.saveGroup(currentGroup.code, merged);
-              setSyncState('synced');
-            } catch { setSyncState('error'); }
-          } else {
-            setSyncState('error');
-          }
-        }, () => { if (!disposed) setSyncState('error'); }, () => {
-          // Firebase may emit this tab's optimistic deletion before the server
-          // accepts it. The local delete handler waits for the acknowledgement.
-          if (!disposed && !deleteLock.current) finishLedgerRemoval(currentGroup.code);
-        })
-        .then(stopListening => {
-          if (disposed) stopListening();
-          else unsubscribe = stopListening;
-        })
-        .catch(() => { if (!disposed) setSyncState('error'); });
-    }
-    return () => {
-      disposed = true;
-      if (unsubscribe) unsubscribe();
-    };
-  }, [currentPage, currentGroup?.code, syncRetryKey]);
 
   useEffect(() => () => {
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -428,14 +373,14 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     successMessage?: string,
   ) => {
     try {
-      const base = storage.getGroup(optimisticGroup.code) || currentGroup || optimisticGroup;
+      const base = ledgerRead.current(optimisticGroup.code) || storage.getGroup(optimisticGroup.code) || currentGroup || optimisticGroup;
       const target = changeEntityId(change);
       const before = change.type.startsWith('expense.') ? (isEditingExpense && selectedExpense?.id === target ? selectedExpense : base.expenses.find(record => record.id === target))
         : change.type.startsWith('transfer.') ? (isEditingTransfer && selectedTransfer?.id === target ? selectedTransfer : base.transfers.find(record => record.id === target))
         : change.type.startsWith('income.')||change.type.startsWith('saving.') ? cashflowEditor?.record?.id===target ? cashflowEditor.record : change.type.endsWith('.remove')&&selectedCashflow?.record.id===target ? selectedCashflow.record : changeRecord(base,change) : undefined;
       const meta = { id: crypto.randomUUID(), actor: myName, actorUid: currentDeviceUid(), at: Date.now(), ...(target ? { expected: fingerprint(before) } : {}) };
       sync.enqueue(optimisticGroup.code, { ...change, meta });
-      const merged = sync.merge(storage.getGroup(optimisticGroup.code) || optimisticGroup);
+      const merged = sync.merge(ledgerRead.current(optimisticGroup.code) || storage.getGroup(optimisticGroup.code) || optimisticGroup);
       setCurrentGroup(merged);
       // The outbox is already durable even if writing the display cache fails.
       try { storage.saveGroup(merged.code, merged); }
@@ -450,11 +395,8 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   };
 
   const retryPendingMutations = async () => {
-    if (!currentGroup) return;
-    setSyncRetryKey(key => key + 1);
-    if (!syncStatus.connected) { showToast('目前離線，已保存的紀錄會在連線恢復後自動同步'); return; }
-    const success = await sync.flush(currentGroup.code);
-    showToast(success ? '所有待同步變更已上傳' : '仍有待同步紀錄，會保留在此裝置');
+    const message = await ledgerRead.retry();
+    if (message) showToast(message);
   };
 
   const resolveRecordConflict = (choice: 'cloud' | 'mine') => {
@@ -614,7 +556,6 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       showToast(newGroupKind === 'personal' ? '個人帳本已建立' : '共用帳本已建立');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : '建立暫時未完成，請稍後再試');
-      setSyncState('error');
     } finally {
       setIsSaving(false);
     }
@@ -632,14 +573,12 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
 
     setIsSaving(true);
     setFormError('');
-    setSyncState('syncing');
     try {
       const code = joinCode.trim();
       const name = joinMyName.trim();
       const cloudData = await fetchGroupOnce(code);
       if (!cloudData) {
         setFormError('找不到此邀請碼，請向群組成員確認');
-        setSyncState('');
         return;
       }
       if (isPersonalLedger(cloudData)) throw new Error('個人帳本無法透過邀請碼加入');
@@ -648,7 +587,6 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       const sameDevice = cloudData.security?.names[memberNameKey(name)] === currentDeviceUid();
       if (cloudData.members.includes(name) && !existingLocalMembership && !unclaimedMember && !sameDevice) {
         setFormError('此名稱已有人使用，請換一個顯示名稱');
-        setSyncState('');
         return;
       }
       const data = await joinGroupInCloud(code, name);
@@ -664,11 +602,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
       setJoinCode('');
       setJoinMyName('');
       enterGroup(data, name);
-      setSyncState('synced');
       showToast('已加入群組');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : '加入暫時未完成，請稍後再試');
-      setSyncState('error');
     } finally {
       setIsSaving(false);
     }
@@ -1143,25 +1079,25 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                 <p>{statsDetailOpen ? '統計明細 · '+currentGroup?.name : personal ? '個人帳本 · 僅自己' : currentGroup?.code}</p>
               </div>
               <div className="group-header-actions">
-                {syncStatus.pending > 0 || syncStatus.error || syncState === 'error' ? (
+                {ledgerRead.retrying || syncStatus.pending > 0 || syncStatus.error || ledgerRead.issue ? (
                   <button
                     type="button"
-                    className={`sync-status ${syncStatus.syncing ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50 hover:bg-red-100'}`}
+                    className={`sync-status ${ledgerRead.retrying || syncStatus.syncing ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50 hover:bg-red-100'}`}
                     onClick={retryPendingMutations}
-                    disabled={syncStatus.syncing}
-                    title="重新上傳尚未同步的變更"
+                    disabled={ledgerRead.retrying || syncStatus.syncing}
+                    title="重新讀取雲端帳本並重試待上傳變更"
                   >
                     <RefreshCw size={13} aria-hidden="true" />
-                    {syncStatus.pending > 0 ? `${!syncStatus.connected ? '離線・' : syncStatus.syncing ? '同步中 ' : '待同步 '}${syncStatus.pending} 筆` : '重試同步'}
+                    {ledgerRead.retrying ? '正在核對' : syncStatus.pending > 0 ? `${!syncStatus.connected ? '離線・' : syncStatus.syncing ? '同步中 ' : '待同步 '}${syncStatus.pending} 筆` : ledgerRead.issue?.kind === 'cache' ? '暫存未完成' : ledgerRead.issue ? '重試讀取' : '重試同步'}
                   </button>
                 ) : (
                   <div
-                    className={`sync-status ${!syncStatus.connected ? 'text-ink-2 bg-paper-2' : syncState === 'syncing' ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50'}`}
+                    className={`sync-status ${!syncStatus.connected ? 'text-ink-2 bg-paper-2' : ledgerRead.phase === 'loading' ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50'}`}
                     role="status"
                     title="雲端同步狀態"
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.connected ? 'bg-ink-3' : syncState === 'syncing' ? 'bg-amber-500 animate-pulse' : 'bg-green-600'}`}></span>
-                    {!syncStatus.connected ? '離線' : syncState === 'syncing' ? '同步中' : '已同步'}
+                    <span className={`w-1.5 h-1.5 rounded-full ${!syncStatus.connected ? 'bg-ink-3' : ledgerRead.phase === 'loading' ? 'bg-amber-500 animate-pulse' : 'bg-green-600'}`}></span>
+                    {!syncStatus.connected ? '離線' : ledgerRead.phase === 'loading' ? '讀取中' : '已同步'}
                   </div>
                 )}
                 <button className="icon-btn" onClick={() => toggleModal('groupSettings', true)} aria-label={personal ? '開啟帳本設定' : '開啟群組設定'}>
@@ -1185,8 +1121,9 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
             </nav>}
 
             <main className="group-content flex-1" data-stat-detail={statsDetailOpen}>
-              {syncStatus.reason && <div className="rounded-2xl border border-line p-4 text-sm bg-paper">
-                <p role="alert">{syncStatus.reason}</p>
+              {(syncStatus.reason || ledgerRead.issue) && <div className="rounded-2xl border border-line p-4 text-sm bg-paper">
+                {syncStatus.reason && <p role="alert">{syncStatus.reason}</p>}
+                {ledgerRead.issue && <p role="alert">{ledgerRead.issue.message}</p>}
                 {syncStatus.conflict && <div className="mt-3">
                   <p className="text-xs text-ink-3 leading-relaxed mb-3">另一位成員已更新這筆紀錄。你的變更保留在此裝置，請選擇保留哪個版本；選擇雲端版本會放棄此筆尚未同步的修改。</p>
                   {(() => {
@@ -1214,7 +1151,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                     <div className="personal-overview-heading"><div className="stat-label">{recordView==='day' ? recordDateLabel(recordDay,utils.todayStr()) : recordMonth === utils.todayStr().slice(0,7) ? '本月收支' : recordMonth ? personalPeriodLabel(recordMonth)+'收支' : '累計收支'}</div><button type="button" className="btn btn-sm btn-ghost" onClick={openBankSettings} aria-label="銀行自動記帳設定"><Wallet size={15} aria-hidden="true"/>銀行設定</button></div>
                     {recordView==='day' ? <div className="day-finance-overview"><div><span>{recordCategory||recordSearch?'篩選支出':'當日支出'}</span><strong className="money"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(selectedDayTotals.expenseCents))}</strong></div>{selectedDayTotals.incomeCents>0&&<div><span>收入</span><strong className="money finance-income"><span className="currency">NT$</span>{utils.fmt(utils.fromCents(selectedDayTotals.incomeCents))}</strong></div>}<p>{visibleRecordCount} 筆記錄{recordDay>utils.todayStr()?' · 預排記帳':''}</p></div> : <FinanceTotals incomeCents={personalIncomeTotal} expenseCents={personalTotal} balanceCents={personalIncomeTotal-personalTotal}/>}
                   </div>}
-                  {personal && !searchingAllDates && <BankInboxCard compact drafts={currentGroup?.bankInbox || []} sharedDrafts={currentGroup?.sharedInbox || []} onOpen={() => setBankInboxOpen(true)} />}
+                  {personal && !searchingAllDates && <BankInboxCard compact updating={ledgerRead.retrying || ledgerRead.phase !== 'ready' || !syncStatus.connected} drafts={currentGroup?.bankInbox || []} sharedDrafts={currentGroup?.sharedInbox || []} onOpen={() => setBankInboxOpen(true)} />}
                   {!personal && !searchingAllDates && <button type="button" className="shared-sync-entry" onClick={() => toggleModal('groupSettings', true)}><span>{personalLink?.enabled && personalLink.mode === 'review' ? `我的分攤待確認 → ${myGroups.find(book => book.code === personalLink.targetCode)?.name || '個人帳本'}` : '把我的分攤同步到個人帳本'}</span><ChevronRight size={17} aria-hidden="true" /></button>}
                   {bankMatchExpense && !searchingAllDates && <div className="shared-match-notice"><strong>有銀行入帳可能與分帳重複</strong><p>請開啟標示「分攤」的明細核對，可合併並保留你的實際負擔金額。</p><button type="button" className="btn btn-sm" onClick={() => showExpenseDetail(bankMatchExpense)}>核對可能重複的記錄</button></div>}
                   <div className="records-heading">
