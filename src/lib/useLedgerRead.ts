@@ -21,7 +21,7 @@ const services: LedgerReadServices = {
 };
 type Scope = { code: string; retry: () => Promise<string | null>; current: () => Group | null };
 
-export function useLedgerRead(code: string | undefined, onGroup: (group: Group) => void, onDeleted: () => void, io = services) {
+export function useLedgerRead(code: string | undefined, onGroup: (group: Group) => void, onDeleted: () => void, sessionKey = '', io = services) {
   const [state, setState] = useState<ReadState>({ phase: 'loading', issue: null, retrying: false });
   const callbacks = useRef({ onGroup, onDeleted });
   callbacks.current = { onGroup, onDeleted };
@@ -106,7 +106,7 @@ export function useLedgerRead(code: string | undefined, onGroup: (group: Group) 
       if (scope.current === session) scope.current = null;
       window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume);
     };
-  }, [code, io]);
+  }, [code, io, sessionKey]);
   return {
     ...(state.code === code ? state : { code, phase: 'loading' as const, issue: null, retrying: false }),
     retry: useCallback(() => scope.current?.retry() || Promise.resolve(null), []),

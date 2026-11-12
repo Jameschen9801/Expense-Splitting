@@ -212,7 +212,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
   const ledgerRead = useLedgerRead(currentPage === 'group' ? currentGroup?.code : undefined, setCurrentGroup, () => {
     // Wait for the server acknowledgement of this tab's own delete action.
     if (!deleteLock.current && groupCodeRef.current) finishLedgerRemoval(groupCodeRef.current);
-  });
+  }, deviceUid);
   const isOwner = currentGroup?.security ? deviceUid === currentGroup.security.ownerUid : myName === currentGroup?.members[0];
   const personal = isPersonalLedger(currentGroup);
   const searchingAllDates = recordSearchAll && !!recordSearch.trim();
@@ -1124,6 +1124,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
               {(syncStatus.reason || ledgerRead.issue) && <div className="rounded-2xl border border-line p-4 text-sm bg-paper">
                 {syncStatus.reason && <p role="alert">{syncStatus.reason}</p>}
                 {ledgerRead.issue && <p role="alert">{ledgerRead.issue.message}</p>}
+                {ledgerRead.issue?.kind === 'read' && personal && currentGroup?.security?.ownerUid !== deviceUid && <button type="button" className="btn btn-sm mt-3" onClick={() => setAccountSettings(true)}>重新登入原本帳號</button>}
                 {syncStatus.conflict && <div className="mt-3">
                   <p className="text-xs text-ink-3 leading-relaxed mb-3">另一位成員已更新這筆紀錄。你的變更保留在此裝置，請選擇保留哪個版本；選擇雲端版本會放棄此筆尚未同步的修改。</p>
                   {(() => {

@@ -1,12 +1,14 @@
 import type { MyGroup } from '../types';
-import { firebaseSession, fetchGroupOnce, currentDeviceUid } from './firebase';
+import { firebaseSession, fetchGroupOnce, currentDeviceUid, normalizeGroup, prepareAccountSignIn } from './firebase';
 import { storage } from './utils';
 import { Outbox } from './outbox';
-import { bankRulesKey, ensureBankBridge, readBankRules, saveBankRules, type BankRule } from './bankShortcuts';
-import { accountBookQueueKey, bankConfig, bookChanges, installSyncedBank, overlayBooks, validateSyncedBank, type AccountProfile, type BookChanges, type SyncedBank } from './accountData';
+import { bankBridgeKey, bankRulesKey, ensureBankBridge, readBankRules, saveBankRules, type BankRule } from './bankShortcuts';
+import { accountBookQueueKey, assertAccountReconnect, bankConfig, bookChanges, installSyncedBank, needsAccountReconnect, overlayBooks, validateSyncedBank, type AccountProfile, type BookChanges, type SyncedBank } from './accountData';
+import { sync } from './sync';
+import { withTimeout } from './syncFeedback';
 
-type AccountState = { initialized: boolean; email: string; ready: boolean; busy: boolean; message: string };
-let state: AccountState = { initialized: false, email: '', ready: false, busy: false, message: '' };
+type AccountState = { initialized: boolean; email: string; ready: boolean; busy: boolean; needsReconnect: boolean; message: string };
+let state: AccountState = { initialized: false, email: '', ready: false, busy: false, needsReconnect: false, message: '' };
 let starting: Promise<void> | undefined;
 let stopProfile: (() => void) | undefined;
 let observedUid = '';
@@ -55,7 +57,7 @@ async function hydrate(value: AccountProfile | null) {
   if (uid !== currentDeviceUid()) return;
   applying = true;
   try {
-    for (const item of available) if (item) storage.saveGroup(item.group.code, item.group);
+    for (const item of available) if (item) storage.saveGroup(item.group.code, sync.merge(item.group));
     storage.saveMyGroups(available.flatMap(item => item ? [item.book] : []));
     installSyncedBank(localStorage, value.bank);
     profile = value;
@@ -79,7 +81,9 @@ function watch(uid: string, database: import('firebase/database').Database, onVa
 async function refresh() {
   const { auth, database } = await firebaseSession();
   const user = auth.currentUser!;
-  notify({ initialized: true, email: user.isAnonymous ? '' : user.email || '' });
+  const books = storage.getMyGroups();
+  const cached = Object.fromEntries(books.map(book => [book.code, storage.getGroup(book.code)]));
+  notify({ initialized: true, email: user.isAnonymous ? '' : user.email || '', needsReconnect: user.isAnonymous && needsAccountReconnect(user.uid, books, cached) });
   if (user.isAnonymous) return;
   await flushBooks();
   const { get, onValue, ref, runTransaction } = await import('firebase/database');
@@ -107,8 +111,9 @@ function trackBooks(before: MyGroup[], after: MyGroup[]) {
 export function accountError(error: unknown) {
   const code = (error as { code?: string })?.code;
   const messages: Record<string, string> = {
-    'auth/email-already-in-use': '這個 Email 已綁定其他身分。原帳本仍保留；請使用另一個 Email 綁定目前帳本。',
-    'auth/credential-already-in-use': '此帳號已綁定其他身分，無法直接合併原帳本。',
+    'auth/email-already-in-use': '這個 Email 已設定過帳號。請用原先的密碼登入，系統會先核對帳本歸屬，原資料會保留。',
+    'auth/credential-already-in-use': '這個 Email 已設定過帳號，請改用原先的密碼登入並核對帳本。',
+    'account/reconnect-required': '這台裝置保留了原帳本，但需要重新登入。請使用原本 Email 與密碼，不需要重新綁定或更換 Email。',
     'auth/invalid-email': '請填寫有效的 Email',
     'auth/weak-password': '密碼至少需要 8 個字元',
     'auth/invalid-credential': 'Email 或密碼不正確，請再確認',
@@ -145,6 +150,10 @@ export const accountSync = {
       const { auth, database } = await firebaseSession();
       const { EmailAuthProvider, linkWithCredential } = await import('firebase/auth');
       const originalUid = auth.currentUser!.uid;
+      const localBooks = storage.getMyGroups();
+      if (needsAccountReconnect(originalUid, localBooks, Object.fromEntries(localBooks.map(book => [book.code, storage.getGroup(book.code)])))) {
+        throw Object.assign(new Error('Reconnect required'), { code: 'account/reconnect-required' });
+      }
       if (auth.currentUser!.isAnonymous) await linkWithCredential(auth.currentUser!, EmailAuthProvider.credential(email.trim(), password));
       if (auth.currentUser!.uid !== originalUid) throw new Error('身分異常，已停止設定');
       await auth.currentUser!.getIdToken(true);
@@ -157,18 +166,44 @@ export const accountSync = {
     } finally { notify({ busy: false }); }
   },
   async login(email: string, password: string) {
+    if (state.busy) throw new Error('正在處理帳本同步，請稍候');
     notify({ busy: true, message: '' });
     try {
       const { auth } = await firebaseSession();
-      if (!auth.currentUser!.isAnonymous) throw new Error('此處已登入同步帳號，無需再登入');
-      if (new Outbox(localStorage).list().length || storage.getMyGroups().length > 0) {
-        throw new Error('這裡已有屬於目前身分的獨立帳本，不能直接換身分。若這是原本記帳的桌面 App，請改選「保留現有帳本並開啟同步」。若 Safari 也建了帳本，請先備份並處理該帳本；系統不會自動合併或刪除。');
+      if (!auth.currentUser!.isAnonymous) {
+        if (auth.currentUser!.email?.toLowerCase() !== email.trim().toLowerCase()) throw new Error('此處已登入另一個同步帳號，原資料仍保留。');
+        await refresh(); return;
       }
-      const { signInWithEmailAndPassword } = await import('firebase/auth');
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      await firebaseSession();
-      profile = null; notify({ ready: false });
-      await refresh();
+      const rawBooks = localStorage.getItem('warikan_my_groups');
+      const books: MyGroup[] = JSON.parse(rawBooks || '[]');
+      if (!Array.isArray(books) || books.some(book => !book || !/^\d{6}$/.test(book.code))) throw new Error('本機帳本清單無法核對，原資料仍保留，請先匯出備份。');
+      const keys = ['warikan_my_groups', 'warikan_outbox_v1', 'warikan_last_group', accountBookQueueKey, bankRulesKey, bankBridgeKey, ...books.map(book => 'warikan_group_' + book.code)];
+      const before = new Map(keys.map(key => [key, localStorage.getItem(key)]));
+      before.set('warikan_my_groups', rawBooks);
+      const cached = Object.fromEntries(books.map(book => [book.code, JSON.parse(before.get('warikan_group_' + book.code) || 'null')]));
+      const pending = new Outbox({ getItem: key => before.get(key) ?? null, setItem: () => { throw new Error('Read only'); } }).list();
+      const memberships = JSON.parse(before.get(accountBookQueueKey) || 'null');
+      const candidate = await prepareAccountSignIn(email, password);
+      try {
+        const account = await withTimeout(candidate.read('accountSync/' + candidate.uid), 15000) as AccountProfile;
+        if (!account || account.version !== 1) throw new Error('這個帳號尚未設定帳本同步，請確認使用原本的 Email；原資料仍保留。');
+        validateSyncedBank(account.bank);
+        const registered = overlayBooks(account.books, memberships?.uid === candidate.uid ? memberships.changes : {});
+        const cloud = Object.fromEntries(await Promise.all(registered.map(async book => {
+          if (!/^\d{6}$/.test(book.code)) throw new Error('帳本同步資料格式錯誤');
+          const raw = await withTimeout(candidate.read('groups/' + book.code), 15000);
+          const group = raw ? normalizeGroup(raw) : null;
+          return [book.code, group];
+        })));
+        assertAccountReconnect({ uid: candidate.uid, books, cached, profile: account, cloud, pending, memberships });
+        if (keys.some(key => localStorage.getItem(key) !== before.get(key))) throw new Error('核對期間本機資料已更新，請再次登入；變更與草稿仍保留。');
+        await candidate.activate();
+        stopProfile?.(); stopProfile = undefined; observedUid = ''; profile = null;
+        notify({ ready: false, needsReconnect: false, email: auth.currentUser?.email || '' });
+        changed();
+        await refresh();
+        sync.flushAll();
+      } finally { await candidate.dispose(); }
     } finally { notify({ busy: false }); }
   },
   async resetPassword(email: string) {

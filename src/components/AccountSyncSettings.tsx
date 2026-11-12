@@ -1,26 +1,32 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { accountError, accountSync } from '../lib/accountSync';
 
 export function AccountSyncSettings({ preferLogin = false, compact = false, onReady }: { preferLogin?: boolean; compact?: boolean; onReady?: () => void }) {
   const account = useSyncExternalStore(accountSync.subscribe, accountSync.getSnapshot);
   const [expanded, setExpanded] = useState(!compact);
-  const [mode, setMode] = useState<'link' | 'login'>(preferLogin ? 'login' : 'link');
+  const [mode, setMode] = useState<'link' | 'login'>(preferLogin || account.needsReconnect ? 'login' : 'link');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  useEffect(() => { if (account.needsReconnect) setMode('login'); }, [account.needsReconnect]);
   const run = async (action: () => Promise<void>, success?: string) => {
     if (busy || account.busy) return;
     setBusy(true); setMessage('');
     try { await action(); setPassword(''); setConfirmation(''); if (success) setMessage(success); onReady?.(); }
-    catch (error) { setMessage(accountError(error)); }
+    catch (error) {
+      if (['auth/email-already-in-use', 'auth/credential-already-in-use', 'account/reconnect-required'].includes((error as { code?: string })?.code || '')) {
+        setMode('login'); setPassword(''); setConfirmation('');
+      }
+      setMessage(accountError(error));
+    }
     finally { setBusy(false); }
   };
   const locked = busy || account.busy;
   return <section className="account-sync-settings settings-section">
-    <div className="account-sync-title"><h3 className="settings-heading">帳本同步</h3><span className="account-sync-badge">{account.email ? account.ready ? '已連結' : '待同步' : '尚未連結'}</span></div>
-    <p className="text-sm text-ink-2 leading-relaxed">保留原本帳本，讓桌面 App、其他裝置和銀行捷徑使用相同的銀行規則。</p>
+    <div className="account-sync-title"><h3 className="settings-heading">帳本同步</h3><span className="account-sync-badge">{account.email ? account.ready ? '已連結' : '待同步' : account.needsReconnect ? '需要重新登入' : '尚未連結'}</span></div>
+    <p className="text-sm text-ink-2 leading-relaxed">{account.needsReconnect ? '這台裝置保留了原帳本，但登入狀態已中斷。登入原本帳號即可恢復連線，帳目與草稿會保留。' : '保留原本帳本，讓桌面 App、其他裝置和銀行捷徑使用相同的銀行規則。'}</p>
     {!expanded ? <button type="button" className="btn w-full mt-3" onClick={() => setExpanded(true)}>{account.email ? '查看同步帳號' : '連結原本帳本'}</button> : <>
       {account.email ? <div className="mt-4">
         <p className="text-sm break-all">{account.email}</p>
@@ -28,12 +34,11 @@ export function AccountSyncSettings({ preferLogin = false, compact = false, onRe
         <button type="button" className="btn w-full mt-3" disabled={locked} onClick={() => run(accountSync.refresh)}>{locked ? '同步中…' : '立即同步帳本與銀行設定'}</button>
         {account.message && <p role="status" className="text-xs text-ink-2 mt-3">{account.message}</p>}
       </div> : <>
-        <div className="account-sync-steps mt-4"><p><strong>1</strong> 在有原本帳目的 App 開啟同步</p><p><strong>2</strong> 儲存銀行規則，再綁定記帳捷徑</p></div>
-        <div className="account-sync-modes mt-4" role="group" aria-label="帳本同步方式">
-          <button type="button" className="btn btn-sm" aria-pressed={mode === 'link'} disabled={locked} onClick={() => { setMode('link'); setMessage(''); }}>我是原本記帳的 App</button>
-          <button type="button" className="btn btn-sm" aria-pressed={mode === 'login'} disabled={locked} onClick={() => { setMode('login'); setMessage(''); }}>我已設定，要登入</button>
-        </div>
-        <p className="text-xs text-ink-3 leading-relaxed mt-3">{mode === 'link' ? '綁定目前的帳本身分，保留原本帳目。請設定自己的 Email 與密碼。' : '使用桌面 App 剛設定的 Email 與密碼，不需要新增帳本。'}</p>
+        {!account.needsReconnect && <div className="account-sync-modes mt-4" role="group" aria-label="帳本同步方式">
+          <button type="button" className="btn btn-sm" aria-pressed={mode === 'login'} disabled={locked} onClick={() => { setMode('login'); setMessage(''); }}>登入原本帳號</button>
+          <button type="button" className="btn btn-sm" aria-pressed={mode === 'link'} disabled={locked} onClick={() => { setMode('link'); setMessage(''); }}>第一次設定同步</button>
+        </div>}
+        <p className="text-xs text-ink-3 leading-relaxed mt-3">{mode === 'link' ? '第一次使用同步時，設定自己的 Email 與密碼，會綁定目前的帳本身分。' : '請輸入原先設定的 Email 與密碼。會先核對帳本歸屬，再恢復連線，不需要新增帳本或重裝捷徑。'}</p>
         <form className="bank-rule-form mt-4" onSubmit={event => { event.preventDefault(); if (mode === 'link' && password !== confirmation) { setMessage('兩次密碼不一致'); return; } void run(() => mode === 'link' ? accountSync.link(email, password) : accountSync.login(email, password), mode === 'link' ? '原本帳本已開啟同步。儲存銀行規則後，可繼續綁定記帳捷徑。' : '已連回原本帳本，可繼續記帳'); }}>
           <div><label className="field-label" htmlFor="sync-email">Email</label><input id="sync-email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={254} value={email} disabled={locked} onChange={event => setEmail(event.target.value)} placeholder="你的 Email" /></div>
           <div><label className="field-label" htmlFor="sync-password">密碼</label><input id="sync-password" type="password" autoComplete={mode === 'link' ? 'new-password' : 'current-password'} required minLength={mode === 'link' ? 8 : 1} maxLength={128} value={password} disabled={locked} onChange={event => setPassword(event.target.value)} placeholder={mode === 'link' ? '至少 8 個字元' : '同步帳號的密碼'} /></div>

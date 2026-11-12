@@ -217,6 +217,35 @@ export const fetchGroupFromServer = async (code: string, signal: AbortSignal): P
   return data ? normalizeGroup(data) : null;
 };
 
+// Verify credentials and book ownership in memory before changing the main
+// app's identity. No temporary login is persisted to the user's device.
+export const prepareAccountSignIn = async (email: string, password: string) => {
+  const { auth, database } = await firebaseSession();
+  const originalUid = auth.currentUser?.uid;
+  const [{ initializeApp, deleteApp }, authApi] = await Promise.all([import('firebase/app'), import('firebase/auth')]);
+  const previewApp = initializeApp(auth.app.options, 'account-check-' + crypto.randomUUID());
+  const previewAuth = authApi.initializeAuth(previewApp, { persistence: authApi.inMemoryPersistence });
+  const controller = new AbortController();
+  if (useEmulator) authApi.connectAuthEmulator(previewAuth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  try {
+    const { user } = await authApi.signInWithEmailAndPassword(previewAuth, email.trim(), password);
+    return {
+      uid: user.uid,
+      async read(path: string) {
+        const url = new URL(path + '.json', useEmulator ? 'http://127.0.0.1:9000/' : database.app.options.databaseURL);
+        if (useEmulator) url.searchParams.set('ns', 'demo-expense-splitting-default-rtdb');
+        return readServerJson(url, await user.getIdToken(), controller.signal);
+      },
+      async activate() {
+        if (auth.currentUser?.uid !== originalUid) throw new Error('核對期間登入狀態已變更，請再試一次；帳本資料仍保留。');
+        await authApi.updateCurrentUser(auth, user);
+        await firebaseSession();
+      },
+      async dispose() { controller.abort(); await deleteApp(previewApp); },
+    };
+  } catch (error) { controller.abort(); await deleteApp(previewApp); throw error; }
+};
+
 const updateGroup = async (
   groupCode: string,
   updater: (current: Group) => Group,
