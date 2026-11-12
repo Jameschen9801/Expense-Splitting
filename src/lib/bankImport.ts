@@ -53,5 +53,5 @@ export async function saveBankEntry(prepared: PreparedBankEntry, confirmed = fal
   try { storage.saveGroup(merged.code, merged); rememberBankReceipt(localStorage, current.rule.id, current.id); }
   catch { warning = '紀錄已保存在待同步佇列，但顯示快取或通知防重複設定暫時無法更新。請勿清除網站資料。'; }
   const message = sync.getStatus(merged.code).connected ? '已保存，正在同步至帳本' : '已離線保存，連線後自動同步';
-  return { group: merged, myName: current.myName, message: current.captureFirst ? '已放入待確認；補好說明與分類後再加入帳本' + (!sync.getStatus(merged.code).connected ? '，連線後自動同步' : '') : message, warning };
+  return { group: merged, myName: current.myName, message: current.captureFirst ? '已放入待確認；核對分類後再加入帳本' + (!sync.getStatus(merged.code).connected ? '，連線後自動同步' : '') : message, warning };
 }

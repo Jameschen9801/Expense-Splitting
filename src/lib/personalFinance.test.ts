@@ -104,6 +104,17 @@ test('收入輸入不可為零、負數或錯誤日期，金額保留分與儲�
   const form={kind:'income' as const,amount:'100.01',desc:'薪資',date:'2024-02-29',direction:'out' as const};assert.equal(cashflowValue(form).amount,100.01);assert.equal('direction' in cashflowValue(form),false);
   assert.equal(cashflowValue({...form,kind:'saving',direction:'in'}).direction,'in');for(const amount of ['0','-1','NaN','100.001'])assert.throws(()=>cashflowValue({...form,amount}));
 });
+test('收入、儲蓄說明可留空，空白說明可完整備份還原',()=>{
+  for(const kind of ['income','saving'] as const){
+    const form={kind,amount:'100.01',desc:'  ',date:'2024-02-29',direction:'out' as const};
+    assert.equal(cashflowValue(form).desc,'');assert.throws(()=>cashflowValue({...form,desc:'字'.repeat(201)}),/200/);
+  }
+  const book={...group,expenses:[{...expense,desc:''}],incomes:[{...income,desc:''}],savings:[{...saving,desc:''}]};
+  const source=memory();source.setItem('warikan_group_654321',JSON.stringify(book));source.setItem('warikan_my_groups',JSON.stringify([{code:'654321',name:'測試',myName:'我',kind:'personal'}]));
+  const plan=planRestore(memory(),readBackup(JSON.stringify(createBackup(source))));
+  assert.equal(plan.records,3);const restored=JSON.parse(plan.entries.warikan_group_654321);
+  assert.equal(restored.expenses[0].desc,'');assert.equal(restored.incomes[0].desc,'');assert.equal(restored.savings[0].desc,'');
+});
 test('新版可讀取舊畫面保留成物件的收入節點，刪除墓碑不會顯示',()=>{
   const store=memory();store.setItem('warikan_group_654321',JSON.stringify({...group,incomes:{i1:income,deleted:{...income,id:'deleted',_deleted:true}},savings:{s1:saving}}));
   const original=Object.getOwnPropertyDescriptor(globalThis,'localStorage');

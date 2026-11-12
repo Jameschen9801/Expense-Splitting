@@ -23,7 +23,7 @@ export function BankImport({ input, onClose, onGroup, onSaved, background = fals
     saving.current ||= saveBankEntry(value, confirmed);
     return saving.current.then(result => {
       const stillPending = result.group.bankInbox?.some(item => item.id === value.id);
-      reportBankDelivery(value.captureFirst ? (stillPending ? 'pending' : 'duplicate') : 'saved', value.captureFirst ? (stillPending ? '已保存在手機通知待確認，補好說明與分類後再加入帳本。同步進度請看帳本右上角。' : '這則通知已在其他畫面處理，沒有再次新增。') : '已保存記帳紀錄。同步進度請看帳本右上角。');
+      reportBankDelivery(value.captureFirst ? (stillPending ? 'pending' : 'duplicate') : 'saved', value.captureFirst ? (stillPending ? '已保存在手機通知待確認，核對分類後再加入帳本。同步進度請看帳本右上角。' : '這則通知已在其他畫面處理，沒有再次新增。') : '已保存記帳紀錄。同步進度請看帳本右上角。');
       onGroup(result.group, result.myName, value.captureFirst ? undefined : result.group.expenses.find(item => item.id === value.id)?.date || value.entry.date); setSaved(true); setMessage(result.message + (result.warning ? '\n' + result.warning : ''));
       if (value.captureFirst && !result.warning) { onSaved(result.message); onClose(); }
     }).catch(error => { saving.current = null; const message = error instanceof Error ? error.message : '記帳未完成，請保留此畫面'; setError(message); reportBankDelivery('error', message); }).finally(() => setBusy(false));

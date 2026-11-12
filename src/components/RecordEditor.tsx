@@ -90,14 +90,14 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
     }
   };
   const keyboardFields = useMemo<KeyboardField[]>(() => {
-    if (sharedReview) return [{ id: 'expense-description', label: '說明' }];
+    if (sharedReview) return [{ id: 'expense-description', label: '說明（選填）' }];
     if (recordType === 'transfer') return [
       { id: 'transfer-amount', label: '轉帳金額 (NT$)' },
       { id: 'transfer-note', label: '轉帳備註' },
     ];
     return [
       { id: 'expense-amount', label: '金額 (NT$)' },
-      { id: 'expense-description', label: '說明' },
+      { id: 'expense-description', label: '說明（選填）' },
       ...(expForm.splitMode === 'equal' ? [] : expForm.participants.map(name => ({
         id: `expense-share-${encodeURIComponent(name)}`,
         label: `${name} ${expForm.splitMode === 'custom' ? '分攤金額 (NT$)' : '分攤比例 (%)'}`,
@@ -168,8 +168,8 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                   </select>
                 </div>
                 <div className="field">
-                  <label className="field-label" htmlFor="expense-description">說明</label>
-                  <input id="expense-description" data-autofocus={bankReview || sharedReview ? true : undefined} type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
+                  <label className="field-label" htmlFor="expense-description">說明（選填）</label>
+                  <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="可留空，例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-date">日期</label>

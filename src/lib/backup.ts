@@ -36,7 +36,7 @@ function validRecord(record: any): record is LedgerRecord {
   if (record.notes != null && !text(record.notes,2000) || record.location != null && !text(record.location,300)
     || record.tags != null && (!Array.isArray(record.tags) || record.tags.length > 100 || record.tags.some(tag=>!text(tag,60) || !tag) || new Set(record.tags).size !== record.tags.length)
     || record.importSource != null && (!object(record.importSource) || record.importSource.system !== 'ReceiptBox' || !text(record.importSource.category,60) || Object.keys(record.importSource).some(key=>!['system','category'].includes(key)))) return false;
-  if ('desc' in record && !('payer' in record)) return text(record.desc,200) && !!record.desc && !('from' in record) && (!record.direction || ['out','in'].includes(record.direction));
+  if ('desc' in record && !('payer' in record)) return text(record.desc,200) && !('from' in record) && (!record.direction || ['out','in'].includes(record.direction));
   if ('payer' in record) {
     const source = record.sharedSource;
     if (source != null && (!object(source) || !code(source.groupCode) || !text(source.groupName,100) || !recordId(source.expenseId)

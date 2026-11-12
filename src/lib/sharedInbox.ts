@@ -50,7 +50,7 @@ export function sharedReviewChanges(target: Group, code: string, projected: Shar
 }
 
 export function sharedDraftExpense(draft: SharedDraft, form: ExpenseForm, at = Date.now()): Expense {
-  if (!form.desc.trim() || form.desc.trim().length > 200) throw new Error('請填寫說明，最多 200 字');
+  if (form.desc.trim().length > 200) throw new Error('說明最多 200 字');
   if (!categories.some(category => category.id === form.category)) throw new Error('請選擇分類');
   if (!form.amount.trim() || !/^\d+(?:\.\d{1,2})?$/.test(form.amount.trim()) || utils.toCents(Number(form.amount)) !== utils.toCents(draft.amount)) throw new Error('分攤金額請回原始共用帳本修改，再重新確認');
   if (!validSyncDate(form.date)) throw new Error('請選擇有效日期');

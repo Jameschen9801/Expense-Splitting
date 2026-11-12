@@ -6,7 +6,6 @@ import { utils } from './utils';
 export const bankDraftOwner = (name: string, id: string) => name + ':bank:' + id;
 export const pendingDescription = (desc: string) => ['銀行消費（待補說明）', '銀行刷卡消費'].includes(desc);
 export function bankDraftExpense(draft: BankDraft, form: ExpenseForm): Expense {
-  if (!form.desc.trim() || pendingDescription(form.desc.trim())) throw new Error('請填寫消費說明');
   if (!categories.some(item => item.id === form.category)) throw new Error('請選擇分類');
   const amount = Number(form.amount), date = new Date(form.date + 'T00:00:00Z');
   if (!form.amount.trim() || !Number.isFinite(amount) || amount <= 0 || amount > 1e9 || !/^\d+(?:\.\d{1,2})?$/.test(form.amount.trim())) throw new Error('請填寫有效金額，最多兩位小數');

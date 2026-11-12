@@ -18,6 +18,12 @@ const apply = (group: Group, changes: GroupChange[]) => changes.reduce((current,
 const projected = () => projectSharedDrafts(source, '我', 'A', '2026-10-29');
 const form = (draft: Expense) => ({ desc: '自己的說明', amount: String(draft.amount), date: draft.date, category: 'shopping' as const, payer: '我', participants: ['我'], splitMode: 'equal' as const, customShares: {} });
 async function pending() { return apply(target, sharedReviewChanges(target, source.code, await projected())); }
+test('共用分攤確認時可不填說明，來源金額與分類驗證仍保留',async()=>{
+  const group=await pending(),draft=group.sharedInbox![0];
+  assert.equal(sharedDraftExpense(draft,{...form(draft),desc:'  '}).desc,'');
+  assert.throws(()=>sharedDraftExpense(draft,{...form(draft),desc:'字'.repeat(201)}),/200/);
+  assert.throws(()=>sharedDraftExpense(draft,{...form(draft),desc:'',amount:'1'}),/金額/);
+});
 function confirmation(group: Group): GroupChange {
   const draft = group.sharedInbox![0];
   return { type: 'sharedDraft.confirm', id: draft.id, expense: sharedDraftExpense(draft, form(draft), 5), expectedExpense: fingerprint(group.expenses.find(record => record.id === draft.id)), meta: { ...meta(), expected: fingerprint(draft) } };

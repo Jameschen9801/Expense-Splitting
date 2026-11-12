@@ -6,7 +6,7 @@ export type CashflowKind = 'income' | 'saving';
 export type CashflowForm = { amount: string; desc: string; date: string; direction: 'out' | 'in'; id?: string; kind: CashflowKind };
 export const cashflowDraftKey = (code: string, name: string, kind: CashflowKind) => `warikan_cashflow_draft_v1_${code}_${encodeURIComponent(name)}_${kind}`;
 export function cashflowValue(form: CashflowForm): Pick<Income,'amount'|'desc'|'date'> & Pick<Saving,'direction'> {
-  if (!form.desc.trim() || form.desc.trim().length > 200) throw new Error('請填寫 1 至 200 字的說明');
+  if (form.desc.trim().length > 200) throw new Error('說明最多 200 字');
   const amount = Number(form.amount);
   if (!/^\d+(?:\.\d{1,2})?$/.test(form.amount.trim()) || !Number.isFinite(amount) || amount <= 0 || amount > 1e9) throw new Error('請填寫有效金額，最多兩位小數');
   const date = new Date(form.date + 'T00:00:00Z');

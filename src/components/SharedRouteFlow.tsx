@@ -1,3 +1,4 @@
+import { recordDescription } from '../lib/ui';
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ChevronRight, Users } from 'lucide-react';
 import type { Expense, Group, MyGroup, SharedRoute } from '../types';
@@ -94,10 +95,10 @@ export function SharedRouteFlow({group,record,source,initialForm,onClose,onSaved
     <div className="shared-route-outcome" role="status">{mine===0?'純代墊 · 你的負擔為 0，不新增個人支出':mine!=null?<>你的負擔 <strong>NT$ {utils.fmt(mine)}</strong>{review&&preview&&preview.date>=link.since! ? <small>先送到「{destination}」待確認</small>:<small>{review?'這筆早於同步起始日，不會補匯到個人帳本':'個人分攤同步尚未開啟'}</small>}</>:'請選擇分攤對象與金額'}</div>
     {mine!==0&&(!review||preview&&preview.date<link.since!)&&<details className="shared-route-sync" onToggle={event=>setShowSyncSettings(event.currentTarget.open)}><summary>查看個人分攤同步設定</summary>{showSyncSettings&&<PersonalLedgerSyncSettings group={target} myName={member} books={books} onAccount={()=>setError('請先回帳本設定，登入原本的帳本同步帳號')}/>}</details>}
     {source==='expense'&&<p className="personal-sync-note mb-4">轉成分帳後，原本的個人全額支出會移除；你的負擔依同步設定先進待確認。</p>}
-    {matches.length>0&&<div className="shared-match-notice"><strong>可能已經記過這筆分帳</strong>{matches.map(expense=><div key={expense.id}><p>{expense.desc} · {expense.date}<br/>整筆 NT$ {utils.fmt(expense.amount)} · 你的負擔 NT$ {utils.fmt(memberExpenseAmount(expense,member))}</p><button type="button" className="btn btn-sm" disabled={saving} onClick={()=>{if(preview)setSelection({...selection,initial:{...selection.initial,expense:preview}});setLinking(expense);setError('');}}>核對並連結這筆分帳</button></div>)}<label><input type="checkbox" checked={separate} onChange={event=>setSeparate(event.target.checked)}/>這是另一筆消費，仍要新增分帳</label></div>}
+    {matches.length>0&&<div className="shared-match-notice"><strong>可能已經記過這筆分帳</strong>{matches.map(expense=><div key={expense.id}><p>{recordDescription(expense)} · {expense.date}<br/>整筆 NT$ {utils.fmt(expense.amount)} · 你的負擔 NT$ {utils.fmt(memberExpenseAmount(expense,member))}</p><button type="button" className="btn btn-sm" disabled={saving} onClick={()=>{if(preview)setSelection({...selection,initial:{...selection.initial,expense:preview}});setLinking(expense);setError('');}}>核對並連結這筆分帳</button></div>)}<label><input type="checkbox" checked={separate} onChange={event=>setSeparate(event.target.checked)}/>這是另一筆消費，仍要新增分帳</label></div>}
   </>;
   if(linking)return <Modal title="連結已記過的分帳？" onClose={()=>{if(!saving)setLinking(null);}}>
-    <div className="shared-source-detail"><strong>{target.name} · {linking.desc}</strong><p>{linking.date} · 整筆 NT$ {utils.fmt(linking.amount)}</p><p>你的負擔 NT$ {utils.fmt(memberExpenseAmount(linking,member))}</p></div>
+    <div className="shared-source-detail"><strong>{target.name} · {recordDescription(linking)}</strong><p>{linking.date} · 整筆 NT$ {utils.fmt(linking.amount)}</p><p>你的負擔 NT$ {utils.fmt(memberExpenseAmount(linking,member))}</p></div>
     <p className="text-sm leading-relaxed">確認是同一筆刷卡後，會沿用這筆共用分帳，處理原{source==='bank'?'銀行通知':'個人全額記錄'}；不再新增第二筆分帳。</p>
     {error&&<p className="form-error mt-3" role="alert">{error}</p>}
     <div className="flex flex-col gap-2 mt-5"><button type="button" className="btn btn-primary" disabled={saving} onClick={()=>void save(preview||selection.initial.expense,linking)}>{saving?'儲存中…':'確認同一筆，連結分帳'}</button><button type="button" className="btn" disabled={saving} onClick={()=>setLinking(null)}>返回核對</button></div>

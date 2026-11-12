@@ -37,7 +37,7 @@ import { Statistics } from './components/Statistics';
 import { StatisticsRecords, statisticsDetailTitle } from './components/StatisticsRecords';
 import { RecordDateNavigator } from './components/RecordDateNavigator';
 import { dayInMonth, recordGroups, recordTotals, resetRecordQuery, type StatisticsDetail } from './lib/recordViews';
-import { recordDateLabel } from './lib/ui';
+import { recordDateLabel, recordDescription } from './lib/ui';
 import { readRecordView, saveRecordView, recordSearchQuery, type RecordView } from './lib/recordNavigation';
 import { CashflowEditor, EntryKindTabs } from './components/CashflowEditor';
 import { RecordProvenance } from './components/RecordProvenance';
@@ -662,7 +662,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
     const { desc, amount, payer, participants, splitMode, date, customShares } = form;
     const amt = parseFloat(amount);
     setFormError('');
-    if (!desc.trim()) { setFormError('請填寫費用說明'); return false; }
+    if (desc.trim().length > 200) { setFormError('說明最多 200 字'); return false; }
     if (!Number.isFinite(amt) || utils.toCents(amt) <= 0) { setFormError('請填寫至少 0.01 元的有效金額'); return false; }
     if (!payer || !currentGroup.members.includes(payer)) { setFormError('請選擇有效付款人'); return false; }
     if (participants.length === 0 || participants.some(name => !currentGroup.members.includes(name))) { setFormError('請選擇有效的分攤對象'); return false; }
@@ -1131,7 +1131,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
                     const conflict = syncStatus.conflict;
                     const cloud = [...conflict.cloud.expenses, ...conflict.cloud.transfers,...conflict.cloud.incomes||[],...conflict.cloud.savings||[], ...conflict.cloud.bankInbox || [], ...conflict.cloud.sharedInbox || []].find(record => record.id === conflict.targetId);
                     const mine = [...currentGroup?.expenses || [], ...currentGroup?.transfers || [],...currentGroup?.incomes||[],...currentGroup?.savings||[], ...currentGroup?.bankInbox || [], ...currentGroup?.sharedInbox || []].find(record => record.id === conflict.targetId);
-                    const describe = (record?: LedgerRecord) => record ? ('desc' in record ? record.desc : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
+                    const describe = (record?: LedgerRecord) => record ? ('desc' in record ? record.desc.trim() || '未填寫說明' : record.from + ' → ' + record.to) + ' · NT$ ' + utils.fmt(record.amount) + ' · ' + record.date : '已刪除';
                     return <div className="text-xs mb-3 space-y-2 break-words"><p>雲端：{describe(cloud)}</p><p>此裝置：{describe(mine)}</p></div>;
                   })()}
                   <div className="flex flex-wrap gap-2">
@@ -1461,7 +1461,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
         {modals.expenseDetail && selectedExpense && (
           <Modal title="費用詳情" onClose={() => toggleModal('expenseDetail', false)}>
             <div className="mb-4.5">
-              <div className="text-xl font-medium mb-1">{selectedExpense.desc}</div>
+              <div className="text-xl font-medium mb-1">{recordDescription(selectedExpense)}</div>
               <div className="text-xs text-ink-3 mb-2">{categoryLabel(selectedExpense.category)}</div>
               <div className="text-2xl font-medium tracking-tight mb-3">NT$ {utils.fmt(selectedExpense.amount)}</div>
               <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1559,7 +1559,7 @@ export default function App({ initialBankInput = {} }: { initialBankInput?: Bank
         )}
       </>
       {cashflowEditor&&currentGroup&&personal&&<React.Fragment key={cashflowEditor.kind+':'+(cashflowEditor.record?.id||'new')}><CashflowEditor code={currentGroup.code} myName={myName} entryDate={recordEntryDate} kind={cashflowEditor.kind} record={cashflowEditor.record} busy={isSaving} error={formError} clearError={()=>setFormError('')} onClose={()=>setCashflowEditor(null)} onKind={choosePersonalEntry} onSave={saveCashflow}/></React.Fragment>}
-      {selectedCashflow&&currentGroup&&personal&&<Modal title={selectedCashflow.kind==='income'?'收入詳情':'儲蓄詳情'} onClose={()=>setSelectedCashflow(null)}><h3 className="text-xl font-medium mb-3">{selectedCashflow.record.desc}</h3><div className={`money text-2xl mb-4 ${selectedCashflow.kind==='income'?'finance-income':''}`}>NT$ {utils.fmt(selectedCashflow.record.amount)}</div><p className="text-sm mb-4">{utils.fmtDate(selectedCashflow.record.date)}</p>{selectedCashflow.kind==='saving'&&<p className="text-sm text-ink-2 mb-4">{'direction' in selectedCashflow.record&&selectedCashflow.record.direction==='in'?'從儲蓄轉回':'存入儲蓄'} · 資金移轉，不計入收入或消費支出</p>}<RecordProvenance record={selectedCashflow.record}/><HistoryLog group={currentGroup} target={selectedCashflow.record.id}/><div className="flex flex-col gap-2 mt-4"><button type="button" className="btn btn-primary" onClick={()=>{setCashflowEditor(selectedCashflow);setSelectedCashflow(null);setFormError('');}}>編輯這筆{selectedCashflow.kind==='income'?'收入':'儲蓄'}</button><button type="button" className="btn btn-danger" onClick={()=>void removeCashflow(selectedCashflow.record,selectedCashflow.kind)}>刪除這筆{selectedCashflow.kind==='income'?'收入':'儲蓄'}</button></div></Modal>}
+      {selectedCashflow&&currentGroup&&personal&&<Modal title={selectedCashflow.kind==='income'?'收入詳情':'儲蓄詳情'} onClose={()=>setSelectedCashflow(null)}><h3 className="text-xl font-medium mb-3">{recordDescription(selectedCashflow.record,selectedCashflow.kind)}</h3><div className={`money text-2xl mb-4 ${selectedCashflow.kind==='income'?'finance-income':''}`}>NT$ {utils.fmt(selectedCashflow.record.amount)}</div><p className="text-sm mb-4">{utils.fmtDate(selectedCashflow.record.date)}</p>{selectedCashflow.kind==='saving'&&<p className="text-sm text-ink-2 mb-4">{'direction' in selectedCashflow.record&&selectedCashflow.record.direction==='in'?'從儲蓄轉回':'存入儲蓄'} · 資金移轉，不計入收入或消費支出</p>}<RecordProvenance record={selectedCashflow.record}/><HistoryLog group={currentGroup} target={selectedCashflow.record.id}/><div className="flex flex-col gap-2 mt-4"><button type="button" className="btn btn-primary" onClick={()=>{setCashflowEditor(selectedCashflow);setSelectedCashflow(null);setFormError('');}}>編輯這筆{selectedCashflow.kind==='income'?'收入':'儲蓄'}</button><button type="button" className="btn btn-danger" onClick={()=>void removeCashflow(selectedCashflow.record,selectedCashflow.kind)}>刪除這筆{selectedCashflow.kind==='income'?'收入':'儲蓄'}</button></div></Modal>}
       {dataSettings && <DataSettings group={currentPage === 'group' ? currentGroup : null} onClose={() => setDataSettings(false)} onOpenBankInstallation={openBankInstallation} />}
       {bankSettings && currentGroup && <Modal title="銀行與卡片設定" onClose={() => setBankSettings(false)}><React.Fragment key={currentGroup.code}><BankShortcutSettings group={currentGroup} /></React.Fragment></Modal>}
       {accountSettings && <Modal title="連結原本帳本" onClose={() => { if (!accountSync.getSnapshot().busy) setAccountSettings(false); }}><AccountSyncSettings /></Modal>}

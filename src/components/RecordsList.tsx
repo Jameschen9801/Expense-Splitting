@@ -3,7 +3,7 @@ import { ArrowLeftRight, PiggyBank, ReceiptText, SearchX, TrendingUp } from 'luc
 import type { Expense, Income, Saving, Transfer } from '../types';
 import { utils } from '../lib/utils';
 import { categoryLabel } from '../lib/categories';
-import { recordDateLabel } from '../lib/ui';
+import { recordDateLabel, recordDescription } from '../lib/ui';
 import { CategoryIcon } from './CategoryIcon';
 import { memberExpenseAmount } from '../lib/sharedExpenses';
 import { recordTotals, type RecordItem } from '../lib/recordViews';
@@ -47,17 +47,19 @@ export const RecordsList = memo(function RecordsList({ groups, myName, personal 
       {items.map(item => {
         if(item.type==='income'||item.type==='saving'){
           const label=item.type==='income'?'收入':item.direction==='in'?'儲蓄轉回':'存入儲蓄';
-          return <button type="button" key={item.id} className="record-row" onClick={()=>onCashflow?.(item,item.type)} aria-label={`${item.desc}，${label} NT$${utils.fmt(item.amount)}`}><span className="record-kind">{item.type==='income'?<TrendingUp size={20}/>:<PiggyBank size={20}/>}</span><div className="min-w-0"><div className="record-name">{item.desc}</div><div className="record-meta">{label}{item.date>utils.todayStr()?' · 預排':''}</div></div><div className="record-amount"><div className="record-amount-label">{label}</div><div className={`money ${item.type==='income'?'finance-income':''}`}><span className="currency">NT$</span>{utils.fmt(item.amount)}</div></div></button>;
+          const title=recordDescription(item,item.type);
+          return <button type="button" key={item.id} className="record-row" onClick={()=>onCashflow?.(item,item.type)} aria-label={`${title}，${label} NT$${utils.fmt(item.amount)}`}><span className="record-kind">{item.type==='income'?<TrendingUp size={20}/>:<PiggyBank size={20}/>}</span><div className="min-w-0"><div className="record-name">{title}</div><div className="record-meta">{label}{item.date>utils.todayStr()?' · 預排':''}</div></div><div className="record-amount"><div className="record-amount-label">{label}</div><div className={`money ${item.type==='income'?'finance-income':''}`}><span className="currency">NT$</span>{utils.fmt(item.amount)}</div></div></button>;
         }
         if (item.type === 'expense') {
           const myCost = memberExpenseAmount(item, myName);
           const showAmount = personal || myCost > 0;
           const shownAmount = utils.fmt(personal ? item.amount : myCost);
+          const title = recordDescription(item);
           return <button type="button" key={item.id} onClick={() => onExpense(item)} className="record-row"
-            aria-label={personal ? `${item.desc}，${categoryLabel(item.category)}，支出 NT$${shownAmount}${item.sharedSource ? '，來自' + item.sharedSource.groupName : ''}` : `${item.desc}，${categoryLabel(item.category)}，${item.payer}先付 NT$${utils.fmt(item.amount)}，${myCost > 0 ? '你的分攤 NT$' + shownAmount : '你不需負擔'}`}>
+            aria-label={personal ? `${title}，${categoryLabel(item.category)}，支出 NT$${shownAmount}${item.sharedSource ? '，來自' + item.sharedSource.groupName : ''}` : `${title}，${categoryLabel(item.category)}，${item.payer}先付 NT$${utils.fmt(item.amount)}，${myCost > 0 ? '你的分攤 NT$' + shownAmount : '你不需負擔'}`}>
             <span className="record-kind"><CategoryIcon category={item.category} /></span>
             <div className="min-w-0">
-              <div className="record-name">{item.desc}</div>
+              <div className="record-name">{title}</div>
               <div className="record-meta">{personal ? (item.sharedSource ? `分攤 · ${item.sharedSource.groupName}` : categoryLabel(item.category))+(item.date>utils.todayStr()?' · 預排':'') : item.payer + '先付 NT$' + utils.fmt(item.amount)}</div>
             </div>
             {showAmount && <div className={`record-amount ${!personal ? 'record-own-expense' : ''}`}><div className="record-amount-label">{personal ? '支出' : '你的分攤'}</div>

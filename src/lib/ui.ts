@@ -1,3 +1,10 @@
+import type { ExpenseCategory } from '../types';
+import { categoryLabel } from './categories';
+
+export function recordDescription(record: { desc: string; category?: ExpenseCategory }, kind: 'expense' | 'income' | 'saving' = 'expense') {
+  return record.desc.trim() || (kind === 'expense' ? categoryLabel(record.category) : kind === 'income' ? '收入' : '儲蓄');
+}
+
 export function recordDateLabel(date: string, today: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '未設定日期';
   const [year, month, day] = date.split('-').map(Number);

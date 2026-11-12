@@ -232,6 +232,18 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('說明可留空，個人支出、收入、儲蓄與共用支出仍受原權限保護',async()=>{
+  const expense={...personalExpense,desc:''},income={id:'i1',desc:'',amount:100,date:'2026-10-28',createdAt:2},saving={...income,id:'s1',direction:'out' as const};
+  await assertSucceeds(privateRef().set(cloud(personal)));
+  await assertSucceeds(privateRef().set(cloud({...personal,expenses:[expense],incomes:[income],savings:[saving]})));
+  for(const path of ['expenses/pe1','incomes/i1','savings/s1']){
+    assert.equal((await privateRef().child(path+'/desc').get()).val(),'');
+    await assertFails(privateRef('stranger').child(path+'/desc').set(''));
+    await assertFails(privateRef().child(path+'/amount').set(0));
+    await assertFails(privateRef().child(path+'/desc').set(123));
+  }
+  await assertSucceeds(owner().set(cloud({...group,expenses:[{...expense,participants:['A','B']}]})));
+});
 test('個人收入與儲蓄僅本人可讀寫，共用帳本與背景服務不能存取',async()=>{
   await privateRef().set(cloud(personal));
   const income={id:'i1',desc:'薪資',amount:10000,date:'2026-10-28',createdAt:2};

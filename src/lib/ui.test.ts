@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RecordsList, type RecordItem } from '../components/RecordsList';
-import { recordDateLabel } from './ui';
+import { recordDateLabel, recordDescription } from './ui';
 import { parseAppearance, resolveAppearance } from './appearance';
 
 test('外觀預設跟隨系統，使用者可固定淺色或深色，錯誤偏好不破壞畫面', () => {
@@ -24,6 +24,14 @@ const expense: RecordItem = { id: 'e1', type: 'expense', desc: '午餐', amount:
 function render(records: RecordItem[], myName = '沛庭', filtered = false) {
   return renderToStaticMarkup(createElement(RecordsList, { groups: records.length ? { '2026-10-12': records } : {}, myName, filtered, resetKey: 'test', onClear() {}, onExpense() {}, onTransfer() {} }));
 }
+test('說明留空時顯示分類或紀錄類型，但不改寫原始說明',()=>{
+  const blank={...expense,desc:''};
+  assert.equal(recordDescription(blank),'餐飲');assert.equal(recordDescription({...blank,desc:'  '}),'餐飲');
+  assert.ok(render([blank]).includes('class="record-name">餐飲</div>'));assert.equal(blank.desc,'');
+  const income:RecordItem={id:'income',type:'income',desc:'',amount:100,date:expense.date,createdAt:2};
+  const saving:RecordItem={...income,id:'saving',type:'saving',direction:'out'};
+  const markup=render([income,saving]);assert.ok(markup.includes('class="record-name">收入</div>'));assert.ok(markup.includes('class="record-name">儲蓄</div>'));
+});
 test('共用明細右側只顯示自己的正數分攤，未分攤及零元均留空', () => {
   const included = render([expense]); assert.ok(included.includes('先付 NT$100.01')); assert.ok(included.includes('你的分攤')); assert.ok(included.includes('50.01'));
   assert.ok(included.includes('record-own-expense'));

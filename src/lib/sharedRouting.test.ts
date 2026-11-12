@@ -54,7 +54,8 @@ test('金額與比例分攤都保留分，輸入未完成或分攤不平衡時�
   assert.deepEqual(routedExpense(routeExpenseForm(custom),shared,'A','test',10),custom);
   const percent=routedExpense({...form,amount:'100.01',splitMode:'percent',customShares:{A:'30',B:'70'}},shared,'A','test',10);
   assert.equal(utils.toCents(percent.shares!.reduce((sum,row)=>sum+row.amount,0)),10001);
-  for(const changed of [{desc:''},{category:undefined},{amount:'1.001'},{date:'2026-02-30'},{payer:'B'},{participants:[]},{participants:['A','A']},{splitMode:'custom',customShares:{A:'1',B:'2'}},{splitMode:'percent',customShares:{A:'20',B:'20'}}])assert.throws(()=>routedExpense({...form,...changed} as any,shared,'A','test',10));
+  assert.equal(routedExpense({...form,desc:'  '},shared,'A','test',10).desc,'');
+  for(const changed of [{desc:'字'.repeat(201)},{category:undefined},{amount:'1.001'},{date:'2026-02-30'},{payer:'B'},{participants:[]},{participants:['A','A']},{splitMode:'custom',customShares:{A:'1',B:'2'}},{splitMode:'percent',customShares:{A:'20',B:'20'}}])assert.throws(()=>routedExpense({...form,...changed} as any,shared,'A','test',10));
 });
 test('連結已存在分帳只處理原通知，完全不修改他人已記錄的分帳',async()=>{
   const existing={...routedExpense(form,shared,'A','already',3),revision:2,lastMutationId:'updated',createdBy:'B'};

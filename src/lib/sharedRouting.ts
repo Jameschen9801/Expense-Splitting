@@ -44,7 +44,7 @@ export function pureAdvance(form: ExpenseForm, member: string, members: string[]
 }
 
 export function routedExpense(form: ExpenseForm, group: Group, member: string, id: string, at: number): Expense {
-  if (!form.desc.trim() || form.desc.trim().length > 200) throw new Error('請填寫消費說明，最多 200 字');
+  if (form.desc.trim().length > 200) throw new Error('說明最多 200 字');
   if (!categories.some(category=>category.id===form.category)) throw new Error('請選擇分類');
   const amount=Number(form.amount);
   if (!/^\d+(?:\.\d{1,2})?$/.test(form.amount.trim()) || !Number.isFinite(amount) || amount<=0 || amount>1e9) throw new Error('請填寫有效金額，最多兩位小數');

@@ -1,3 +1,4 @@
+import { recordDescription } from '../lib/ui';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronRight } from 'lucide-react';
 import type { Expense, Group, SharedDraft } from '../types';
@@ -77,21 +78,21 @@ export function SharedInbox({ group, myName, onClose, onSaved, navigation }: Pro
       setIgnoring(null); onSaved('已忽略此分攤，不會重複送入待確認');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '忽略未完成，內容仍保留'); }
   };
-  if (ignoring) return <Modal title="忽略這筆分攤？" onClose={() => setIgnoring(null)}><h3 className="text-lg mb-3">{ignoring.desc}</h3><p className="text-sm leading-relaxed">{ignoring.sharedSource.groupName} · {ignoring.date}<br/>你的分攤 NT$ {utils.fmt(ignoring.amount)}</p><p className="text-sm text-ink-2 mt-3">同一筆分攤不會再送入待確認。已經手動記帳或確認過的紀錄會保留。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex gap-2 mt-5"><button type="button" className="btn flex-1" onClick={() => setIgnoring(null)}>返回</button><button type="button" className="btn btn-danger flex-1" onClick={ignore}>確認忽略</button></div></Modal>;
+  if (ignoring) return <Modal title="忽略這筆分攤？" onClose={() => setIgnoring(null)}><h3 className="text-lg mb-3">{recordDescription(ignoring)}</h3><p className="text-sm leading-relaxed">{ignoring.sharedSource.groupName} · {ignoring.date}<br/>你的分攤 NT$ {utils.fmt(ignoring.amount)}</p><p className="text-sm text-ink-2 mt-3">同一筆分攤不會再送入待確認。已經手動記帳或確認過的紀錄會保留。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex gap-2 mt-5"><button type="button" className="btn flex-1" onClick={() => setIgnoring(null)}>返回</button><button type="button" className="btn btn-danger flex-1" onClick={ignore}>確認忽略</button></div></Modal>;
   if (editing) {
     const matches = possiblePersonalMatches(editing.draft, group), banks = possibleBankMatches(editing.draft, group);
     return <Fragment key={editing.draft.id}><RecordEditor reviewProgress={reviewProgress(review,drafts.map(item=>item.id))} group={group} myName={myName} initial={editing.initial} sharedReview draftOwner={draftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) setEditing(null); }} onExpense={confirm} onTransfer={async () => false}
-      notice={<><div className="shared-source-detail"><strong>來自 {editing.draft.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(editing.draft.sharedSource.totalAmount)} · 你的分攤 NT$ {utils.fmt(editing.draft.amount)}</p><p>{editing.existing ? '原分攤已更新，確認後會更新同一筆個人紀錄。' : '尚未計入支出；補好說明與分類後再確認。'}</p></div>
-        {(matches.length > 0 || banks.length > 0) && <div className="shared-match-notice"><strong>有可能已記過的消費</strong>{matches.map(record => <p key={record.id}>{record.desc} · NT$ {utils.fmt(record.amount)} · {record.date}</p>)}
+      notice={<><div className="shared-source-detail"><strong>來自 {editing.draft.sharedSource.groupName}</strong><p>整筆 NT$ {utils.fmt(editing.draft.sharedSource.totalAmount)} · 你的分攤 NT$ {utils.fmt(editing.draft.amount)}</p><p>{editing.existing ? '原分攤已更新，確認後會更新同一筆個人紀錄。' : '尚未計入支出；核對分類後再確認，說明可留空。'}</p></div>
+        {(matches.length > 0 || banks.length > 0) && <div className="shared-match-notice"><strong>有可能已記過的消費</strong>{matches.map(record => <p key={record.id}>{recordDescription(record)} · NT$ {utils.fmt(record.amount)} · {record.date}</p>)}
           {matches.length > 0 && <button type="button" className="btn btn-sm" onClick={() => { setIgnoring(editing.draft); setEditing(null); }}>已經記過，忽略此分攤</button>}
-          {banks.map(record => <div key={record.id}><p>{record.desc} · 銀行全額 NT$ {utils.fmt(record.amount)}</p><button type="button" aria-pressed={bank?.id === record.id} className="btn btn-sm" onClick={() => { setBank(record); setSeparate(false); }}>{bank?.id === record.id ? '已選擇合併銀行記帳' : '同一筆刷卡，改為只記我的分攤'}</button></div>)}
+          {banks.map(record => <div key={record.id}><p>{recordDescription(record)} · 銀行全額 NT$ {utils.fmt(record.amount)}</p><button type="button" aria-pressed={bank?.id === record.id} className="btn btn-sm" onClick={() => { setBank(record); setSeparate(false); }}>{bank?.id === record.id ? '已選擇合併銀行記帳' : '同一筆刷卡，改為只記我的分攤'}</button></div>)}
           <label><input type="checkbox" checked={separate} onChange={event => { setSeparate(event.target.checked); if (event.target.checked) setBank(null); }}/>這是不同消費，仍要新增</label></div>}</>}/></Fragment>;
   }
   return <Modal title="共用分攤待確認" onClose={onClose}>{navigation}
     <div className="bank-inbox-intro"><strong>{drafts.length}</strong><div><h3>筆等你確認</h3><p>{group.name} · 尚未正式入帳</p></div></div>
     {error && <p className="form-error mb-4">{error}</p>}
     {drafts.length > 0 && <button type="button" className="btn btn-primary w-full mb-4" onClick={() => open(drafts[0])}>繼續確認最早一筆</button>}
-    <div className="space-y-3">{drafts.map(draft => <article className="bank-inbox-item" key={draft.id}><button type="button" className="bank-inbox-item-main" onClick={() => open(draft)} aria-label={`確認分攤 ${draft.desc} NT$${utils.fmt(draft.amount)}`}><div><strong>{draft.desc}</strong><p>{draft.sharedSource.groupName} · {draft.date}{group.expenses.some(record => record.id === draft.id) ? ' · 更新待確認' : ''}</p></div><span className="money">NT$ {utils.fmt(draft.amount)}</span><ChevronRight size={17} aria-hidden="true"/></button><button type="button" className="btn btn-ghost btn-sm" onClick={() => { setError(''); setIgnoring(draft); }}>忽略</button></article>)}</div>
+    <div className="space-y-3">{drafts.map(draft => <article className="bank-inbox-item" key={draft.id}><button type="button" className="bank-inbox-item-main" onClick={() => open(draft)} aria-label={`確認分攤 ${recordDescription(draft)} NT$${utils.fmt(draft.amount)}`}><div><strong>{recordDescription(draft)}</strong><p>{draft.sharedSource.groupName} · {draft.date}{group.expenses.some(record => record.id === draft.id) ? ' · 更新待確認' : ''}</p></div><span className="money">NT$ {utils.fmt(draft.amount)}</span><ChevronRight size={17} aria-hidden="true"/></button><button type="button" className="btn btn-ghost btn-sm" onClick={() => { setError(''); setIgnoring(draft); }}>忽略</button></article>)}</div>
     {!drafts.length && <div className="empty-state"><Check size={30} aria-hidden="true"/><h3>全部處理好了</h3><p>符合起始日期的新分攤會先放在這裡。</p></div>}
   </Modal>;
 }

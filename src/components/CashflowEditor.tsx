@@ -40,11 +40,11 @@ export function CashflowEditor({code,myName,kind,record,busy,error,onClose,onSav
   };
   const label=kind==='income'?'收入':'儲蓄';
   return <Modal layout="editor" title={(record?'編輯':'新增')+label} onClose={()=>{if(!busy&&writer.current!.flush())onClose();}}
-    keyboardFields={[{id:'cashflow-amount',label:label+'金額 (NT$)'},{id:'cashflow-description',label:'說明'}]} keyboardError={localError||error}
+    keyboardFields={[{id:'cashflow-amount',label:label+'金額 (NT$)'},{id:'cashflow-description',label:'說明（選填）'}]} keyboardError={localError||error}
     footer={<div className="record-editor-actions"><button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={()=>{if(writer.current!.flush())onClose();}}>取消</button><button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={()=>void save()}>{busy?'儲存中…':'儲存'}</button></div>}>
     {!record&&<EntryKindTabs kind={kind} onKind={next=>{if(!busy&&writer.current!.flush())onKind(next);}}/>}
     <div className="field"><label className="field-label" htmlFor="cashflow-amount">{label}金額 (NT$)</label><input id="cashflow-amount" type="number" inputMode="decimal" step="0.01" min="0.01" value={form.amount} onChange={event=>patch({amount:event.target.value})} enterKeyHint="next" data-autofocus="true" className="expense-amount-input" placeholder="0"/></div>
-    <div className="field"><label className="field-label" htmlFor="cashflow-description">說明</label><input id="cashflow-description" type="text" value={form.desc} onChange={event=>patch({desc:event.target.value})} maxLength={200} enterKeyHint="done" placeholder={kind==='income'?'例：薪資、兼職收入':'例：預備金、共同儲蓄'}/></div>
+    <div className="field"><label className="field-label" htmlFor="cashflow-description">說明（選填）</label><input id="cashflow-description" type="text" value={form.desc} onChange={event=>patch({desc:event.target.value})} maxLength={200} enterKeyHint="done" placeholder={kind==='income'?'可留空，例：薪資、兼職收入':'可留空，例：預備金、共同儲蓄'}/></div>
     <div className="field"><label className="field-label" htmlFor="cashflow-date">日期</label><input id="cashflow-date" type="date" value={form.date} onChange={event=>patch({date:event.target.value})}/></div>
     {kind==='saving'&&<><div className="field"><label className="field-label" htmlFor="saving-direction">儲蓄方向</label><select id="saving-direction" value={form.direction} onChange={event=>patch({direction:event.target.value as 'in'|'out'})}><option value="out">存入儲蓄</option><option value="in">從儲蓄轉回</option></select></div><p className="text-sm text-ink-2 leading-relaxed">儲蓄是資金移轉，會另列統計，不計入消費支出或收入。</p></>}
     {(localError||error)&&<p role="alert" className="form-error">{localError||error}</p>}

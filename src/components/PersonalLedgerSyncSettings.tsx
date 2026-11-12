@@ -48,7 +48,7 @@ export function PersonalLedgerSyncSettings({ group, myName, books, onAccount }: 
   };
   return <section className="personal-sync-settings">
     <div className="personal-sync-title"><Link2 size={19} aria-hidden="true" /><h3>我的分攤同步</h3>{enabled && <span><Check size={14} aria-hidden="true" />待確認同步已開啟</span>}</div>
-    <p>只送入你負擔的金額。先在個人帳本補好說明與分類，確認後才計入收支。</p>
+    <p>只送入你負擔的金額。先在個人帳本核對分類，確認後才計入收支。</p>
     {link?.enabled && !reviewLink(link) && <p className="shared-match-notice">舊版直接入帳已暫停。請確認目標帳本及起始日期，改用待確認流程。</p>}
     {loading ? <p role="status">載入你的個人帳本…</p> : choices.length ? <>
       <div className="field"><label className="field-label" htmlFor="personal-sync-target">同步到哪本個人帳本</label>

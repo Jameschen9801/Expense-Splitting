@@ -32,9 +32,9 @@ test('通知只放待確認，支出統計、CSV 與正式明細都保持空白'
   assert.deepEqual(roundTrip.bankReceiptIds,[draft.id]);
   assert.equal(roundTrip.expenses.length,0);
 });
-test('說明與分類必須明確填寫，金額日期仍經過驗證', () => {
-  assert.throws(()=>bankDraftExpense(draft,{...form,desc:''}),/說明/);
-  assert.throws(()=>bankDraftExpense(draft,{...form,desc:draft.desc}),/說明/);
+test('銀行確認的說明可留空，分類、金額日期仍經過驗證', () => {
+  assert.equal(bankDraftExpense(draft,{...form,desc:''}).desc,'');
+  assert.equal(bankDraftExpense(draft,{...form,desc:'  '}).desc,'');
   assert.throws(()=>bankDraftExpense(draft,{...form,category:undefined}),/分類/);
   assert.throws(()=>bankDraftExpense(draft,{...form,amount:'-1'}),/金額/);
   assert.throws(()=>bankDraftExpense(draft,{...form,date:'2026-02-30'}),/日期/);
