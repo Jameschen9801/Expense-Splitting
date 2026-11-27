@@ -437,6 +437,20 @@ test('Gemini 用量僅背景服務可存取，商家欄位可隨個人確認的�
   await assertSucceeds(expense.set({ ...personalExpense, merchant: '測試店家' }));
   await assertFails(expense.child('merchant').set('x'.repeat(61)));
 });
+test('Gemini 背景建議只能由服務寫入本人的待確認通知，由帳本擁有人讀取', async () => {
+  await seedBankService();
+  const { id, draft } = serviceCapture();
+  const path = 'bankIngressUsers/owner/geminiDrafts/654321';
+  const value = { merchant: '測試商店', at: Date.now(), state: 'ready', category: 'food', desc: '測試消費' };
+  await assertFails(serviceRef(path + '/' + id).set(value));
+  await env.withSecurityRulesDisabled(ctx => ctx.database().ref('groups/654321/bankInbox/' + id).set(draft));
+  await assertSucceeds(serviceRef(path + '/' + id).set(value));
+  assert.deepEqual((await env.authenticatedContext('owner').database().ref(path + '/' + id).get()).val(), value);
+  await assertFails(env.authenticatedContext('owner').database().ref(path + '/' + id).set(value));
+  await assertFails(env.authenticatedContext('stranger').database().ref(path).get());
+  await assertFails(serviceRef('bankIngressUsers/stranger/geminiDrafts/654321/' + id).set(value));
+  await assertFails(serviceRef(path + '/' + id + '/rawNotification').set('不可保存原始推播'));
+});
 function serviceCapture() {
   const id = 'ebank_' + 'a'.repeat(64), at = Date.now();
   const next = applyChange(personal, { type: 'bankDraft.put', draft: { ...personalExpense, id, createdAt: at, category: 'other', bank: 'Richart', last4: '0123' }, meta: { id: 'm' + id, actor: 'A', actorUid: 'owner', at, expected: null } });

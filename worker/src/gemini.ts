@@ -1,12 +1,24 @@
 import { BankBackgroundError, taipeiToday } from '../../src/lib/bankBackground';
 import { categories } from '../../src/lib/categories';
-import { readMerchantHabits, readMerchantSuggestion, suggestionMerchant } from '../../src/lib/merchantSuggestions';
+import { bankNoticeMerchant, merchantHabits, readMerchantHabits, readMerchantSuggestion, suggestionMerchant, type BankGeminiSuggestion } from '../../src/lib/merchantSuggestions';
+import { linePaySuggestions, type LinePayIndex } from '../../src/lib/linePay';
+import type { BankDraft, Expense } from '../../src/types';
 import { FirebaseRest, type Env } from './firebaseRest';
 import { identity } from './firebaseToken';
 
 const dailyLimit = 25;
 const model = 'gemini-3.1-flash-lite';
 const unavailable = () => new BankBackgroundError('gemini_unavailable', 'Gemini 暫時無法提供建議，可繼續手動確認', 503);
+export const canSuggestInBackground = (env: Env, uid: string) => !!env.GEMINI_API_KEY && env.GEMINI_ALLOWED_UID === uid;
+
+async function reserveGeminiQuota(db: FirebaseRest, uid: string) {
+  const day = taipeiToday(Date.now());
+  const { committed } = await db.transaction('bankIngressUsers/' + uid + '/geminiQuota', current => {
+    const count = current?.day === day ? current.count : 0;
+    return count >= dailyLimit ? undefined : { day, count: count + 1 };
+  }).catch(() => { throw unavailable(); });
+  if (!committed) throw new BankBackgroundError('gemini_daily_limit', '今天的 Gemini 建議已達上限，可繼續手動確認', 429);
+}
 
 export async function suggestPurchase(request: Request, env: Env, db: FirebaseRest, body: Record<string, unknown>) {
   const uid = await identity(request, env);
@@ -21,16 +33,40 @@ export async function suggestPurchase(request: Request, env: Env, db: FirebaseRe
   if (!merchant || !habits || Object.keys(body).length !== 2) {
     throw new BankBackgroundError('invalid_suggestion', '無法辨識商家資料，可繼續手動確認', 400);
   }
-  const day = taipeiToday(Date.now());
-  let committed: boolean;
-  try {
-    ({ committed } = await db.transaction('bankIngressUsers/' + uid + '/geminiQuota', current => {
-      const count = current?.day === day ? current.count : 0;
-      return count >= dailyLimit ? undefined : { day, count: count + 1 };
-    }));
-  } catch { throw unavailable(); }
-  if (!committed) throw new BankBackgroundError('gemini_daily_limit', '今天的 Gemini 建議已達上限，可繼續手動確認', 429);
+  await reserveGeminiQuota(db, uid);
   return generateSuggestion(env.GEMINI_API_KEY, merchant, habits);
+}
+
+export async function suggestBankDraft(db: FirebaseRest, env: Env, uid: string, book: string, id: string, linePay?: LinePayIndex) {
+  if (!canSuggestInBackground(env, uid)) return;
+  const draft: (BankDraft & { _deleted?: boolean }) | null = await db.get('groups/' + book + '/bankInbox/' + id);
+  if (!draft || draft._deleted || draft.id !== id) return;
+  const merchant = linePay
+    ? suggestionMerchant(linePaySuggestions(linePay, book, [draft])[id])
+    : bankNoticeMerchant(draft.desc);
+  if (!merchant) return;
+
+  const path = 'bankIngressUsers/' + uid + '/geminiDrafts/' + book;
+  const at = Date.now();
+  const job: BankGeminiSuggestion = { merchant, at, state: 'running' };
+  const claimed = await db.transaction(path, (current: Record<string, BankGeminiSuggestion> | null) => {
+    if (current?.[id]) return;
+    const recent = Object.entries(current || {}).sort(([, a], [, b]) => b.at - a.at).slice(0, 79);
+    return { ...Object.fromEntries(recent), [id]: job };
+  });
+  if (!claimed.committed) return;
+
+  let finished: BankGeminiSuggestion = { ...job, state: 'failed' };
+  try {
+    const { value } = await db.request('groups/' + book + '/expenses', 'GET', undefined, { lastByDate: 400 });
+    const history = Object.values(value || {}) as (Expense & { _deleted?: boolean })[];
+    const habits = merchantHabits(merchant, history.filter(expense => expense && !expense._deleted));
+    await reserveGeminiQuota(db, uid);
+    const suggestion = await generateSuggestion(env.GEMINI_API_KEY!, merchant, habits);
+    finished = { ...job, state: 'ready', ...(suggestion.category ? { category: suggestion.category } : {}), desc: suggestion.desc };
+  } catch { /* Manual review stays available if the optional suggestion fails. */ }
+  await db.transaction(path + '/' + id, (current: BankGeminiSuggestion | null) =>
+    current?.state === 'running' && current.at === at ? finished : undefined);
 }
 
 export async function generateSuggestion(key: string, merchant: string, habits: NonNullable<ReturnType<typeof readMerchantHabits>>, send = fetch) {

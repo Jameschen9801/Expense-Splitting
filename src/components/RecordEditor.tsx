@@ -9,9 +9,10 @@ import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 import { pureAdvance } from '../lib/sharedRouting';
 import { MerchantSuggestionPanel } from './MerchantSuggestion';
+import type { BankGeminiSuggestion } from '../lib/merchantSuggestions';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange, linePayMerchant, suggestionMerchant }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange, linePayMerchant, suggestionMerchant, backgroundSuggestion }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
@@ -25,6 +26,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   onFormChange?: (form: ExpenseForm) => void;
   linePayMerchant?: string;
   suggestionMerchant?: string;
+  backgroundSuggestion?: BankGeminiSuggestion;
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -165,8 +167,8 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 </div>
                 {bankReview && personal && group.security?.ownerUid && suggestionMerchant && (
                   <Fragment key={suggestionMerchant}>
-                    <MerchantSuggestionPanel owner={group.security.ownerUid} book={group.code} merchant={suggestionMerchant}
-                      history={group.expenses} disabled={isSaving} onApply={suggestion => {
+                    <MerchantSuggestionPanel owner={group.security.ownerUid} merchant={suggestionMerchant}
+                      history={group.expenses} background={backgroundSuggestion} form={expForm} disabled={isSaving} onApply={suggestion => {
                         setExpForm(form => ({ ...form, category: suggestion.category ?? form.category, desc: suggestion.desc || form.desc }));
                         setFormError('');
                       }} />

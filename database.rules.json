@@ -115,6 +115,7 @@
           }
         },
         "expenses": {
+          ".indexOn": ["date"],
           "$id": {
             ".write": "(auth != null && root.child('groups').child($code).child('security/users').child(auth.uid).exists() && newData.exists()) && !(auth != null && root.child('bankBackgroundServices').child(auth.uid).val() == true)",
             ".validate": "(!newData.parent().parent().child('security').exists() || (newData.hasChildren(['id','amount','date','createdAt','desc','payer','participants','splitMode']) && newData.child('id').val() == $id && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 1000000000 && newData.child('date').isString() && newData.child('date').val().matches(/^\\d{4}-\\d{2}-\\d{2}$/) && (auth != null && auth.uid == root.child('groups').child($code).child('security/ownerUid').val() || (newData.child('updatedByUid').val() == auth.uid && newData.child('_lastAudit/actorUid').val() == auth.uid && newData.child('_lastAudit/target').val() == $id)) && newData.child('desc').isString() && newData.child('payer').isString() && newData.child('participants').hasChildren() && (newData.child('splitMode').val() == 'equal' || newData.child('splitMode').val() == 'custom' || newData.child('splitMode').val() == 'percent') && (!newData.child('_deleted').exists() || (newData.child('_deleted').val() == true && data.exists())))) && (newData.parent().parent().child('kind').val() != 'personal' || (newData.child('payer').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('participants/0').val() == newData.parent().parent().child('security/users').child(newData.parent().parent().child('security/ownerUid').val()).child('name').val() && newData.child('splitMode').val() == 'equal')) && (!data.child('sharedSource').exists() || newData.child('sharedSource').exists()) && (!data.child('sharedSource/confirmedAt').exists() || newData.child('_deleted').val() != true || newData.child('_lastAudit/action').val() == 'sharedExpense.remove') && (!newData.parent().parent().child('sharedRoutes').child($id).exists() || (newData.parent().parent().child('sharedRoutes').child($id).child('source').val() == 'expense' && newData.child('_deleted').val() == true && newData.child('lastMutationId').val() == newData.parent().parent().child('sharedRoutes').child($id).child('mutationId').val() && newData.child('_lastAudit/action').val() == 'expense.routeShared')) && (newData.child('_lastAudit/action').val() != 'expense.routeCreate' || !data.exists() || newData.child('lastMutationId').val() == data.child('lastMutationId').val()) && (newData.child('_lastAudit/action').val() != 'expense.routeShared' || newData.parent().parent().child('sharedRoutes').child($id).exists())",
@@ -338,6 +339,20 @@
           "day": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "count": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 25" },
           "$other": { ".validate": false }
+        },
+        "geminiDrafts": {
+          "$code": {
+            ".read": "auth != null && auth.uid == $uid && root.child('groups').child($code).child('kind').val() == 'personal' && root.child('groups').child($code).child('security/ownerUid').val() == $uid",
+            "$id": {
+              ".validate": "$code.matches(/^\\d{6}$/) && $id.matches(/^ebank_[a-f0-9]{64}$/) && newData.hasChildren(['merchant','at','state']) && (data.exists() || (root.child('groups').child($code).child('kind').val() == 'personal' && root.child('groups').child($code).child('security/ownerUid').val() == $uid && root.child('groups').child($code).child('bankInbox').child($id).exists() && root.child('groups').child($code).child('bankInbox').child($id).child('_deleted').val() != true))",
+              "merchant": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60" },
+              "at": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= now + 120000" },
+              "state": { ".validate": "newData.val() == 'running' || newData.val() == 'ready' || newData.val() == 'failed'" },
+              "category": { ".validate": "newData.parent().child('state').val() == 'ready' && newData.isString() && newData.val().matches(/^(other|food|transport|stay|shopping|household|electronics|entertainment|bills|health|social|insurance|travel|education|haircut)$/)" },
+              "desc": { ".validate": "newData.parent().child('state').val() == 'ready' && newData.isString() && newData.val().length <= 30" },
+              "$other": { ".validate": false }
+            }
+          }
         },
         "linePay": {
           ".read": "auth != null && auth.uid == $uid && root.child('bankBackgroundServices').child(auth.uid).val() != true",

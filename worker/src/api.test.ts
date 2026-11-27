@@ -14,7 +14,9 @@ const db = { ref(path = '') { return {
   async remove() { return this.set(null); },
 }; } };
 const notice = '【信用卡消費通知】您的Richart卡(末四碼0123)於10/26-19:04刷卡消費約新臺幣58元，實際消費資訊以帳單為準，如有疑問請洽客服';
-let uid: string, loginToken: string, key: string;
+const uid = process.env.TEST_GEMINI_UID!;
+const loginToken = process.env.TEST_GEMINI_LOGIN!;
+let otherLoginToken: string, key: string;
 const rule = newBankRule({ bank: 'Richart', last4: '0123', groupCode: '123456', payer: 'A', participants: ['A'], category: 'food', mode: 'auto', limit: 1e9 });
 const group = () => ({ kind: 'personal', code: '123456', name: '背景接收測試', createdAt: 1, members: { A: true }, security: { version: 1, ownerUid: uid, users: { [uid]: { name: 'A', nameKey: 'A', role: 'owner' } }, names: { A: uid } } });
 const profile = (rules = [rule]) => ({ version: 1, books: { '123456': { kind: 'personal', code: '123456', name: '背景接收測試', myName: 'A' } }, bank: { rules: JSON.stringify(rules), bridge: 'b'.repeat(64), revision: 1 } });
@@ -28,7 +30,7 @@ before(async () => {
   assert.equal((await fetch(base + '/health')).status, 200, 'Start the local auth/database emulators and Worker first');
   const response = await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: `background-${Date.now()}@example.test`, password: 'local-test-only-123', returnSecureToken: true }) });
   const user = await response.json() as any;
-  assert.ok(user.localId); uid = user.localId; loginToken = user.idToken;
+  assert.ok(user.localId); otherLoginToken = user.idToken;
 });
 beforeEach(async () => {
   key = '';
@@ -41,9 +43,56 @@ test('Gemini 拒絕捷徑金鑰與未授權帳號，也不會建立用量', asyn
   const payload = { merchant: '測試商店', habits: [] };
   const fromShortcut = await post('/suggest', payload, { 'X-Expense-Key': key });
   assert.equal(fromShortcut.body.code, 'login_required');
-  const fromOtherAccount = await post('/suggest', payload, { Authorization: 'Bearer ' + loginToken });
+  const fromOtherAccount = await post('/suggest', payload, { Authorization: 'Bearer ' + otherLoginToken });
   assert.equal(fromOtherAccount.body.code, 'gemini_forbidden');
   assert.equal((await db.ref('bankIngressUsers/' + uid + '/geminiQuota').get()).exists(), false);
+});
+
+async function backgroundResult(id: string) {
+  const path = 'bankIngressUsers/' + uid + '/geminiDrafts/123456/' + id;
+  for (let i = 0; i < 80; i++) {
+    const result = (await db.ref(path).get()).val();
+    if (result && result.state !== 'running') return result;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  assert.fail('No background suggestion was saved for the pending receipt');
+}
+
+test('銀行有店名就依已入帳的分類產生建議，重送只用一次 Gemini 且保留原草稿', async () => {
+  const date = taipeiToday(Date.now());
+  const history = Object.fromEntries(['previous1', 'previous2'].map((id, i) => [id, {
+    id, date, createdAt: i + 1, desc: '私人備註', merchant: '測試商店', category: 'household', amount: 25,
+    payer: 'A', participants: { 0: 'A' }, splitMode: 'equal',
+  }]));
+  await db.ref('groups/123456/expenses').set(history);
+  const withMerchant = notice.replace('於10/26-19:04刷卡', '於「測試商店」刷卡');
+  const responses = await Promise.all([capture(withMerchant), capture(withMerchant), capture(withMerchant)]);
+  assert.equal(responses.filter(result => result.body.status === 'pending').length, 1);
+  const book = (await db.ref('groups/123456').get()).val();
+  const [draft] = Object.values(book.bankInbox) as any[];
+  const saved = await backgroundResult(draft.id);
+  assert.equal(saved.state, 'ready');
+  assert.equal(saved.category, 'household');
+  assert.equal(saved.desc, '測試商店（有歷史分類）');
+  assert.equal(saved.merchant, '測試商店');
+  assert.equal(draft.category, 'other');
+  assert.deepEqual((await db.ref('groups/123456').get()).val(), book);
+  assert.deepEqual(Object.keys(book.expenses).sort(), Object.keys(history).sort());
+  assert.equal((await db.ref('bankIngressUsers/' + uid + '/geminiQuota').get()).val().count, 1);
+});
+
+test('模型故障仍保留待確認消費；沒有辨識店名時不呼叫模型', async () => {
+  const unknown = await capture();
+  assert.equal(unknown.body.status, 'pending');
+  const failText = notice.replace('於10/26-19:04刷卡', '於「暫無回覆商店」刷卡');
+  assert.equal((await capture(failText)).body.status, 'pending');
+  const book = (await db.ref('groups/123456').get()).val();
+  const drafts = Object.values(book.bankInbox) as any[];
+  assert.equal(drafts.length, 2);
+  const result = await backgroundResult(drafts.find(draft => draft.desc === '暫無回覆商店').id);
+  assert.equal(result.state, 'failed');
+  assert.equal(book.expenses, undefined);
+  assert.equal((await db.ref('bankIngressUsers/' + uid + '/geminiQuota').get()).val().count, 1);
 });
 
 test('真實 HTTP 綁定僅存雜湊，狀態與連線測試不新增帳目', async () => {
@@ -94,6 +143,8 @@ test('LINE Pay 可先到或後到，永遠只補店名，銀行原始待確認�
   for (const order of ['LINE first', 'Richart first']) {
     await db.ref('groups/123456').set(group());
     await db.ref(path).remove();
+    await db.ref('bankIngressUsers/' + uid + '/geminiDrafts').remove();
+    await db.ref('bankIngressUsers/' + uid + '/geminiQuota').remove();
     if (order === 'LINE first') {
       assert.equal((await linePay()).body.status, 'store_received');
       assert.deepEqual(await book(), group());
@@ -112,6 +163,10 @@ test('LINE Pay 可先到或後到，永遠只補店名，銀行原始待確認�
     const drafts = Object.values(before.bankInbox) as any[];
     assert.equal(drafts.length, 1);
     assert.deepEqual(linePaySuggestions(index, '123456', drafts), { [drafts[0].id]: '測試商店' });
+    const suggested = await backgroundResult(drafts[0].id);
+    assert.equal(suggested.state, 'ready');
+    assert.equal(suggested.desc, '測試商店消費');
+    assert.equal((await db.ref('bankIngressUsers/' + uid + '/geminiQuota').get()).val().count, 1);
     assert.deepEqual(await book(), before); assert.equal(before.expenses, undefined);
     const prior = await readIndex();
     assert.equal((await linePay(walletText.replace('LINE 錢包', '普通聊天室'))).body.status, 'ignored');

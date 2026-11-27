@@ -1,8 +1,16 @@
 import type { Expense, ExpenseCategory } from '../types';
 import { categories } from './categories';
+import { pendingDescription } from './bankInbox';
 
 export type MerchantHabit = { category: ExpenseCategory; count: number };
 export type MerchantSuggestion = { category: ExpenseCategory | null; desc: string };
+export type BankGeminiSuggestion = {
+  merchant: string;
+  at: number;
+  state: 'running' | 'ready' | 'failed';
+  category?: ExpenseCategory;
+  desc?: string;
+};
 
 const categoryIds = new Set<string>(categories.map(item => item.id));
 const unsafeText = /[\p{Cc}\p{Cf}<>{}]|https?:|www\.|@|\d[\d\s-]{6,}\d/u;
@@ -11,6 +19,13 @@ export function suggestionMerchant(value: unknown) {
   if (typeof value !== 'string') return '';
   const name = value.normalize('NFKC').trim();
   return name.length <= 60 && /\p{L}/u.test(name) && !unsafeText.test(name) ? name.replace(/\s+/g, ' ') : '';
+}
+
+export const bankNoticeMerchant = (desc: string) => pendingDescription(desc) ? '' : suggestionMerchant(desc);
+
+export function savedBankSuggestion(value: BankGeminiSuggestion | undefined, merchant: string) {
+  if (!merchant || value?.merchant !== merchant || value.state !== 'ready') return null;
+  return readMerchantSuggestion({ category: value.category ?? null, desc: value.desc ?? '' });
 }
 
 const merchantKey = (name: string) => name.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
@@ -27,11 +42,12 @@ export function merchantHabits(merchant: string, history: readonly Expense[]): M
   const matches = history.filter(expense => {
     if (!expense.category || !categoryIds.has(expense.category)) return false;
     if (expense.sharedSource && !expense.sharedSource.confirmedAt) return false;
-    if (expense.merchant) return merchantIdentity(merchantKey(expense.merchant)) === key;
+    if (typeof expense.merchant === 'string' && expense.merchant) return merchantIdentity(merchantKey(expense.merchant)) === key;
     // On older entries, recognize a store at the start of the description
     // only when the remainder is separated from it, or for known chains.
-    const first = expense.desc.trim().split(/[\s、，,·：:（(]/u)[0];
-    return merchantIdentity(merchantKey(first)) === key || merchantIdentity(merchantKey(expense.desc)) === key;
+    const description = typeof expense.desc === 'string' ? expense.desc.trim() : '';
+    const first = description.split(/[\s、，,·：:（(]/u)[0];
+    return merchantIdentity(merchantKey(first)) === key || merchantIdentity(merchantKey(description)) === key;
   }).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 12);
 
   const counts = new Map<ExpenseCategory, number>();

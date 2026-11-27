@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "expense-bank-background-test",
-  "main": "src/index.ts",
+  "main": "src/testWorker.ts",
   "compatibility_date": "2026-10-28",
   "send_metrics": false,
   "observability": { "enabled": false },

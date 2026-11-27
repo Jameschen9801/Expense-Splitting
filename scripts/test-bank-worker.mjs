@@ -10,10 +10,16 @@ try {
   const signup = await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }) });
   const service = await signup.json();
   if (!service.localId || !service.refreshToken) throw new Error('Start the local Auth/Database emulators first.');
+  const owner = await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'gemini-' + crypto.randomUUID() + '@example.test', password: 'local-test-only-123', returnSecureToken: true }),
+  }).then(response => response.json());
+  if (!owner.localId || !owner.idToken) throw new Error('Could not create local Gemini test account');
   const session = JSON.stringify({ uid: service.localId, refreshToken: service.refreshToken });
   const envFile = join(temporary, 'worker.env');
-  await writeFile(envFile, 'FIREBASE_SERVICE_SESSION=' + session + '\n', { mode: 0o600 });
-  const env = { ...process.env, WRANGLER_SEND_METRICS: 'false', TEST_WORKER_UID: service.localId };
+  await writeFile(envFile, 'FIREBASE_SERVICE_SESSION=' + session + '\nGEMINI_ALLOWED_UID=' + owner.localId + '\nGEMINI_API_KEY=test-double\n', { mode: 0o600 });
+  const env = { ...process.env, WRANGLER_SEND_METRICS: 'false', TEST_WORKER_UID: service.localId, TEST_GEMINI_UID: owner.localId, TEST_GEMINI_LOGIN: owner.idToken };
   worker = spawn(process.execPath, ['worker/node_modules/wrangler/bin/wrangler.js', 'dev', '--local', '--config', 'worker/wrangler.test.jsonc', '--env-file', envFile, '--ip', '127.0.0.1', '--port', '8787', '--persist-to', join(temporary, 'state')], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
   worker.stdout.on('data', value => { output = (output + value).slice(-12000); });
   worker.stderr.on('data', value => { output = (output + value).slice(-12000); });

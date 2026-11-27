@@ -41,13 +41,17 @@ async function serviceToken(env: Env) {
 
 export class FirebaseRest {
   constructor(private env: Env) { localEmulator(env); }
-  async request(path: string, method = 'GET', value?: unknown, options: { shallow?: boolean; etag?: boolean; ifMatch?: string } = {}) {
+  async request(path: string, method = 'GET', value?: unknown, options: { shallow?: boolean; etag?: boolean; ifMatch?: string; lastByDate?: number } = {}) {
     const url = new URL('/' + path.split('/').map(encodeURIComponent).join('/') + '.json', this.env.FIREBASE_DATABASE_URL);
     // ID tokens are required in Firebase's auth parameter. Only our scoped
     // service identity is used, never a user's refresh token or administrator key.
     url.searchParams.set('auth', await serviceToken(this.env));
     if (localEmulator(this.env)) url.searchParams.set('ns', 'demo-expense-splitting-default-rtdb');
     if (options.shallow) url.searchParams.set('shallow', 'true');
+    if (options.lastByDate) {
+      url.searchParams.set('orderBy', '"date"');
+      url.searchParams.set('limitToLast', String(options.lastByDate));
+    }
     let response: Response;
     try {
       response = await fetch(url, { method, redirect: 'manual', headers: { 'Content-Type': 'application/json', ...(options.etag ? { 'X-Firebase-ETag': 'true' } : {}), ...(options.ifMatch ? { 'If-Match': options.ifMatch } : {}) }, ...(method === 'GET' ? {} : { body: JSON.stringify(value) }), signal: AbortSignal.timeout(10000) });

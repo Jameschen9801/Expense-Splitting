@@ -86,22 +86,33 @@ export function addLinePayBank(index: LinePayIndex | null, id: string, bank: Lin
 
 // Compute a one-to-one match using both sides, including recently handled
 // Richart receipts. A finished receipt must not free its hint for another one.
-export function linePaySuggestions(index: LinePayIndex | null, book: string, drafts: BankDraft[]): Record<string, string> {
+export function linePayPairs(index: LinePayIndex | null) {
   const banks = Object.entries(index?.banks || {});
-  const payments = Object.values(index?.payments || {});
+  const payments = Object.entries(index?.payments || {});
   const eligible = (bank: LinePayBank, payment: LinePayPayment) =>
     bank.cents === payment.cents && bank.date === payment.date &&
     Math.abs(bank.at - payment.receivedAt) <= pairWindow &&
     (!payment.explicitTime || Math.abs((bank.chargeAt ?? bank.at) - payment.at) <= pairWindow);
+  const pairs: Record<string, { book: string; paymentId: string; merchant: string }> = {};
+  for (const [id, bank] of banks) {
+    const matching = payments.filter(([, payment]) => eligible(bank, payment));
+    if (matching.length !== 1) continue;
+    const [paymentId, payment] = matching[0];
+    if (banks.filter(([, row]) => eligible(row, payment)).length === 1) {
+      pairs[id] = { book: bank.book, paymentId, merchant: payment.merchant };
+    }
+  }
+  return pairs;
+}
+
+export function linePaySuggestions(index: LinePayIndex | null, book: string, drafts: BankDraft[]): Record<string, string> {
+  const pairs = linePayPairs(index);
   const suggestions: Record<string, string> = {};
   for (const draft of drafts) {
     const bank = index?.banks?.[draft.id];
     if (!bank || bank.book !== book || bank.cents !== utils.toCents(draft.amount) ||
       bank.date !== draft.date || !richartBank(draft.bank) || (draft.desc.trim() && !pendingDescription(draft.desc))) continue;
-    const matching = payments.filter(payment => eligible(bank, payment));
-    if (matching.length === 1 && banks.filter(([, row]) => eligible(row, matching[0])).length === 1) {
-      suggestions[draft.id] = matching[0].merchant;
-    }
+    if (pairs[draft.id]) suggestions[draft.id] = pairs[draft.id].merchant;
   }
   return suggestions;
 }

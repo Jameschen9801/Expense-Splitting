@@ -12,6 +12,7 @@ import { overlayPending, Outbox } from './outbox';
 import { excludedOnTargetChange, projectSharedDrafts, reviewLink, sharedReviewChanges } from './sharedInbox';
 import { readServerJson } from './syncFeedback';
 import type { LinePayIndex } from './linePay';
+import type { BankGeminiSuggestion } from './merchantSuggestions';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -129,6 +130,13 @@ export async function subscribeToLinePayIndex(uid: string, onUpdate: (index: Lin
   if (auth.currentUser?.uid !== uid || auth.currentUser.isAnonymous) return () => {};
   const index = ref(database, 'bankIngressUsers/' + uid + '/linePay');
   return onValue(index, snapshot => onUpdate(snapshot.val()), () => onUpdate(null));
+}
+
+export async function subscribeToBankGemini(uid: string, code: string, onUpdate: (results: Record<string, BankGeminiSuggestion>) => void): Promise<Unsubscribe> {
+  const [{ database, auth }, { ref, onValue }] = await Promise.all([firebaseSession(), import('firebase/database')]);
+  if (auth.currentUser?.uid !== uid || auth.currentUser.isAnonymous) return () => {};
+  const results = ref(database, 'bankIngressUsers/' + uid + '/geminiDrafts/' + code);
+  return onValue(results, snapshot => onUpdate(snapshot.val() || {}), () => onUpdate({}));
 }
 
 export const subscribeToBankInbox = async (code: string, onUpdate: (data: Pick<Group,'bankInbox'|'bankReceiptIds'|'sharedInbox'>) => void, onExpenseCount?: (count: number) => void): Promise<Unsubscribe> => {
