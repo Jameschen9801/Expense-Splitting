@@ -1,6 +1,7 @@
 import { firebaseSession } from './firebase';
 import { accountSync } from './accountSync';
 import { bankBackgroundEndpoint, backgroundSetupUrl } from './bankBackgroundProtocol';
+import { readMerchantSuggestion, type MerchantHabit } from './merchantSuggestions';
 export { bankBackgroundName, richartBackgroundName, bankBackgroundInstallUrl, richartBackgroundInstallUrl } from './bankBackgroundProtocol';
 
 const credentialKey = 'warikan_bank_background_v1';
@@ -51,4 +52,24 @@ export async function bindBackgroundShortcut(): Promise<string> {
 export async function revokeBackgroundShortcuts() {
   const { uid } = await manage('revoke');
   if (readCredential(uid)) localStorage.removeItem(credentialKey);
+}
+
+export async function requestMerchantSuggestion(owner: string, merchant: string, habits: MerchantHabit[], signal: AbortSignal) {
+  const { auth } = await firebaseSession();
+  const user = auth.currentUser;
+  if (!user?.email || user.isAnonymous || user.uid !== owner) throw new Error('請先登入這個帳本的同步帳號');
+  const token = await user.getIdToken();
+  if (signal.aborted) throw new DOMException('Suggestion cancelled', 'AbortError');
+  const response = await fetch(endpoint + '/suggest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ merchant, habits }),
+    signal,
+  });
+  const body = await response.json().catch(() => null);
+  const suggestion = readMerchantSuggestion(body?.suggestion);
+  if (!response.ok || body?.ok !== true || !suggestion) {
+    throw new Error(body?.message || '目前無法取得 Gemini 建議，可繼續手動確認');
+  }
+  return suggestion;
 }

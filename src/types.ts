@@ -48,6 +48,7 @@ export interface Saving extends Income { direction?: 'out' | 'in' }
 export interface Expense extends RecordMetadata, RecordDetails {
   id: string;
   desc: string;
+  merchant?: string;
   amount: number;
   payer: string;
   participants: string[];

@@ -37,6 +37,15 @@ beforeEach(async () => {
   assert.equal(result.status, 200, result.body.code + ': ' + result.body.message); key = result.body.token; assert.match(key, /^[a-f0-9]{64}$/);
 });
 
+test('Gemini 拒絕捷徑金鑰與未授權帳號，也不會建立用量', async () => {
+  const payload = { merchant: '測試商店', habits: [] };
+  const fromShortcut = await post('/suggest', payload, { 'X-Expense-Key': key });
+  assert.equal(fromShortcut.body.code, 'login_required');
+  const fromOtherAccount = await post('/suggest', payload, { Authorization: 'Bearer ' + loginToken });
+  assert.equal(fromOtherAccount.body.code, 'gemini_forbidden');
+  assert.equal((await db.ref('bankIngressUsers/' + uid + '/geminiQuota').get()).exists(), false);
+});
+
 test('真實 HTTP 綁定僅存雜湊，狀態與連線測試不新增帳目', async () => {
   const before = (await db.ref('groups/123456').get()).val();
   const tested = await post('/capture', { mode: 'test' }, { 'X-Expense-Key': key });

@@ -2,6 +2,7 @@ import { BankBackgroundError, backgroundIdentity, buildBackgroundDraft, matchBac
 import { FirebaseRest, RestFailure, localEmulator, type Env } from './firebaseRest';
 import { identity } from './firebaseToken';
 import { addLinePayBank, addLinePayPayment, parseLinePayNotification, richartBank, richartChargeTime } from '../../src/lib/linePay';
+import { suggestPurchase } from './gemini';
 
 const hash = async (value: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
 const randomKey = () => [...crypto.getRandomValues(new Uint8Array(32))].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -49,11 +50,12 @@ export default {
       }
       const url = new URL(request.url), path = url.pathname.replace(/\/$/, '') || '/';
       if (url.search) fail('invalid_request', '通知與憑證不可放在網址中');
-      if (request.method === 'GET' && path === '/health') return respond({ ok: true, version: 3, platform: 'cloudflare-workers' });
+      if (request.method === 'GET' && path === '/health') return respond({ ok: true, version: 4, platform: 'cloudflare-workers' });
       if (request.method !== 'POST') return respond({ ok: false, code: 'method_not_allowed', message: '請使用背景記帳捷徑傳送' }, 405);
-      if (!['/manage', '/capture'].includes(path)) return respond({ ok: false, code: 'not_found', message: '找不到接收服務' }, 404);
+      if (!['/manage', '/capture', '/suggest'].includes(path)) return respond({ ok: false, code: 'not_found', message: '找不到接收服務' }, 404);
       const body = await jsonBody(request);
       db = new FirebaseRest(env);
+      if (path === '/suggest') return respond({ ok: true, suggestion: await suggestPurchase(request, env, db, body) });
       const rulesFor = async (uid: string) => syncedBackgroundRules({ version: 1, bank: { rules: await db.get('accountSync/' + uid + '/bank/rules') } });
       const metadata = async (code: string) => {
         try {

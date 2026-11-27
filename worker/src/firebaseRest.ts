@@ -1,6 +1,14 @@
 import { BankBackgroundError } from '../../src/lib/bankBackground';
 
-export type Env = { FIREBASE_PROJECT_ID: string; FIREBASE_DATABASE_URL: string; FIREBASE_API_KEY: string; FIREBASE_SERVICE_SESSION?: string; AUTH_EMULATOR_ORIGIN?: string };
+export type Env = {
+  FIREBASE_PROJECT_ID: string;
+  FIREBASE_DATABASE_URL: string;
+  FIREBASE_API_KEY: string;
+  FIREBASE_SERVICE_SESSION?: string;
+  AUTH_EMULATOR_ORIGIN?: string;
+  GEMINI_ALLOWED_UID?: string;
+  GEMINI_API_KEY?: string;
+};
 export class RestFailure extends Error { constructor(public status: number, public operation = '') { super('Database request failed'); } }
 const fail = (code = 'service_unavailable') => new BankBackgroundError(code, '背景接收服務暫時無法連線，請稍後重試', 503);
 let sessionCache: { key: string; token: string; until: number } | undefined;

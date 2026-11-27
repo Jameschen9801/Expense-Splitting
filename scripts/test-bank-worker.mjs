@@ -24,7 +24,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   if (!ready) throw new Error('Local Worker did not start. ' + output.replaceAll(service.refreshToken, '[redacted]'));
-  const tests = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', '--test', 'worker/src/api.test.ts', 'worker/src/firebaseToken.test.ts'], { cwd: root, env, stdio: 'inherit' });
+  const tests = spawn(process.execPath, ['node_modules/tsx/dist/cli.mjs', '--test', 'worker/src/api.test.ts', 'worker/src/firebaseToken.test.ts', 'worker/src/gemini.test.ts'], { cwd: root, env, stdio: 'inherit' });
   process.exitCode = await new Promise(resolve => tests.once('exit', code => resolve(code ?? 1)));
   if (process.exitCode) console.error(output.replaceAll(service.refreshToken, '[redacted]').split('\n').filter(line => line.includes('Local bank test:')).slice(-20).join('\n'));
 } catch (error) { console.error(error.message); process.exitCode = 1; }

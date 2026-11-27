@@ -423,6 +423,20 @@ async function seedBankService() {
     'accountSync/owner': { version: 1, books: { '654321': { code: '654321', name: personal.name, myName: 'A' } }, bank: { rules: '[]', bridge: 'b'.repeat(64), revision: 1 } },
   }));
 }
+test('Gemini 用量僅背景服務可存取，商家欄位可隨個人確認的支出保存', async () => {
+  await seedBankService();
+  const quota = 'bankIngressUsers/owner/geminiQuota';
+  const valid = { day: '2026-11-27', count: 25 };
+  await assertSucceeds(serviceRef(quota).set(valid));
+  await assertFails(serviceRef(quota).set({ ...valid, count: 26 }));
+  await assertFails(serviceRef(quota).child('merchant').set('測試店家'));
+  const ownerQuota = env.authenticatedContext('owner').database().ref(quota);
+  await assertFails(ownerQuota.get());
+  await assertFails(ownerQuota.set({ ...valid, count: 1 }));
+  const expense = privateRef().child('expenses/pe1');
+  await assertSucceeds(expense.set({ ...personalExpense, merchant: '測試店家' }));
+  await assertFails(expense.child('merchant').set('x'.repeat(61)));
+});
 function serviceCapture() {
   const id = 'ebank_' + 'a'.repeat(64), at = Date.now();
   const next = applyChange(personal, { type: 'bankDraft.put', draft: { ...personalExpense, id, createdAt: at, category: 'other', bank: 'Richart', last4: '0123' }, meta: { id: 'm' + id, actor: 'A', actorUid: 'owner', at, expected: null } });

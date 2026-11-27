@@ -43,7 +43,8 @@ function validRecord(record: any): record is LedgerRecord {
       || !text(source.memberName,100) || !source.memberName || !text(source.payer,100) || !amount(source.totalAmount)
       || source.sourceVersion != null && (typeof source.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(source.sourceVersion))
       || source.confirmedAt != null && (!Number.isFinite(source.confirmedAt) || source.confirmedAt <= 0))) return false;
-    if (!text(record.desc, 200) || !text(record.payer, 100) || !names(record.participants) || !record.participants.length
+    if (!text(record.desc, 200) || (record.merchant != null && (!text(record.merchant, 60) || !record.merchant))
+      || !text(record.payer, 100) || !names(record.participants) || !record.participants.length
       || !['equal', 'custom', 'percent'].includes(record.splitMode)
       || record.category && !categories.some(category => category.id === record.category)) return false;
     if (record.splitMode !== 'equal') {

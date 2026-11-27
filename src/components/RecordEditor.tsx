@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ExpenseCategory, Group } from '../types';
 import { Drafts, DraftWriter, type RecordDraft, type ExpenseForm, type TransferForm } from '../lib/drafts';
@@ -8,9 +8,10 @@ import { Modal } from './Modal';
 import type { KeyboardField } from './KeyboardInputBar';
 import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 import { pureAdvance } from '../lib/sharedRouting';
+import { MerchantSuggestionPanel } from './MerchantSuggestion';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange, linePayMerchant }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange, linePayMerchant, suggestionMerchant }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
@@ -23,6 +24,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   onRouteShared?: (form: ExpenseForm) => void;
   onFormChange?: (form: ExpenseForm) => void;
   linePayMerchant?: string;
+  suggestionMerchant?: string;
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -161,6 +163,15 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                     className="expense-amount-input"
                   />
                 </div>
+                {bankReview && personal && group.security?.ownerUid && suggestionMerchant && (
+                  <Fragment key={suggestionMerchant}>
+                    <MerchantSuggestionPanel owner={group.security.ownerUid} book={group.code} merchant={suggestionMerchant}
+                      history={group.expenses} disabled={isSaving} onApply={suggestion => {
+                        setExpForm(form => ({ ...form, category: suggestion.category ?? form.category, desc: suggestion.desc || form.desc }));
+                        setFormError('');
+                      }} />
+                  </Fragment>
+                )}
                 <div className="field">
                   <label className="field-label" htmlFor="expense-category">分類</label>
                   <select id="expense-category" value={expForm.category || (bankReview ? '' : defaultExpenseCategory)} onChange={event => setExpForm({ ...expForm, category: event.target.value as ExpenseCategory })}>
