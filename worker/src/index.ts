@@ -1,6 +1,7 @@
 import { BankBackgroundError, backgroundIdentity, buildBackgroundDraft, matchBackgroundRule, personalBackgroundOwner, syncedBackgroundRules } from '../../src/lib/bankBackground';
 import { FirebaseRest, RestFailure, localEmulator, type Env } from './firebaseRest';
 import { identity } from './firebaseToken';
+import { addLinePayBank, addLinePayPayment, parseLinePayNotification, richartBank, richartChargeTime } from '../../src/lib/linePay';
 
 const hash = async (value: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, '0')).join('');
 const randomKey = () => [...crypto.getRandomValues(new Uint8Array(32))].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -21,7 +22,7 @@ async function jsonBody(request: Request) {
   return value;
 }
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, context?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
     const headers = new Headers({ 'Cache-Control': 'no-store', 'Content-Type': 'application/json; charset=utf-8', Vary: 'Origin' });
     const respond = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers });
     let received: { uid: string; digest: string; at: number } | undefined;
@@ -48,7 +49,7 @@ export default {
       }
       const url = new URL(request.url), path = url.pathname.replace(/\/$/, '') || '/';
       if (url.search) fail('invalid_request', '通知與憑證不可放在網址中');
-      if (request.method === 'GET' && path === '/health') return respond({ ok: true, version: 2, platform: 'cloudflare-workers' });
+      if (request.method === 'GET' && path === '/health') return respond({ ok: true, version: 3, platform: 'cloudflare-workers' });
       if (request.method !== 'POST') return respond({ ok: false, code: 'method_not_allowed', message: '請使用背景記帳捷徑傳送' }, 405);
       if (!['/manage', '/capture'].includes(path)) return respond({ ok: false, code: 'not_found', message: '找不到接收服務' }, 404);
       const body = await jsonBody(request);
@@ -108,6 +109,16 @@ export default {
         await delivery(uid, digest, 'ready', '背景捷徑已連線，測試未新增帳目', at);
         return respond({ ok: true, status: 'ready', message: '背景捷徑已綁定，測試未新增帳目' });
       }
+      if (body.mode === 'linepay') {
+        if (typeof body.text !== 'string' || body.text.length > 500) fail('invalid_request', 'LINE Pay 推播格式不正確');
+        const payment = parseLinePayNotification(body.text, at);
+        if (!payment || !(await rulesFor(uid)).some(rule => richartBank(rule.bank))) {
+          return respond({ ok: true, status: 'ignored', message: '推播未包含可配對的 LINE Pay 資料' });
+        }
+        const id = await hash(JSON.stringify([payment.merchant, payment.cents, payment.at, payment.explicitTime]));
+        await db.transaction('bankIngressUsers/' + uid + '/linePay', current => addLinePayPayment(current, id, payment));
+        return respond({ ok: true, status: 'store_received', message: '已接收 LINE Pay 店名，將核對 Richart 待確認紀錄' });
+      }
       if (body.mode !== 'capture' || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 6000) fail('invalid_request', '請傳入完整的銀行消費通知');
       const matched = matchBackgroundRule(await rulesFor(uid), body.text, at);
       if (!matched) { await delivery(uid, digest, 'ignored', '略過未符合銀行規則的通知', at); return respond({ ok: true, status: 'ignored', message: '未符合成功消費規則，沒有新增帳目' }); }
@@ -128,6 +139,15 @@ export default {
           try { duplicate = !!await db.get(base + '/bankInbox/' + receipt.id + '/id'); }
           catch (readError) { if (!(readError instanceof RestFailure) || readError.status !== 401) throw readError; }
           if (!duplicate) fail('ledger_unavailable', '個人帳本不存在或已無權限，請回 App 檢查', 403);
+        }
+        if (!duplicate && richartBank(matched.rule.bank)) {
+          const chargeAt = richartChargeTime(body.text, draft.date);
+          // Suggestions are optional. A failure here must never affect the
+          // bank receipt or cause the Shortcut to retry an acknowledged save.
+          const index = db.transaction('bankIngressUsers/' + uid + '/linePay', current =>
+            addLinePayBank(current, receipt.id, { book: matched.rule.groupCode, cents: Math.round(draft.amount * 100), date: draft.date, at, ...(chargeAt !== undefined ? { chargeAt } : {}) })
+          ).catch(() => {});
+          if (context) context.waitUntil(index); else await index;
         }
       }
       const status = duplicate ? 'duplicate' : 'pending', message = duplicate ? '相同通知已處理，未重複新增' : '已放入手機通知待確認';

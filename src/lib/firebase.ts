@@ -11,6 +11,7 @@ import { storage } from './utils';
 import { overlayPending, Outbox } from './outbox';
 import { excludedOnTargetChange, projectSharedDrafts, reviewLink, sharedReviewChanges } from './sharedInbox';
 import { readServerJson } from './syncFeedback';
+import type { LinePayIndex } from './linePay';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBTPJD" + "4CLjBsU5yQqjuiwXi1rwAZNF_bo0",
@@ -122,6 +123,13 @@ export const subscribeToConnection = async (onChange: (connected: boolean) => vo
   const [database, { ref, onValue }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);
   return onValue(ref(database, '.info/connected'), snapshot => onChange(snapshot.val() === true), () => onChange(false));
 };
+
+export async function subscribeToLinePayIndex(uid: string, onUpdate: (index: LinePayIndex | null) => void): Promise<Unsubscribe> {
+  const [{ database, auth }, { ref, onValue }] = await Promise.all([firebaseSession(), import('firebase/database')]);
+  if (auth.currentUser?.uid !== uid || auth.currentUser.isAnonymous) return () => {};
+  const index = ref(database, 'bankIngressUsers/' + uid + '/linePay');
+  return onValue(index, snapshot => onUpdate(snapshot.val()), () => onUpdate(null));
+}
 
 export const subscribeToBankInbox = async (code: string, onUpdate: (data: Pick<Group,'bankInbox'|'bankReceiptIds'|'sharedInbox'>) => void, onExpenseCount?: (count: number) => void): Promise<Unsubscribe> => {
   const [database, { ref, onValue }] = await Promise.all([getDatabaseInstance(), import('firebase/database')]);

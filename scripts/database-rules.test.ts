@@ -232,6 +232,31 @@ test('成員不能刪除或覆寫已上傳的修改歷史', async () => {
 const personal: Group = {kind:'personal',code:'654321',name:'日常記帳',createdAt:1,members:['A'],expenses:[],transfers:[],security:{version:1,ownerUid:'owner',users:{owner:{name:'A',nameKey:'A',role:'owner'}},names:{A:'owner'}}};
 const privateRef=(uid='owner')=>env.authenticatedContext(uid).database().ref('groups/654321');
 const personalExpense={id:'pe1',desc:'午餐',amount:120,payer:'A',participants:['A'],splitMode:'equal' as const,date:'2026-10-27',createdAt:2};
+test('LINE Pay 補店名只開放本人讀取，服務不能用它改帳或替其他帳本索引', async () => {
+  const service = env.authenticatedContext('line-service').database();
+  const accountPath = 'bankIngressUsers/owner';
+  const path = accountPath + '/linePay';
+  const at = Date.now();
+  const payment = { merchant: '測試商店', cents: 12000, date: '2026-11-27', at, receivedAt: at, explicitTime: false };
+  const receipt = 'ebank_' + 'a'.repeat(64);
+  const index = {
+    payments: { ['b'.repeat(64)]: payment },
+    banks: { [receipt]: { book: personal.code, cents: 12000, date: payment.date, at } },
+  };
+  await env.withSecurityRulesDisabled(async context => {
+    await context.database().ref('groups/' + personal.code).set(cloud(personal));
+    await context.database().ref('bankBackgroundServices/line-service').set(true);
+  });
+  await assertSucceeds(service.ref(path).set(index));
+  await assertSucceeds(env.authenticatedContext('owner').database().ref(path).get());
+  await assertFails(env.authenticatedContext('owner').database().ref(accountPath).get());
+  await assertFails(env.authenticatedContext('owner').database().ref(path).set(index));
+  await assertFails(env.authenticatedContext('member').database().ref(path).get());
+  await assertFails(env.unauthenticatedContext().database().ref(path).get());
+  await assertFails(service.ref(path + '/banks/ebank_' + 'c'.repeat(64)).set({ ...index.banks[receipt], book: '123456' }));
+  await assertFails(service.ref(path + '/payments/' + 'b'.repeat(64) + '/raw').set('raw notice'));
+  await assertFails(service.ref('groups/' + personal.code + '/expenses/pe1').set(personalExpense));
+});
 test('說明可留空，個人支出、收入、儲蓄與共用支出仍受原權限保護',async()=>{
   const expense={...personalExpense,desc:''},income={id:'i1',desc:'',amount:100,date:'2026-10-28',createdAt:2},saving={...income,id:'s1',direction:'out' as const};
   await assertSucceeds(privateRef().set(cloud(personal)));

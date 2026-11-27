@@ -330,6 +330,33 @@
         "lastDelivery": {
           ".validate": "newData.hasChildren(['at','status','message']) && newData.child('at').isNumber() && newData.child('status').isString() && newData.child('status').val().matches(/^(ready|pending|duplicate|ignored|error)$/) && newData.child('message').isString() && newData.child('message').val().length <= 300"
         },
+        "linePay": {
+          ".read": "auth != null && auth.uid == $uid && root.child('bankBackgroundServices').child(auth.uid).val() != true",
+          "banks": {
+            "$receipt": {
+              ".validate": "$receipt.matches(/^ebank_[a-f0-9]{64}$/) && newData.hasChildren(['book','cents','date','at']) && ((data.exists() && data.child('book').val() == newData.child('book').val()) || (root.child('groups').child(newData.child('book').val()).child('kind').val() == 'personal' && root.child('groups').child(newData.child('book').val()).child('security/ownerUid').val() == $uid))",
+              "book": { ".validate": "newData.isString() && newData.val().matches(/^\\d{6}$/)" },
+              "cents": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= 100000000000" },
+              "date": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+              "at": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= now + 120000" },
+              "chargeAt": { ".validate": "newData.isNumber() && newData.val() > 0" },
+              "$other": { ".validate": false }
+            }
+          },
+          "payments": {
+            "$payment": {
+              ".validate": "$payment.matches(/^[a-f0-9]{64}$/) && newData.hasChildren(['merchant','cents','date','at','receivedAt','explicitTime'])",
+              "merchant": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 60" },
+              "cents": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= 100000000000" },
+              "date": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+              "at": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= now + 120000" },
+              "receivedAt": { ".validate": "newData.isNumber() && newData.val() > 0 && newData.val() <= now + 120000" },
+              "explicitTime": { ".validate": "newData.isBoolean()" },
+              "$other": { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        },
         "lastKeyCreatedAt": {
           ".validate": "newData.isNumber()"
         },

@@ -15,7 +15,7 @@ const dictionary = values => ({ Value: { WFDictionaryFieldValueItems: Object.ent
 const actions = [];
 const add = (name, action, params = {}) => { actions.push({ WFWorkflowActionIdentifier: 'is.workflow.actions.' + action, WFWorkflowActionParameters: { ...(name ? { UUID: id(name) } : {}), ...params } }); return out(name); };
 const text = (name, value) => add(name, 'gettext', { WFTextActionText: typeof value === 'string' ? token(value) : value });
-const match = (name, input, pattern) => add(name, 'text.match', { text: token(input), WFMatchTextPattern: pattern, WFMatchTextCaseSensitive: true });
+const match = (name, input, pattern, caseSensitive = true) => add(name, 'text.match', { text: token(input), WFMatchTextPattern: pattern, WFMatchTextCaseSensitive: caseSensitive });
 const first = (name, input) => add(name, 'getitemfromlist', { WFInput: input, WFItemSpecifier: 'First Item' });
 const start = (name, input) => add('', 'conditional', { GroupingIdentifier: id(name), WFControlFlowMode: 0, WFCondition: 100, WFInput: { Type: 'Variable', Variable: input } });
 const otherwise = name => add('', 'conditional', { GroupingIdentifier: id(name), WFControlFlowMode: 1 });
@@ -82,3 +82,41 @@ for (const action of trigger.WFWorkflowActions) {
   }
 }
 writeFileSync(new URL('ios-richart-background.json', import.meta.url), JSON.stringify(trigger, null, 2) + '\n');
+
+// This optional source reuses the installed background key. Filter the LINE
+// notification before reading the file or making any network request.
+const linePayName = protocol.match(/export const linePayBackgroundName = '([^']+)'/)?.[1];
+const linePaySource = readFileSync(new URL('../src/lib/linePay.ts', import.meta.url), 'utf8');
+const linePayPattern = linePaySource.match(/linePayNotificationPattern = String\.raw\x60([^\x60]+)\x60/)?.[1];
+if (!linePayName || !linePayPattern) throw new Error('Missing LINE Pay source definition');
+const lineTrigger = JSON.parse(readFileSync(new URL('ios-linepay-push-test.json', import.meta.url), 'utf8'));
+const noticeText = lineTrigger.WFWorkflowActions.find(action => action.WFWorkflowActionIdentifier.endsWith('.gettext')).WFWorkflowActionParameters.WFTextActionText;
+noticeText.Value.string = '\ufffc\n\ufffc\n\ufffc';
+noticeText.Value.attachmentsByRange = Object.fromEntries(Object.values(noticeText.Value.attachmentsByRange).map((item, index) => ['{' + index * 2 + ', 1}', item]));
+lineTrigger.WFWorkflowName = linePayName;
+lineTrigger.WFWorkflowTriggers[0].WFTriggerUUID = id('linepay-merchant-trigger');
+actions.length = 0;
+add('', 'comment', { WFCommentActionText: '開啟此捷徑的自動化，通知來源為 LINE。捷徑沿用已綁定的銀行背景設定，只送出含店名和新臺幣金額的 LINE Pay 付款通知。店名可補到原本的 Richart 待確認紀錄，由你核對分類後入帳。' });
+const lineInput = text('linepay-input', noticeText);
+const lineMatches = match('linepay-candidate', lineInput, linePayPattern, false);
+start('linepay-present', lineMatches);
+  const payment = first('linepay-first', lineMatches);
+  const config = add('linepay-load-config', 'documentpicker.open', { WFGetFilePath: file, WFFileErrorIfNotFound: false, WFShowFilePicker: false, WFGetFileService: 'iCloud Drive', WFGetFolderContents: true });
+  const configText = text('linepay-config', token(config));
+  const configMatch = match('linepay-config-valid', configText, strictConfig);
+  start('linepay-bound', configMatch);
+    const lineSettings = first('linepay-settings', configMatch);
+    const lineResponse = request('linepay-response', keyFrom('linepay-key', lineSettings), 'linepay', payment);
+    const lineStatus = value('linepay-status', lineResponse, 'status');
+    const accepted = match('linepay-accepted', lineStatus, '^(store_received|ignored)$');
+    start('linepay-ok', accepted);
+      add('', 'nothing');
+    otherwise('linepay-ok');
+      notice(value('linepay-message', lineResponse, 'message'));
+    end('linepay-ok');
+  otherwise('linepay-bound');
+    notice('請先在 App 完成「銀行背景記帳」綁定，才能使用 LINE Pay 補店名。');
+  end('linepay-bound');
+end('linepay-present');
+lineTrigger.WFWorkflowActions = actions;
+writeFileSync(new URL('ios-linepay-background.json', import.meta.url), JSON.stringify(lineTrigger, null, 2) + '\n');

@@ -1,0 +1,509 @@
+{
+  "WFWorkflowName": "LINE Pay 補店名",
+  "WFWorkflowClientVersion": "5037.111",
+  "WFWorkflowMinimumClientVersion": 900,
+  "WFWorkflowMinimumClientVersionString": "900",
+  "WFWorkflowIcon": {
+    "WFWorkflowIconStartColor": 1239869439,
+    "WFWorkflowIconGlyphNumber": 61440
+  },
+  "WFWorkflowHasShortcutInputVariables": false,
+  "WFWorkflowOutputContentItemClasses": [],
+  "WFWorkflowInputContentItemClasses": [
+    "WFStringContentItem"
+  ],
+  "WFWorkflowHasOutputFallback": false,
+  "WFWorkflowImportQuestions": [],
+  "WFWorkflowTypes": [
+    "WFWorkflowTypeShowInSearch"
+  ],
+  "WFQuickActionSurfaces": [],
+  "WFWorkflowTriggers": [
+    {
+      "WFTriggerIdentifier": "WFNotificationTrigger",
+      "WFTriggerUUID": "94A39E1D-B100-4FC0-AFE2-E86BFC02DDBF",
+      "WFTriggerSerializedParameters": {
+        "SelectedApps": [
+          {
+            "BundleIdentifier": "jp.naver.line",
+            "Name": "LINE",
+            "TeamIdentifier": "ZW4U99SQQ3"
+          }
+        ]
+      }
+    }
+  ],
+  "WFWorkflowActions": [
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+      "WFWorkflowActionParameters": {
+        "WFCommentActionText": "開啟此捷徑的自動化，通知來源為 LINE。捷徑沿用已綁定的銀行背景設定，只送出含店名和新臺幣金額的 LINE Pay 付款通知。店名可補到原本的 Richart 待確認紀錄，由你核對分類後入帳。"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "FAF79D9B-274B-424E-A7C0-A55F1BA56CBE",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼\n￼\n￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "TriggerIdentifier": "WFNotificationTrigger",
+                "Type": "TriggerOutput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Title"
+                  }
+                ]
+              },
+              "{2, 1}": {
+                "TriggerIdentifier": "WFNotificationTrigger",
+                "Type": "TriggerOutput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Subtitle"
+                  }
+                ]
+              },
+              "{4, 1}": {
+                "TriggerIdentifier": "WFNotificationTrigger",
+                "Type": "TriggerOutput",
+                "Aggrandizements": [
+                  {
+                    "Type": "WFPropertyVariableAggrandizement",
+                    "PropertyName": "Body"
+                  }
+                ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "BB2EE9DF-7C38-440F-A825-410E1F4ADD13",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "FAF79D9B-274B-424E-A7C0-A55F1BA56CBE",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^(?:LINE[ \\u3000]*錢包|LINE[ \\u3000]*Pay)[ \\t]*\\r?\\n(?=[\\s\\S]{1,400}$)(?![\\s\\S]*(?:退款|退貨|取消|失敗|未完成|未成功|轉帳|驗證碼|\\bOTP\\b|https?://))(?=[\\s\\S]*(?:付款(?:已)?完成|付款成功|支付成功))(?=[\\s\\S]*(?:NT[ \\t]*[$＄]|TWD|新[台臺]幣))(?=[\\s\\S]*(?:商[店家]名稱|店家名稱|商店|商家)(?:[ \\t]*[:：][ \\t]*|[ \\t]+|\\r?\\n)[^\\s:：])[\\s\\S]+$",
+        "WFMatchTextCaseSensitive": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "B27CD279-83BD-4976-AC2E-FF37747E04D7",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "BB2EE9DF-7C38-440F-A825-410E1F4ADD13",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "FF2E7160-7D11-4260-A142-3EEDF0C200CC",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "BB2EE9DF-7C38-440F-A825-410E1F4ADD13",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.documentpicker.open",
+      "WFWorkflowActionParameters": {
+        "UUID": "B15CA4AB-1544-4DC3-A1F2-1F1950ACDA47",
+        "WFGetFilePath": "ExpenseSplitting-bank-background.txt",
+        "WFFileErrorIfNotFound": false,
+        "WFShowFilePicker": false,
+        "WFGetFileService": "iCloud Drive",
+        "WFGetFolderContents": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "3D136A49-C1F5-42F5-A7A7-1FFB1A016C0F",
+        "WFTextActionText": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "B15CA4AB-1544-4DC3-A1F2-1F1950ACDA47",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "F921C2CA-70ED-4F82-A1BC-5434193CA98E",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "3D136A49-C1F5-42F5-A7A7-1FFB1A016C0F",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^\\{\"version\":1,\"endpoint\":\"https://expense-bank-background\\.poetes-wine-catalog\\.workers\\.dev/capture\",\"token\":\"[a-f0-9]{64}\"\\}$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "AA76ACAD-3324-4939-AC26-6197F7E358A9",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "F921C2CA-70ED-4F82-A1BC-5434193CA98E",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "18E179A2-08D5-47D7-AAEE-55A4568413D7",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "F921C2CA-70ED-4F82-A1BC-5434193CA98E",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "77111B44-63C5-4A52-AAAF-72F7467C7224",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "18E179A2-08D5-47D7-AAEE-55A4568413D7",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "(?<=\"token\":\")[a-f0-9]{64}(?=\")",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "E2C0E7DE-6A3D-437C-A5D8-B241724D96F9",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "77111B44-63C5-4A52-AAAF-72F7467C7224",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
+      "WFWorkflowActionParameters": {
+        "UUID": "0A3852C1-8F47-437B-A3A4-7D2EE99C2B48",
+        "WFURL": "https://expense-bank-background.poetes-wine-catalog.workers.dev/capture",
+        "WFHTTPMethod": "POST",
+        "ShowHeaders": true,
+        "WFHTTPHeaders": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "X-Expense-Key"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "￼",
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputUUID": "E2C0E7DE-6A3D-437C-A5D8-B241724D96F9",
+                        "Type": "ActionOutput",
+                        "OutputName": "文字"
+                      }
+                    }
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "Content-Type"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "application/json"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        },
+        "WFHTTPBodyType": "JSON",
+        "WFJSONValues": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "mode"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "linepay"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "text"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "￼",
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputUUID": "FF2E7160-7D11-4260-A142-3EEDF0C200CC",
+                        "Type": "ActionOutput",
+                        "OutputName": "文字"
+                      }
+                    }
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "A26CBCE4-2C15-465D-ADB0-766090D1230F",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "0A3852C1-8F47-437B-A3A4-7D2EE99C2B48",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFDictionaryKey": "status",
+        "WFGetDictionaryValueType": "Value"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.match",
+      "WFWorkflowActionParameters": {
+        "UUID": "B71058B5-3DC1-4AD2-A388-4D05F4877AEB",
+        "text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "A26CBCE4-2C15-465D-ADB0-766090D1230F",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFMatchTextPattern": "^(store_received|ignored)$",
+        "WFMatchTextCaseSensitive": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "F12EBB50-2F57-44EE-AA72-E7C980ED3E66",
+        "WFControlFlowMode": 0,
+        "WFCondition": 100,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputUUID": "B71058B5-3DC1-4AD2-A388-4D05F4877AEB",
+              "Type": "ActionOutput",
+              "OutputName": "文字"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.nothing",
+      "WFWorkflowActionParameters": {}
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "F12EBB50-2F57-44EE-AA72-E7C980ED3E66",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "DBAE180E-FCD5-4E6C-AD0A-AEDD9D8580C3",
+        "WFInput": {
+          "Value": {
+            "OutputUUID": "0A3852C1-8F47-437B-A3A4-7D2EE99C2B48",
+            "Type": "ActionOutput",
+            "OutputName": "文字"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFDictionaryKey": "message",
+        "WFGetDictionaryValueType": "Value"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "WFNotificationActionTitle": "背景記帳未完成",
+        "WFNotificationActionBody": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputUUID": "DBAE180E-FCD5-4E6C-AD0A-AEDD9D8580C3",
+                "Type": "ActionOutput",
+                "OutputName": "文字"
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "DDD3D8C6-DCE8-46FE-ADD7-22657B9EFFA3",
+        "GroupingIdentifier": "F12EBB50-2F57-44EE-AA72-E7C980ED3E66",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "AA76ACAD-3324-4939-AC26-6197F7E358A9",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "WFNotificationActionTitle": "背景記帳未完成",
+        "WFNotificationActionBody": {
+          "Value": {
+            "string": "請先在 App 完成「銀行背景記帳」綁定，才能使用 LINE Pay 補店名。"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "0B163A46-44D1-4E0C-A2AA-5DA05B2BEF28",
+        "GroupingIdentifier": "AA76ACAD-3324-4939-AC26-6197F7E358A9",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "UUID": "47393552-7529-4424-AD25-B16AD704AEC7",
+        "GroupingIdentifier": "B27CD279-83BD-4976-AC2E-FF37747E04D7",
+        "WFControlFlowMode": 2
+      }
+    }
+  ]
+}

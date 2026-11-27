@@ -7,7 +7,7 @@ import { isPersonalLedger } from '../lib/ledgers';
 import { storage } from '../lib/utils';
 import { bankRulesKey, readBankRules } from '../lib/bankShortcuts';
 import { backgroundStatus, bindBackgroundShortcut, revokeBackgroundShortcuts, type BackgroundStatus } from '../lib/bankBackgroundClient';
-import { bankBackgroundEndpoint, bankBackgroundInstallUrl, bankBackgroundName, richartBackgroundInstallUrl, richartBackgroundName } from '../lib/bankBackgroundProtocol';
+import { bankBackgroundEndpoint, bankBackgroundInstallUrl, bankBackgroundName, linePayBackgroundName, richartBackgroundInstallUrl, richartBackgroundName } from '../lib/bankBackgroundProtocol';
 import { freshInstallation, installationChecks, installationReceipt, readInstallation, saveInstallation, type InstallationProgress } from '../lib/bankInstallation';
 import { AccountSyncSettings } from './AccountSyncSettings';
 import { BankShortcutSettings } from './BankShortcutSettings';
@@ -117,6 +117,12 @@ export function BankInstallation({ groups, currentGroup, onClose, onCreateLedger
         <p className="bank-install-hint">這個開關只能由你在 iPhone 確認，App 無法讀取它的狀態。</p>
       </section>}
       {completed === 3 && <section className="bank-install-complete" aria-labelledby="install-complete-title"><CircleCheck size={44} aria-hidden="true" /><h2 id="install-complete-title">3 步都完成了</h2><ul><li><Check size={16} />銀行與帳本已驗證</li><li><Check size={16} />主捷徑連線測試通過</li><li><Check size={16} />通知自動化：你已確認開啟</li></ul><button type="button" className="btn btn-primary w-full" onClick={onClose}>回帳本，查看待確認</button></section>}
+      {completed >= 2 && <details className="bank-install-help"><summary>用 LINE Pay 補店名（選用）</summary><div>
+        <p>LINE Pay 推播有店名，且只對得上一筆 Richart 待確認時，開啟該筆會帶入店名。確認後才入帳。</p>
+        <a className="btn w-full mt-3" href={import.meta.env.BASE_URL + 'shortcuts/linepay-merchant-source.zip'} download={linePayBackgroundName + '.zip'}>下載「{linePayBackgroundName}」</a>
+        <p className="mt-3">在「檔案」解壓並加入捷徑，開啟它的「自動化」，確認來源是 LINE。用過店名測試的話，把測試自動化關掉。</p>
+        <a className="btn btn-ghost w-full mt-3" href={openShortcut(linePayBackgroundName)}>開啟「{linePayBackgroundName}」</a>
+      </div></details>}
       {error && <div className="bank-install-error" role="alert"><p>{error}</p><button type="button" className="btn btn-sm mt-3" disabled={loading} onClick={() => void refresh()}>重新確認</button></div>}
       {message && completed !== 3 && <p className="bank-install-notice" role="status">{message}</p>}
       {completed >= 2 && <section className="bank-install-receipt">{receipt ? <CircleCheck size={19} aria-hidden="true" /> : <RefreshCw size={19} aria-hidden="true" />}<div><h3>{receipt ? '已收到有效消費通知' : '第一則通知，等待驗證'}</h3><p>{receipt ? time(receipt.at) + ' · ' + receipt.message : '下次收到 Richart 有效消費通知後，這裡會自動更新。先到待確認，不會直接計入支出。'}</p><button type="button" className="bank-install-text-button" disabled={loading} onClick={() => void refresh()}>{loading ? '確認中…' : '確認最新接收結果'}</button></div></section>}

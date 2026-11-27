@@ -2,6 +2,7 @@ import test, { before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { bankExpenseIdentity, newBankRule } from '../../src/lib/bankShortcuts';
 import { taipeiToday } from '../../src/lib/bankBackground';
+import { linePaySuggestions } from '../../src/lib/linePay';
 
 // Deliberately fixed to the local demo namespace, never a production project.
 const base = 'http://127.0.0.1:8787';
@@ -73,6 +74,42 @@ test('通知先進一筆待確認，沒有正式支出、原始通知或網址�
   assert.deepEqual(drafts[0].participants, ['A']); assert.equal(drafts[0].createdByUid, uid);
   assert.equal(Object.values(saved.history).length, 1);
   assert.ok(!JSON.stringify((await db.ref().get()).val()).includes(notice));
+});
+test('LINE Pay 可先到或後到，永遠只補店名，銀行原始待確認及正式紀錄不變', async () => {
+  const today = taipeiToday(Date.now()), walletText = 'LINE 錢包\n付款完成。\nNT$58\n商店名稱：測試商店';
+  const bankText = notice.replace('10/26-19:04', today.slice(5).replace('-', '/') + '-19:04');
+  const path = 'bankIngressUsers/' + uid + '/linePay';
+  const linePay = (text = walletText, token = key) => post('/capture', { mode: 'linepay', text }, { 'X-Expense-Key': token });
+  const readIndex = async () => (await db.ref(path).get()).val();
+  const book = async () => (await db.ref('groups/123456').get()).val();
+  for (const order of ['LINE first', 'Richart first']) {
+    await db.ref('groups/123456').set(group());
+    await db.ref(path).remove();
+    if (order === 'LINE first') {
+      assert.equal((await linePay()).body.status, 'store_received');
+      assert.deepEqual(await book(), group());
+    }
+    assert.equal((await capture(bankText)).body.status, 'pending');
+    const before = await book();
+    if (order === 'Richart first') assert.equal((await linePay()).body.status, 'store_received');
+    assert.equal((await linePay()).body.status, 'store_received');
+    let index;
+    for (let i = 0; i < 40; i++) {
+      index = await readIndex();
+      if (index?.banks) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.equal(Object.keys(index.payments).length, 1);
+    const drafts = Object.values(before.bankInbox) as any[];
+    assert.equal(drafts.length, 1);
+    assert.deepEqual(linePaySuggestions(index, '123456', drafts), { [drafts[0].id]: '測試商店' });
+    assert.deepEqual(await book(), before); assert.equal(before.expenses, undefined);
+    const prior = await readIndex();
+    assert.equal((await linePay(walletText.replace('LINE 錢包', '普通聊天室'))).body.status, 'ignored');
+    assert.equal((await linePay(walletText, 'f'.repeat(64))).status, 401);
+    assert.deepEqual(await readIndex(), prior);
+    assert.ok(!JSON.stringify(prior).includes(walletText));
+  }
 });
 test('並行重送、換 Richart Life 標題或補送舊版格式，仍只新增一次', async () => {
   const results = await Promise.all(Array.from({ length: 5 }, (_, i) => capture((i % 2 ? 'Richart Life ' : '') + notice)));

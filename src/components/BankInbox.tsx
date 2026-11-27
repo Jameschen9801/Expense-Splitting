@@ -6,7 +6,8 @@ import { possibleSharedMatches } from '../lib/sharedExpenses';
 import { bankDraftExpense, bankDraftOwner, pendingDescription } from '../lib/bankInbox';
 import { Drafts, type ExpenseForm, type RecordDraft } from '../lib/drafts';
 import { fingerprint } from '../lib/audit';
-import { currentDeviceUid } from '../lib/firebase';
+import { currentDeviceUid, subscribeToLinePayIndex } from '../lib/firebase';
+import { linePaySuggestions, type LinePayIndex } from '../lib/linePay';
 import { sync } from '../lib/sync';
 import { storage, utils } from '../lib/utils';
 import { Modal } from './Modal';
@@ -28,6 +29,17 @@ export function BankInboxCard({ drafts, sharedDrafts = [], onOpen, compact = fal
 
 export function BankInbox({ group, myName, onClose, onSaved, navigation }: { group: Group; myName: string; onClose: () => void; onSaved: (message: string, date?: string, continued?:boolean) => void; navigation?: ReactNode }) {
   const drafts = [...(group.bankInbox || [])].sort((a,b) => a.createdAt - b.createdAt);
+  const owner = group.security?.ownerUid;
+  const [linePay, setLinePay] = useState<{ uid: string; index: LinePayIndex | null } | null>(null);
+  const shopNames = linePaySuggestions(linePay?.uid === owner ? linePay?.index || null : null, group.code, drafts);
+  useEffect(() => {
+    if (!owner) return;
+    let stopped = false;
+    let unsubscribe: (() => void) | undefined;
+    void subscribeToLinePayIndex(owner, index => { if (!stopped) setLinePay({ uid: owner, index }); })
+      .then(stop => { if (stopped) stop(); else unsubscribe = stop; }).catch(() => {});
+    return () => { stopped = true; unsubscribe?.(); };
+  }, [owner]);
   const [editing, setEditing] = useState<{ draft: BankDraft; initial: RecordDraft } | null>(null);
   const [routing,setRouting]=useState<{draft:BankDraft;form:ExpenseForm}|null>(null);
   const [review, setReview] = useState<ReviewSession|null>(null);
@@ -47,7 +59,7 @@ export function BankInbox({ group, myName, onClose, onSaved, navigation }: { gro
     setReview(session);
     const cached = new Drafts(localStorage).read(group.code, bankDraftOwner(myName, draft.id));
     const initial: RecordDraft = cached?.expenseId === draft.id ? cached : { recordType: 'expense', expenseId: draft.id,
-      expense: { amount: String(draft.amount), desc: pendingDescription(draft.desc) ? '' : draft.desc, date: draft.date, payer: myName, participants: [myName], splitMode: 'equal', customShares: {} },
+      expense: { amount: String(draft.amount), desc: shopNames[draft.id]?.slice(0,30) || (pendingDescription(draft.desc) ? '' : draft.desc), date: draft.date, payer: myName, participants: [myName], splitMode: 'equal', customShares: {} },
       transfer: { amount: '', from: myName, to: '', date: draft.date, note: '' } };
     setError(''); setSeparateExpense(false); setEditing({ draft, initial });
   };
@@ -104,7 +116,7 @@ export function BankInbox({ group, myName, onClose, onSaved, navigation }: { gro
     setRouting(null);if(next)open(next,done);else{setEditing(null);setReview(null);}
     onSaved(message,undefined,!!next);
   }}/>;
-  if (editing) return <Fragment key={editing.draft.id}><RecordEditor reviewProgress={reviewProgress(review,drafts.map(item=>item.id))} group={group} myName={myName} initial={editing.initial} bankReview draftOwner={bankDraftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) { setEditing(null); setError(''); } }} onExpense={confirm} onTransfer={async () => false} onRouteShared={form=>{setEditing({...editing,initial:{...editing.initial,expense:form}});setRouting({draft:editing.draft,form});}}
+  if (editing) return <Fragment key={editing.draft.id}><RecordEditor reviewProgress={reviewProgress(review,drafts.map(item=>item.id))} group={group} myName={myName} initial={editing.initial} bankReview linePayMerchant={shopNames[editing.draft.id]?.slice(0,30)} draftOwner={bankDraftOwner(myName, editing.draft.id)} isSaving={saving} error={error} clearError={() => setError('')} onClose={() => { if (!saving) { setEditing(null); setError(''); } }} onExpense={confirm} onTransfer={async () => false} onRouteShared={form=>{setEditing({...editing,initial:{...editing.initial,expense:form}});setRouting({draft:editing.draft,form});}}
     notice={possibleSharedMatches(editing.draft, group.expenses).length > 0 && <div className="shared-match-notice"><strong>有可能相同的分帳</strong><p>同日、同刷卡全額的分帳已同步，請先返回核對，避免重複入帳。</p><button type="button" className="btn btn-sm" onClick={() => { const detail = { failed: false }; window.dispatchEvent(new CustomEvent('warikan:flush-draft', { detail })); if (!detail.failed) { setEditing(null); setError(''); } }}>返回核對分帳</button><label><input type="checkbox" checked={separateExpense} onChange={event => setSeparateExpense(event.target.checked)} />這是另一筆消費，仍要新增</label></div>} /></Fragment>;
   if (linking) return <Modal title="連結這筆分帳？" onClose={() => setLinking(null)}><div className="shared-match-notice"><strong>{recordDescription(linking.expense)}</strong><p>{linking.expense.sharedSource?.groupName} · {linking.expense.date}</p><p>銀行刷卡全額 NT$ {utils.fmt(linking.draft.amount)}</p><p>你的實際分攤 NT$ {utils.fmt(linking.expense.amount)}</p></div><p className="text-sm leading-relaxed">確認是同一筆消費後，通知會移出待確認，個人帳本只保留你的分攤金額。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex flex-col gap-2 mt-5"><button type="button" className="btn btn-primary" disabled={saving} onClick={link}>確認是同一筆，連結分帳</button><button type="button" className="btn" onClick={() => setLinking(null)}>返回核對</button></div></Modal>;
   if (ignoring) return <Modal title="忽略這則通知？" onClose={() => setIgnoring(null)}><p className="text-sm leading-relaxed">{ignoring.bank} · NT$ {utils.fmt(ignoring.amount)} · {ignoring.date}</p><p className="text-sm text-ink-2 leading-relaxed mt-3">這則通知會移出待確認，同一通知重送也不會再次新增。不影響已確認的帳目。</p>{error && <p className="form-error mt-3">{error}</p>}<div className="flex gap-2 mt-5"><button type="button" className="btn flex-1" onClick={() => setIgnoring(null)}>保留通知</button><button type="button" className="btn btn-danger flex-1" onClick={ignore}>確認忽略</button></div></Modal>;
@@ -113,7 +125,7 @@ export function BankInbox({ group, myName, onClose, onSaved, navigation }: { gro
     <div className="bank-inbox-intro"><strong>{drafts.length}</strong><div><h3>筆等你補資料</h3><p>{group.name} · 尚未計入支出與統計</p></div></div>
     {error && <p role="status" className="form-error mb-4">{error}</p>}
     {drafts.length > 0 && <button type="button" className="btn btn-primary w-full mb-4" onClick={() => open(drafts[0])}>繼續確認最早一筆</button>}
-    <div className="space-y-3">{drafts.map(draft => <article key={draft.id} className="bank-inbox-item"><button type="button" className="bank-inbox-item-main" onClick={() => open(draft)} aria-label={`確認 ${draft.bank} NT$${utils.fmt(draft.amount)} ${draft.date}`}><div><strong>{draft.bank} · 末 4 碼 {draft.last4}</strong><p>{draft.date} · {pendingDescription(draft.desc) ? '待確認分類' : recordDescription(draft)}</p></div><span className="money">NT$ {utils.fmt(draft.amount)}</span><ChevronRight size={17} aria-hidden="true" /></button>
+    <div className="space-y-3">{drafts.map(draft => <article key={draft.id} className="bank-inbox-item"><button type="button" className="bank-inbox-item-main" onClick={() => open(draft)} aria-label={`確認 ${shopNames[draft.id] || draft.bank} NT$${utils.fmt(draft.amount)} ${draft.date}`}><div><strong>{draft.bank} · 末 4 碼 {draft.last4}</strong><p>{draft.date} · {shopNames[draft.id] || (pendingDescription(draft.desc) ? '待確認分類' : recordDescription(draft))}</p></div><span className="money">NT$ {utils.fmt(draft.amount)}</span><ChevronRight size={17} aria-hidden="true" /></button>
       {possibleSharedMatches(draft, group.expenses).map(expense => <div className="shared-match-notice" key={expense.id}><strong>可能已記在分帳</strong><p>{recordDescription(expense)} · {expense.sharedSource?.groupName}<br />你的分攤 NT$ {utils.fmt(expense.amount)}</p><button type="button" className="btn btn-sm" onClick={() => { setError(''); setLinking({ draft, expense }); }}>核對並連結</button></div>)}
       <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setError(''); setIgnoring(draft); }}>忽略</button></article>)}</div>
     {!drafts.length && <div className="empty-state"><Check size={30} aria-hidden="true" /><h3>全部處理好了</h3><p>之後收到的新銀行通知會先保存在這裡。</p></div>}

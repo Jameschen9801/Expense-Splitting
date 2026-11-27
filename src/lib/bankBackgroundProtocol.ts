@@ -1,5 +1,6 @@
 export const bankBackgroundName = '銀行背景記帳';
 export const richartBackgroundName = 'Richart 背景記帳';
+export const linePayBackgroundName = 'LINE Pay 補店名';
 export const bankBackgroundEndpoint = 'https://expense-bank-background.poetes-wine-catalog.workers.dev';
 export const bankBackgroundSetupMarker = 'expense-bank-background:';
 export const bankBackgroundInstallUrl = 'https://www.icloud.com/shortcuts/8648f008f0e94bcdaf81d487cbc16ae8';

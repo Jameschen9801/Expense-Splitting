@@ -10,7 +10,7 @@ import { expenseFormForLedger, isPersonalLedger } from '../lib/ledgers';
 import { pureAdvance } from '../lib/sharedRouting';
 
 // Typing stays in this component instead of rerendering balances, filters and the group page.
-export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange }: {
+export function RecordEditor({ group, myName, initial, isSaving, error, clearError, onClose, onExpense, onTransfer, bankReview = false, sharedReview = false, draftOwner = myName, notice, entryDate = utils.todayStr(), reviewProgress, title, submitLabel, lockPayer = false, onRouteShared, onFormChange, linePayMerchant }: {
   group: Group; myName: string; initial: RecordDraft; isSaving: boolean; error: string; clearError: () => void;
   onClose: () => void; onExpense: (form: ExpenseForm, keepOpen: boolean) => Promise<boolean>;
   onTransfer: (form: TransferForm) => Promise<boolean>;
@@ -22,6 +22,7 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
   title?: string; submitLabel?: string; lockPayer?: boolean;
   onRouteShared?: (form: ExpenseForm) => void;
   onFormChange?: (form: ExpenseForm) => void;
+  linePayMerchant?: string;
 }) {
   const personal = isPersonalLedger(group);
   const [expForm, setExpForm] = useState<ExpenseForm>(expenseFormForLedger(group, { ...initial.expense, category: bankReview ? initial.expense.category : initial.expense.category || (initial.expenseId ? 'other' : defaultExpenseCategory) }));
@@ -170,6 +171,9 @@ export function RecordEditor({ group, myName, initial, isSaving, error, clearErr
                 <div className="field">
                   <label className="field-label" htmlFor="expense-description">說明（選填）</label>
                   <input id="expense-description" type="text" value={expForm.desc} onChange={e => { setExpForm({ ...expForm, desc: e.target.value }); setFormError(''); }} placeholder="可留空，例：晚餐、計程車" maxLength={bankReview?30:200} enterKeyHint={expForm.splitMode === 'equal' ? 'done' : 'next'} />
+                  {linePayMerchant && (expForm.desc === linePayMerchant
+                    ? <p className="mt-2 text-xs text-ink-3">店名來自 LINE Pay，入帳前請核對。</p>
+                    : <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => setExpForm({ ...expForm, desc: linePayMerchant })}>帶入 LINE Pay 店名 · {linePayMerchant}</button>)}
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="expense-date">日期</label>
