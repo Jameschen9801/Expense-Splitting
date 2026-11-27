@@ -37,7 +37,9 @@ export async function generateSuggestion(key: string, merchant: string, habits: 
   try {
     const result = await send('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
       method: 'POST',
-      redirect: 'error',
+      // Workers supports manual redirects. Treat any redirect as a failed
+      // response and keep the API key on the original Google endpoint.
+      redirect: 'manual',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       signal: AbortSignal.timeout(12000),
       body: JSON.stringify({

@@ -31,6 +31,7 @@ test('只將店名和分類次數送至 Gemini，清楚的個人分類偏好可�
   const suggestion = await generateSuggestion('fixture-key', '全聯', habits, async (url, request) => {
     assert.equal(new URL(String(url)).hostname, 'generativelanguage.googleapis.com');
     assert.ok(!String(url).includes('fixture-key'));
+    assert.equal(request?.redirect, 'manual');
     const body = JSON.parse(String(request?.body));
     assert.deepEqual(JSON.parse(body.contents[0].parts[0].text).habits, [{ category: 'household', count: 2 }]);
     assert.doesNotMatch(String(request?.body), /私人說明|測試使用者|2026-11-01|local-only/u);
@@ -43,7 +44,12 @@ test('模型分類、內容與失敗均以可人工接手的方式處理', async
   assert.deepEqual(await generateSuggestion('fixture-key', '陌生店家', [], async () => response('{"category":null,"desc":""}')),
     { category: null, desc: '' });
   const suggested = () => response('{"category":"travel","desc":"測試店家"}', 'MAX_TOKENS');
-  for (const mock of [suggested, () => response('{"category":"income","desc":"測試"}'), () => new Response(null, { status: 429 })]) {
+  for (const mock of [
+    suggested,
+    () => response('{"category":"income","desc":"測試"}'),
+    () => new Response(null, { status: 429 }),
+    () => Response.redirect('https://example.test/', 307),
+  ]) {
     await assert.rejects(generateSuggestion('fixture-key', '陌生店家', [], async () => mock()), /可繼續手動確認/u);
   }
 });
