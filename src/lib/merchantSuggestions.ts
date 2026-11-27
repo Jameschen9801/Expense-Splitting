@@ -13,11 +13,13 @@ export type BankGeminiSuggestion = {
 };
 
 const categoryIds = new Set<string>(categories.map(item => item.id));
-const unsafeText = /[\p{Cc}\p{Cf}<>{}]|https?:|www\.|@|\d[\d\s-]{6,}\d/u;
+const unsafeText = /[\p{Cc}\p{Cf}<>{}]|https?:|www\.|@|\d[\d\s-]{6,}\d/iu;
+
+export const stripMerchantFormatting = (value: string) => value.replace(/[\p{Bidi_Control}\u200B\uFEFF]/gu, '').trim();
 
 export function suggestionMerchant(value: unknown) {
   if (typeof value !== 'string') return '';
-  const name = value.normalize('NFKC').trim();
+  const name = stripMerchantFormatting(value.normalize('NFKC'));
   return name.length <= 60 && /\p{L}/u.test(name) && !unsafeText.test(name) ? name.replace(/\s+/g, ' ') : '';
 }
 
@@ -33,6 +35,8 @@ const aliases = [
   ['好市多', /^(好市多|costco)/],
   ['全聯', /^(全聯|pxmart|pxmart全聯)/],
   ['中油', /^(台灣中油|臺灣中油|中油|cpc)/],
+  ['統一超商', /^(統一超商|7eleven)|^711(?:$|超商)/],
+  ['全家', /^(全家便利商店|全家超商|familymart)/],
 ] as const;
 const merchantIdentity = (key: string) => aliases.find(([, pattern]) => pattern.test(key))?.[0] || key;
 
@@ -48,18 +52,18 @@ export function merchantHabits(merchant: string, history: readonly Expense[]): M
     const description = typeof expense.desc === 'string' ? expense.desc.trim() : '';
     const first = description.split(/[\s、，,·：:（(]/u)[0];
     return merchantIdentity(merchantKey(first)) === key || merchantIdentity(merchantKey(description)) === key;
-  }).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 12);
+  }).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 6);
 
   const counts = new Map<ExpenseCategory, number>();
   for (const expense of matches) {
     const category = expense.category!;
     counts.set(category, (counts.get(category) ?? 0) + 1);
   }
-  return [...counts].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count).slice(0, 3);
+  return [...counts].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count);
 }
 
 export function readMerchantHabits(value: unknown): MerchantHabit[] | null {
-  if (!Array.isArray(value) || value.length > 3) return null;
+  if (!Array.isArray(value) || value.length > 6) return null;
   const seen = new Set<string>();
   let total = 0;
   for (const item of value) {

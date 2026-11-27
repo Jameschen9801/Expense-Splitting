@@ -42,6 +42,14 @@ test('LINE Pay 與 Richart 不論誰先到，都只在同一筆待確認顯示�
   }
 });
 
+test('清掉店名隱藏字元，已收通知重送也不增加第二個配對', () => {
+  assert.deepEqual(parseLinePayNotification(message + '\u2069', received), payment);
+  const earlier = { ...payment, merchant: '測試商店\u2069' };
+  const index = addLinePayPayment(addLinePayBank(null, 'first', bank), 'old-id', earlier);
+  assert.equal(addLinePayPayment(index, 'new-id', payment), index);
+  assert.deepEqual(linePaySuggestions(index, bank.book, [draft()]), { first: '測試商店' });
+});
+
 test('多筆同額、錯日期和過遠的消費都不套用店名，已處理的競爭紀錄也不會移轉店名', () => {
   const index = addLinePayPayment(addLinePayBank(null, 'first', bank), 'line', payment);
   const ambiguous = addLinePayBank(index, 'second', { ...bank, at: received + 10_000 });

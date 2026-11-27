@@ -23,6 +23,9 @@ test('分類摘要從同店家已確認的備註或店名產生，只保留分�
   assert.equal(readMerchantHabits([{ category: 'food', count: 13 }]), null);
   assert.equal(readMerchantHabits([{ category: 'food', count: 1, desc: '私人說明' }]), null);
   assert.equal(suggestionMerchant('交易卡號 1111-2222-3333-4444'), '');
+  assert.equal(suggestionMerchant('測試商店\u2069'), '測試商店');
+  assert.equal(suggestionMerchant('\u2068測試商店\u2069'), '測試商店');
+  assert.equal(suggestionMerchant('https\u200B://example.test/測試'), '');
 });
 
 const response = (text: string, finishReason = 'STOP') => Response.json({ candidates: [{ finishReason, content: { parts: [{ text }] } }] });
@@ -38,6 +41,27 @@ test('只將店名和分類次數送至 Gemini，清楚的個人分類偏好可�
     return response('{"category":"shopping","desc":"全聯"}');
   });
   assert.deepEqual(suggestion, { category: 'household', desc: '全聯' });
+});
+
+test('陌生店家由模型判斷，已確認的同店分類與後續修正會影響建議', async () => {
+  const forecast = async (merchant: string, history: Expense[]) => {
+    const suggestion = await generateSuggestion('fixture-key', merchant, merchantHabits(merchant, history), async () =>
+      response('{"category":"shopping","desc":"統一超商"}'));
+    return suggestion.category;
+  };
+  const confirmed = expense('food', '私人項目', '統一超商測試門市');
+  assert.equal(await forecast('7-ELEVEN', []), 'shopping');
+  assert.equal(await forecast('7-ELEVEN', [confirmed]), 'food');
+  const corrected = { ...confirmed, category: 'household' as const };
+  assert.equal(await forecast('7-ELEVEN', [corrected]), 'household');
+  assert.equal(await forecast('7-ELEVEN', [corrected, expense('food', '統一超商 咖啡')]), 'shopping');
+});
+
+test('偏好取同店近期分類，新習慣可取代較久以前的慣例', () => {
+  const dates = Array.from({ length: 12 }, (_, index) => ({
+    ...expense(index < 8 ? 'shopping' : 'household', '測試', '好市多'), createdAt: index + 1,
+  }));
+  assert.deepEqual(merchantHabits('Costco', dates), [{ category: 'household', count: 4 }, { category: 'shopping', count: 2 }]);
 });
 
 test('模型分類、內容與失敗均以可人工接手的方式處理', async () => {

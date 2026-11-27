@@ -1,5 +1,6 @@
 import type { BankDraft } from '../types';
 import { pendingDescription } from './bankInbox';
+import { stripMerchantFormatting } from './merchantSuggestions';
 import { utils } from './utils';
 
 const pairWindow = 2 * 60_000;
@@ -40,7 +41,7 @@ export function parseLinePayNotification(text: string, receivedAt: number): Line
   const merchants = [...normalized.matchAll(merchantLabel)];
   const amounts = [...normalized.matchAll(amountLabel)];
   if (merchants.length !== 1 || amounts.length !== 1) return null;
-  const merchant = merchants[0][1].trim();
+  const merchant = stripMerchantFormatting(merchants[0][1]);
   const cents = Number(amounts[0][1].replaceAll(',', '')) * 100 + Number((amounts[0][2] || '').padEnd(2, '0'));
   if (!merchant || merchant.length > 60 || !/\p{Letter}/u.test(merchant) ||
     /[\u0000-\u001f]|\d{8,}|付款完成|付款成功|了解更多|瞭解更多|^LINE\s*Pay$/i.test(merchant) ||
@@ -66,9 +67,10 @@ function recent<T>(rows: Record<string, T>, timestamp: (item: T) => number, now:
 
 export function addLinePayPayment(index: LinePayIndex | null, id: string, payment: LinePayPayment): LinePayIndex {
   const payments = index?.payments || {};
-  if (payments[id] || (!payment.explicitTime && Object.values(payments).some(previous =>
-    !previous.explicitTime && previous.merchant === payment.merchant && previous.cents === payment.cents &&
-    previous.date === payment.date && Math.abs(previous.receivedAt - payment.receivedAt) <= pairWindow))) return index!;
+  if (payments[id] || Object.values(payments).some(previous =>
+    previous.explicitTime === payment.explicitTime && stripMerchantFormatting(previous.merchant) === payment.merchant &&
+    previous.cents === payment.cents && previous.date === payment.date &&
+    (payment.explicitTime ? previous.at === payment.at : Math.abs(previous.receivedAt - payment.receivedAt) <= pairWindow))) return index!;
   return {
     payments: recent({ ...payments, [id]: payment }, item => item.receivedAt, payment.receivedAt),
     banks: recent(index?.banks || {}, item => item.at, payment.receivedAt),
@@ -99,7 +101,7 @@ export function linePayPairs(index: LinePayIndex | null) {
     if (matching.length !== 1) continue;
     const [paymentId, payment] = matching[0];
     if (banks.filter(([, row]) => eligible(row, payment)).length === 1) {
-      pairs[id] = { book: bank.book, paymentId, merchant: payment.merchant };
+      pairs[id] = { book: bank.book, paymentId, merchant: stripMerchantFormatting(payment.merchant) };
     }
   }
   return pairs;

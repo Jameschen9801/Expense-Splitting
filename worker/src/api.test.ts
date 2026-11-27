@@ -134,7 +134,7 @@ test('通知先進一筆待確認，沒有正式支出、原始通知或網址�
   assert.ok(!JSON.stringify((await db.ref().get()).val()).includes(notice));
 });
 test('LINE Pay 可先到或後到，永遠只補店名，銀行原始待確認及正式紀錄不變', async () => {
-  const today = taipeiToday(Date.now()), walletText = 'LINE 錢包\n付款完成。\nNT$58\n商店名稱：測試商店';
+  const today = taipeiToday(Date.now()), walletText = 'LINE 錢包\n付款完成。\nNT$58\n商店名稱：測試商店\u2069';
   const bankText = notice.replace('10/26-19:04', today.slice(5).replace('-', '/') + '-19:04');
   const path = 'bankIngressUsers/' + uid + '/linePay';
   const linePay = (text = walletText, token = key) => post('/capture', { mode: 'linepay', text }, { 'X-Expense-Key': token });
@@ -152,7 +152,7 @@ test('LINE Pay 可先到或後到，永遠只補店名，銀行原始待確認�
     assert.equal((await capture(bankText)).body.status, 'pending');
     const before = await book();
     if (order === 'Richart first') assert.equal((await linePay()).body.status, 'store_received');
-    assert.equal((await linePay()).body.status, 'store_received');
+    assert.equal((await linePay(walletText.replace('\u2069', ''))).body.status, 'store_received');
     let index;
     for (let i = 0; i < 40; i++) {
       index = await readIndex();
