@@ -1,5 +1,5 @@
 {
-  "WFWorkflowName": "LINE Pay 店名測試",
+  "WFWorkflowName": "LINE Pay 店名測試 2",
   "WFWorkflowClientVersion": "5037.111",
   "WFWorkflowMinimumClientVersion": 900,
   "WFWorkflowMinimumClientVersionString": "900",
@@ -21,7 +21,7 @@
   "WFWorkflowTriggers": [
     {
       "WFTriggerIdentifier": "WFNotificationTrigger",
-      "WFTriggerUUID": "BAF61B79-E5AC-436F-B1CB-A8CC14B26388",
+      "WFTriggerUUID": "7DA2EA31-3FE5-494B-AE8D-F5292B87CAF5",
       "WFTriggerSerializedParameters": {
         "SelectedApps": [
           {
@@ -37,13 +37,27 @@
     {
       "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
       "WFWorkflowActionParameters": {
-        "WFCommentActionText": "在 iPhone 開啟此捷徑的「自動化」，查看來源是 LINE。下次正常 LINE Pay 付款時，先在解鎖狀態測試，查看下方是否有實際商家名稱。結果只在手機畫面顯示，此捷徑不傳送通知，也不會建立帳目。確認後可關閉測試。"
+        "WFCommentActionText": "開啟此捷徑的「自動化」，確認來源是 LINE。先離開 LINE，請人傳一則普通訊息測試，看到「LINE 推播測試已觸發」就代表自動化有執行。等下次正常 LINE Pay 付款，再查看結果中是否出現店名。手動按執行可以檢查提示動作，但無法取得真實的推播變數。測試只在此裝置顯示結果。"
       }
     },
     {
-      "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
       "WFWorkflowActionParameters": {
-        "Text": {
+        "WFNotificationActionTitle": "LINE 推播測試已觸發",
+        "WFNotificationActionBody": {
+          "Value": {
+            "string": "這是捷徑執行提示，通知文字請查看測試結果視窗。"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "C999E5F8-4782-4139-A1BC-377B37456B1F",
+        "WFTextActionText": {
           "Value": {
             "string": "LINE Pay 店名測試\n\n通知標題\n￼\n\n通知副標題\n￼\n\n通知內文\n￼",
             "attachmentsByRange": {
@@ -76,6 +90,24 @@
                     "PropertyName": "Body"
                   }
                 ]
+              }
+            }
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
+      "WFWorkflowActionParameters": {
+        "Text": {
+          "Value": {
+            "string": "￼",
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "ActionOutput",
+                "OutputUUID": "C999E5F8-4782-4139-A1BC-377B37456B1F",
+                "OutputName": "文字"
               }
             }
           },
